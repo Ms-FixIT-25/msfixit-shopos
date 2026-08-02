@@ -9,6 +9,13 @@ on:
       - "image/**"
       - "scripts/**"
       - ".github/workflows/build-image.yml"
+  pull_request:
+    branches:
+      - main
+    paths:
+      - "image/**"
+      - "scripts/**"
+      - ".github/workflows/build-image.yml"
 
 permissions:
   contents: read
