@@ -1,0 +1,13 @@
+[Unit]
+Description=Ms. FixIT ShopOS first-boot provisioning
+Before=ssh.service
+After=local-fs.target
+ConditionPathExists=!/var/lib/shopos/firstboot.done
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/shopos-firstboot
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
