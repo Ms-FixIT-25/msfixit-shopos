@@ -2,7 +2,11 @@
 set -Eeuo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-version="${SHOPOS_VERSION:-0.1.0}"
+default_version="0.1.0"
+if [ -f "${root}/image/VERSION" ]; then
+    default_version="$(tr -d '[:space:]' < "${root}/image/VERSION")"
+fi
+version="${SHOPOS_VERSION:-$default_version}"
 cloudflared_version="${CLOUDFLARED_VERSION:-latest}"
 source_dir="${root}/image/package"
 output_dir="${root}/image/packages"
