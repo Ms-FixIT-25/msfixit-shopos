@@ -6,6 +6,7 @@ storage="${1:-usb}"
 rig_version="${RPI_IMAGE_GEN_VERSION:-v2.6.0}"
 rig_dir="${RPI_IMAGE_GEN_DIR:-${root}/.cache/rpi-image-gen-${rig_version}}"
 artifacts_dir="${root}/artifacts"
+image_name="msfixit-shopos-rpi5-${storage}"
 
 case "$storage" in
     usb|sd|nvme) ;;
@@ -60,16 +61,28 @@ fi
         -c "shopos-rpi5-${storage}.yaml"
 )
 
-image_file="$(
-    find "$rig_dir" -type f \
-        \( -name '*.img' -o -name '*.img.xz' -o -name '*.img.zst' -o -name '*.img.gz' \) \
-        -printf '%T@ %p\n' \
+deploy_dir="$(
+    find "$rig_dir/work" -maxdepth 1 -type d -name 'deploy-*' -printf '%T@ %p\n' \
         | sort -nr \
         | awk 'NR==1 {$1=""; sub(/^ /, ""); print}'
 )"
 
+if [ -z "$deploy_dir" ] || [ ! -d "$deploy_dir" ]; then
+    echo "The image build completed without a deploy directory." >&2
+    exit 1
+fi
+
+image_file="$(
+    find "$deploy_dir" -maxdepth 1 -type f \
+        \( -name "${image_name}.img" \
+           -o -name "${image_name}.img.xz" \
+           -o -name "${image_name}.img.zst" \
+           -o -name "${image_name}.img.gz" \) \
+        -print -quit
+)"
+
 if [ -z "$image_file" ] || [ ! -f "$image_file" ]; then
-    echo "The image build completed without a discoverable image file." >&2
+    echo "The image build completed but no flash image was found in $deploy_dir." >&2
     exit 1
 fi
 
