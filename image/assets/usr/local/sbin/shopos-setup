@@ -1,0 +1,142 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ $EUID -ne 0 ]]; then
+    echo "Run this command with sudo: sudo shopos-setup" >&2
+    exit 1
+fi
+
+if [[ -e /var/lib/shopos/setup-complete ]]; then
+    echo "ShopOS is already configured. Remove /var/lib/shopos/setup-complete only for a deliberate reinstall." >&2
+    exit 1
+fi
+
+read -r -p "Shop URL [https://msfixit.at]: " site_url
+site_url=${site_url:-https://msfixit.at}
+read -r -p "Shop title [Ms. FixIT]: " site_title
+site_title=${site_title:-Ms. FixIT}
+read -r -p "WordPress admin user [shopadmin]: " admin_user
+admin_user=${admin_user:-shopadmin}
+read -r -p "WordPress admin email: " admin_email
+if [[ ! "$admin_email" =~ ^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$ ]]; then
+    echo "A valid admin email is required." >&2
+    exit 1
+fi
+
+read -r -s -p "WordPress admin password (leave empty to generate): " admin_password
+echo
+if [[ -z "$admin_password" ]]; then
+    admin_password="$(openssl rand -hex 18)"
+    generated_admin_password=yes
+else
+    generated_admin_password=no
+fi
+
+read -r -s -p "Cloudflare Tunnel token (optional, leave empty for later): " tunnel_token
+echo
+read -r -p "SSH public key for shopadmin (optional): " ssh_public_key
+
+db_name=shopos
+db_user=shopos
+db_password="$(openssl rand -hex 24)"
+wp_path=/var/www/shopos
+env_file=/etc/shopos/shopos.env
+admin_password_file="$(mktemp)"
+trap 'rm -f "$admin_password_file"' EXIT
+chmod 0600 "$admin_password_file"
+printf '%s' "$admin_password" >"$admin_password_file"
+
+systemctl start mariadb redis-server php8.4-fpm nginx
+
+mariadb <<SQL
+CREATE DATABASE IF NOT EXISTS \`$db_name\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER IF NOT EXISTS '$db_user'@'localhost' IDENTIFIED BY '$db_password';
+ALTER USER '$db_user'@'localhost' IDENTIFIED BY '$db_password';
+GRANT ALL PRIVILEGES ON \`$db_name\`.* TO '$db_user'@'localhost';
+FLUSH PRIVILEGES;
+SQL
+
+rm -rf "$wp_path"
+install -d -m 0755 -o www-data -g www-data "$wp_path" "$wp_path/wp-content"
+
+runuser -u www-data -- /usr/local/bin/wp core download \
+    --path="$wp_path" \
+    --locale=de_DE \
+    --skip-content
+
+runuser -u www-data -- /usr/local/bin/wp config create \
+    --path="$wp_path" \
+    --dbname="$db_name" \
+    --dbuser="$db_user" \
+    --dbpass="$db_password" \
+    --dbhost=localhost \
+    --dbcharset=utf8mb4 \
+    --skip-check
+
+runuser -u www-data -- /usr/local/bin/wp config set WP_HOME "$site_url" --path="$wp_path"
+runuser -u www-data -- /usr/local/bin/wp config set WP_SITEURL "$site_url" --path="$wp_path"
+runuser -u www-data -- /usr/local/bin/wp config set DISALLOW_FILE_EDIT true --raw --path="$wp_path"
+runuser -u www-data -- /usr/local/bin/wp config set DISABLE_WP_CRON true --raw --path="$wp_path"
+runuser -u www-data -- /usr/local/bin/wp config set WP_MEMORY_LIMIT 256M --path="$wp_path"
+runuser -u www-data -- /usr/local/bin/wp config set WP_MAX_MEMORY_LIMIT 384M --path="$wp_path"
+
+runuser -u www-data -- /usr/local/bin/wp core install \
+    --path="$wp_path" \
+    --url="$site_url" \
+    --title="$site_title" \
+    --admin_user="$admin_user" \
+    --admin_email="$admin_email" \
+    --locale=de_DE \
+    --skip-email \
+    --prompt=admin_password <"$admin_password_file"
+
+runuser -u www-data -- /usr/local/bin/wp plugin install woocommerce --activate --path="$wp_path"
+runuser -u www-data -- /usr/local/bin/wp plugin install redis-cache --activate --path="$wp_path"
+runuser -u www-data -- /usr/local/bin/wp redis enable --path="$wp_path" || true
+runuser -u www-data -- /usr/local/bin/wp rewrite structure '/%postname%/' --hard --path="$wp_path"
+runuser -u www-data -- /usr/local/bin/wp option update timezone_string Europe/Vienna --path="$wp_path"
+runuser -u www-data -- /usr/local/bin/wp option update blog_public 0 --path="$wp_path"
+
+cat >"$env_file" <<EOF
+SHOP_URL=$site_url
+SHOP_TITLE=$site_title
+DB_NAME=$db_name
+DB_USER=$db_user
+DB_PASSWORD=$db_password
+EOF
+chmod 0600 "$env_file"
+
+if [[ -n "$tunnel_token" ]]; then
+    printf '%s' "$tunnel_token" >/etc/shopos/cloudflared.token
+    chown root:root /etc/shopos/cloudflared.token
+    chmod 0600 /etc/shopos/cloudflared.token
+    systemctl enable --now cloudflared-shopos.service
+fi
+
+if [[ -n "$ssh_public_key" ]]; then
+    install -d -m 0700 -o shopadmin -g shopadmin /home/shopadmin/.ssh
+    printf '%s\n' "$ssh_public_key" >/home/shopadmin/.ssh/authorized_keys
+    chown shopadmin:shopadmin /home/shopadmin/.ssh/authorized_keys
+    chmod 0600 /home/shopadmin/.ssh/authorized_keys
+    sed -i 's/^PasswordAuthentication .*/PasswordAuthentication no/' /etc/ssh/sshd_config.d/60-shopos.conf
+    systemctl reload ssh
+fi
+
+touch /var/lib/shopos/setup-complete
+rm -f /boot/firmware/SHOPOS-FIRST-LOGIN.txt
+systemctl restart php8.4-fpm nginx
+/usr/local/sbin/shopos-backup
+
+echo
+echo "ShopOS setup completed."
+echo "Shop URL: $site_url"
+echo "WordPress admin: $admin_user"
+if [[ "$generated_admin_password" == yes ]]; then
+    echo "Generated WordPress password: $admin_password"
+    echo "Store it now; it will not be printed again."
+fi
+if [[ -z "$tunnel_token" ]]; then
+    echo "Cloudflare Tunnel is not enabled yet."
+    echo "Add /etc/shopos/cloudflared.token and enable cloudflared-shopos.service later."
+fi
+echo "The shop is hidden from search engines until you change WordPress visibility."
