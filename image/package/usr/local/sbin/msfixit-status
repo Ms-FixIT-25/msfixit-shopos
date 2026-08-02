@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+set -u
+
+ip_address="$(hostname -I 2>/dev/null | awk '{print $1}')"
+[ -n "$ip_address" ] || ip_address="unknown"
+
+echo "Ms. FixIT ShopOS"
+echo "=================="
+echo "Hostname: $(hostname)"
+echo "LAN IP:   $ip_address"
+echo "Local URL: http://${ip_address}/"
+echo
+
+for service in nginx mariadb redis-server msfixit-cloudflared; do
+    printf '%-24s %s\n' "$service" "$(systemctl is-active "$service" 2>/dev/null || true)"
+done
+
+php_service="$(systemctl list-unit-files --type=service --no-legend 'php*-fpm.service' 2>/dev/null | awk 'NR==1 {print $1}')"
+if [ -n "$php_service" ]; then
+    printf '%-24s %s\n' "$php_service" "$(systemctl is-active "$php_service" 2>/dev/null || true)"
+fi
+
+echo
+if [ -f /var/lib/msfixit-shopos/health.json ]; then
+    jq . /var/lib/msfixit-shopos/health.json
+else
+    echo "Health data is not available yet."
+fi
+
+echo
+for credentials in /boot/firmware/SHOPOS-CREDENTIALS.txt /boot/SHOPOS-CREDENTIALS.txt; do
+    if [ -f "$credentials" ]; then
+        echo "First-boot credentials: $credentials"
+        echo "Delete that file after saving the credentials securely."
+        break
+    fi
+done
