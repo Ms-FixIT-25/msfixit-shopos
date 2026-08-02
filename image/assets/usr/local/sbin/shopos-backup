@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+backup_root=/var/backups/shopos
+stamp=$(date +%Y%m%d-%H%M%S)
+tmp_dir=$(mktemp -d)
+archive="$backup_root/shopos-$stamp.tar.xz"
+
+trap 'rm -rf "$tmp_dir"' EXIT
+install -d -m 0700 "$backup_root"
+
+mariadb-dump --single-transaction --routines --events --all-databases >"$tmp_dir/databases.sql"
+tar -cJf "$archive" \
+    -C "$tmp_dir" databases.sql \
+    -C / etc/shopos \
+    -C / etc/nginx/sites-available/shopos \
+    -C / var/www/shopos
+
+sha256sum "$archive" >"$archive.sha256"
+find "$backup_root" -type f -name 'shopos-*.tar.xz*' -mtime +14 -delete
