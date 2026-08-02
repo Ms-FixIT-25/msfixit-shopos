@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+umask 077
+
+backup_root=/data/backups
+stamp="$(date +%Y%m%d-%H%M%S)"
+workdir="${backup_root}/.${stamp}.tmp"
+archive="${backup_root}/shopos-${stamp}.tar.gz"
+
+install -d -m 0700 "$backup_root" "$workdir"
+trap 'rm -rf "$workdir"' EXIT
+
+mariadb-dump --single-transaction --quick --lock-tables=false wordpress \
+    | gzip -9 > "${workdir}/wordpress.sql.gz"
+
+if [ -d /data/wordpress/uploads ]; then
+    tar -C /data/wordpress -czf "${workdir}/uploads.tar.gz" uploads
+fi
+
+if [ -f /srv/www/wordpress/wp-config.php ]; then
+    install -m 0600 /srv/www/wordpress/wp-config.php "${workdir}/wp-config.php"
+fi
+
+if [ -d /etc/msfixit-shopos ]; then
+    tar -C /etc -czf "${workdir}/shopos-config.tar.gz" msfixit-shopos
+fi
+
+tar -C "$workdir" -czf "$archive" .
+sha256sum "$archive" > "${archive}.sha256"
+
+find "$backup_root" -maxdepth 1 -type f \
+    \( -name 'shopos-*.tar.gz' -o -name 'shopos-*.tar.gz.sha256' \) \
+    -mtime +14 -delete
