@@ -5,6 +5,13 @@ install -d -m 0750 /etc/msfixit-shopos
 install -d -m 0755 /var/lib/msfixit-shopos
 install -d -m 0755 /run/msfixit-shopos
 install -d -m 0755 /srv/www
+install -d -m 0755 /etc/nftables.d
+
+# Keep Debian's package-owned nftables.conf and load the ShopOS rules from a
+# separate include file to avoid package ownership conflicts.
+if ! grep -Fq 'include "/etc/nftables.d/*.nft"' /etc/nftables.conf; then
+    printf '\ninclude "/etc/nftables.d/*.nft"\n' >> /etc/nftables.conf
+fi
 
 # The first-boot unit configures the persistent data tree before the
 # database, cache and web services are started for the first time.
