@@ -88,9 +88,12 @@ fi
 
 rm -rf "$artifacts_dir"
 install -d -m 0755 "$artifacts_dir"
-cp "$image_file" "$artifacts_dir/"
-sha256sum "$artifacts_dir/$(basename "$image_file")" \
-    > "$artifacts_dir/$(basename "$image_file").sha256"
+image_basename="$(basename "$image_file")"
+cp "$image_file" "$artifacts_dir/$image_basename"
+(
+    cd "$artifacts_dir"
+    sha256sum "$image_basename" > "$image_basename.sha256"
+)
 
-printf 'Flash image: %s\n' "$artifacts_dir/$(basename "$image_file")"
-printf 'Checksum:    %s\n' "$artifacts_dir/$(basename "$image_file").sha256"
+printf 'Flash image: %s\n' "$artifacts_dir/$image_basename"
+printf 'Checksum:    %s\n' "$artifacts_dir/$image_basename.sha256"
