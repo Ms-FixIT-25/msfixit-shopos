@@ -1,0 +1,13 @@
+[Unit]
+Description=Ms. FixIT ShopOS local backup
+After=mariadb.service
+ConditionPathExists=/var/lib/shopos/setup-complete
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/shopos-backup
+User=root
+Group=root
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
