@@ -1,0 +1,22 @@
+#!/bin/sh
+set -eu
+
+install -d -m 0750 /etc/msfixit-shopos
+install -d -m 0755 /var/lib/msfixit-shopos
+install -d -m 0755 /run/msfixit-shopos
+install -d -m 0755 /srv/www
+
+# The first-boot unit configures the persistent data tree before the
+# database, cache and web services are started for the first time.
+systemctl disable nginx.service 2>/dev/null || true
+systemctl disable mariadb.service 2>/dev/null || true
+systemctl disable redis-server.service 2>/dev/null || true
+for unit in /lib/systemd/system/php*-fpm.service; do
+    [ -e "$unit" ] || continue
+    systemctl disable "$(basename "$unit")" 2>/dev/null || true
+done
+
+systemctl enable nftables.service 2>/dev/null || true
+systemctl enable msfixit-firstboot.service 2>/dev/null || true
+
+exit 0
