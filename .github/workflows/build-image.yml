@@ -1,0 +1,44 @@
+name: Build flashable ShopOS image
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/flashable-shopos-v0.1
+    paths:
+      - "image/**"
+      - "scripts/**"
+      - ".github/workflows/build-image.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install validation dependency
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-yaml
+      - name: Validate repository
+        run: ./scripts/validate.sh
+
+  build:
+    needs: validate
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: ./scripts/build-image.sh
+      - name: Upload flash image
+        uses: actions/upload-artifact@v4
+        with:
+          name: msfixit-shopos-rpi5
+          path: |
+            artifacts/msfixit-shopos-rpi5.img.xz
+            artifacts/msfixit-shopos-rpi5.img.xz.sha256
+          if-no-files-found: error
+          retention-days: 14
