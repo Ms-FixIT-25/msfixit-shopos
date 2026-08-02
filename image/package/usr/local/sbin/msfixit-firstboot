@@ -1,0 +1,298 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+umask 077
+
+exec > >(tee -a /var/log/msfixit-firstboot.log) 2>&1
+
+readonly marker=/data/.shopos-initialized
+readonly config_dir=/etc/msfixit-shopos
+readonly wordpress_dir=/srv/www/wordpress
+readonly data_dir=/data
+
+log() {
+    printf '[%s] %s\n' "$(date --iso-8601=seconds)" "$*"
+}
+
+random_secret() {
+    openssl rand -hex 18
+}
+
+read_shopos_config() {
+    local file="$1" line key value
+    [ -f "$file" ] || return 0
+
+    while IFS= read -r line || [ -n "$line" ]; do
+        line="${line%$'\r'}"
+        [[ -z "$line" || "$line" == \#* || "$line" != *=* ]] && continue
+        key="${line%%=*}"
+        value="${line#*=}"
+        value="${value#\"}"
+        value="${value%\"}"
+        value="${value#\'}"
+        value="${value%\'}"
+
+        case "$key" in
+            SHOP_URL|SHOP_TITLE|SHOP_ADMIN_USER|SHOP_ADMIN_EMAIL|SHOP_ADMIN_PASSWORD|OS_ADMIN_PASSWORD|CF_TUNNEL_TOKEN|WORDPRESS_LOCALE|WORDPRESS_VERSION)
+                printf -v "$key" '%s' "$value"
+                ;;
+        esac
+    done < "$file"
+}
+
+wait_for_mariadb() {
+    local attempt
+    for attempt in $(seq 1 60); do
+        if mariadb-admin ping --silent >/dev/null 2>&1; then
+            return 0
+        fi
+        sleep 1
+    done
+    return 1
+}
+
+run_wp() {
+    runuser -u www-data -- env HOME=/tmp /usr/local/bin/wp --path="$wordpress_dir" "$@"
+}
+
+if [ -e "$marker" ]; then
+    log "ShopOS is already initialized."
+    exit 0
+fi
+
+log "Starting ShopOS first-boot provisioning."
+
+SHOP_URL=""
+SHOP_TITLE="Ms. FixIT"
+SHOP_ADMIN_USER="shopadmin"
+SHOP_ADMIN_EMAIL="admin@localhost.invalid"
+SHOP_ADMIN_PASSWORD=""
+OS_ADMIN_PASSWORD=""
+CF_TUNNEL_TOKEN=""
+WORDPRESS_LOCALE="de_DE"
+WORDPRESS_VERSION="latest"
+
+boot_root=/boot
+[ -d /boot/firmware ] && boot_root=/boot/firmware
+config_file="${boot_root}/shopos.env"
+credentials_file="${boot_root}/SHOPOS-CREDENTIALS.txt"
+
+if [ ! -f "${boot_root}/shopos.env.example" ]; then
+    install -m 0644 /usr/share/msfixit-shopos/shopos.env.example "${boot_root}/shopos.env.example"
+fi
+read_shopos_config "$config_file"
+
+local_ip=""
+for _ in $(seq 1 60); do
+    local_ip="$(hostname -I 2>/dev/null | awk '{print $1}')"
+    [ -n "$local_ip" ] && break
+    sleep 1
+done
+[ -n "$local_ip" ] || local_ip="msfixit-shopos.local"
+[ -n "$SHOP_URL" ] || SHOP_URL="http://${local_ip}"
+
+SHOP_ADMIN_PASSWORD="${SHOP_ADMIN_PASSWORD:-$(random_secret)}"
+OS_ADMIN_PASSWORD="${OS_ADMIN_PASSWORD:-$(random_secret)}"
+DB_PASSWORD="$(random_secret)"
+
+if id shopadmin >/dev/null 2>&1; then
+    printf 'shopadmin:%s\n' "$OS_ADMIN_PASSWORD" | chpasswd
+fi
+
+install -d -m 0750 "$config_dir"
+install -d -m 0750 "$data_dir"
+install -d -m 0750 "$data_dir/mariadb"
+install -d -m 0750 "$data_dir/wordpress"
+install -d -m 0750 "$data_dir/wordpress/uploads"
+install -d -m 0700 "$data_dir/backups"
+install -d -m 0750 "$data_dir/logs"
+install -d -m 0755 "$wordpress_dir"
+install -d -m 0755 /run/msfixit-shopos /var/lib/msfixit-shopos
+
+log "Configuring MariaDB on persistent storage."
+systemctl stop mariadb.service 2>/dev/null || true
+cat > /etc/mysql/mariadb.conf.d/99-shopos.cnf <<'EOF_DB'
+[mysqld]
+datadir=/data/mariadb
+bind-address=127.0.0.1
+skip-name-resolve
+character-set-server=utf8mb4
+collation-server=utf8mb4_unicode_ci
+innodb_file_per_table=1
+max_connections=100
+EOF_DB
+
+if [ ! -d "$data_dir/mariadb/mysql" ]; then
+    rm -rf "$data_dir/mariadb"/*
+    mariadb-install-db --user=mysql --datadir="$data_dir/mariadb" --skip-test-db
+fi
+chown -R mysql:mysql "$data_dir/mariadb"
+chmod 0750 "$data_dir/mariadb"
+systemctl enable mariadb.service
+systemctl start mariadb.service
+wait_for_mariadb
+
+mariadb <<EOF_SQL
+CREATE DATABASE IF NOT EXISTS wordpress CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE USER IF NOT EXISTS 'wordpress'@'localhost' IDENTIFIED BY '${DB_PASSWORD}';
+ALTER USER 'wordpress'@'localhost' IDENTIFIED BY '${DB_PASSWORD}';
+GRANT ALL PRIVILEGES ON wordpress.* TO 'wordpress'@'localhost';
+FLUSH PRIVILEGES;
+EOF_SQL
+
+cat > "$config_dir/database.env" <<EOF_DATABASE
+WORDPRESS_DB_NAME=wordpress
+WORDPRESS_DB_USER=wordpress
+WORDPRESS_DB_PASSWORD=${DB_PASSWORD}
+WORDPRESS_DB_HOST=localhost
+EOF_DATABASE
+chmod 0600 "$config_dir/database.env"
+
+log "Configuring PHP-FPM."
+php_pool="$(find /etc/php -path '*/fpm/pool.d/www.conf' -type f 2>/dev/null | sort -V | tail -n 1)"
+if [ -z "$php_pool" ]; then
+    log "No PHP-FPM pool configuration was found."
+    exit 1
+fi
+php_version="$(awk -F/ '{print $4}' <<< "$php_pool")"
+php_service="php${php_version}-fpm.service"
+
+sed -ri 's|^listen = .*|listen = /run/php/msfixit-fpm.sock|' "$php_pool"
+sed -ri 's|^;?listen.owner = .*|listen.owner = www-data|' "$php_pool"
+sed -ri 's|^;?listen.group = .*|listen.group = www-data|' "$php_pool"
+sed -ri 's|^;?listen.mode = .*|listen.mode = 0660|' "$php_pool"
+sed -ri 's|^pm.max_children = .*|pm.max_children = 12|' "$php_pool"
+sed -ri 's|^pm.start_servers = .*|pm.start_servers = 3|' "$php_pool"
+sed -ri 's|^pm.min_spare_servers = .*|pm.min_spare_servers = 2|' "$php_pool"
+sed -ri 's|^pm.max_spare_servers = .*|pm.max_spare_servers = 6|' "$php_pool"
+
+cat > "/etc/php/${php_version}/fpm/conf.d/99-shopos.ini" <<'EOF_PHP'
+memory_limit=512M
+upload_max_filesize=128M
+post_max_size=128M
+max_execution_time=120
+max_input_vars=5000
+expose_php=Off
+opcache.enable=1
+opcache.enable_cli=0
+opcache.memory_consumption=192
+opcache.interned_strings_buffer=16
+opcache.max_accelerated_files=20000
+opcache.validate_timestamps=1
+opcache.revalidate_freq=60
+session.cookie_httponly=1
+session.cookie_samesite=Lax
+EOF_PHP
+ln -sf "/etc/php/${php_version}/fpm/conf.d/99-shopos.ini" "/etc/php/${php_version}/cli/conf.d/99-shopos.ini"
+
+log "Configuring Redis."
+sed -ri 's/^bind .*/bind 127.0.0.1 ::1/' /etc/redis/redis.conf
+sed -ri 's/^protected-mode .*/protected-mode yes/' /etc/redis/redis.conf
+if grep -q '^maxmemory ' /etc/redis/redis.conf; then
+    sed -ri 's/^maxmemory .*/maxmemory 256mb/' /etc/redis/redis.conf
+else
+    printf '\nmaxmemory 256mb\n' >> /etc/redis/redis.conf
+fi
+if grep -q '^maxmemory-policy ' /etc/redis/redis.conf; then
+    sed -ri 's/^maxmemory-policy .*/maxmemory-policy allkeys-lru/' /etc/redis/redis.conf
+else
+    printf 'maxmemory-policy allkeys-lru\n' >> /etc/redis/redis.conf
+fi
+systemctl enable redis-server.service
+systemctl start redis-server.service
+
+log "Installing WordPress and WooCommerce."
+chown -R www-data:www-data "$wordpress_dir" "$data_dir/wordpress"
+if [ ! -f "$wordpress_dir/wp-load.php" ]; then
+    if ! run_wp core download --locale="$WORDPRESS_LOCALE" --version="$WORDPRESS_VERSION"; then
+        log "Requested locale failed; retrying with en_US."
+        run_wp core download --locale=en_US --version="$WORDPRESS_VERSION"
+    fi
+fi
+
+rm -rf "$wordpress_dir/wp-content/uploads"
+ln -s "$data_dir/wordpress/uploads" "$wordpress_dir/wp-content/uploads"
+chown -h www-data:www-data "$wordpress_dir/wp-content/uploads"
+
+if [ ! -f "$wordpress_dir/wp-config.php" ]; then
+    run_wp config create \
+        --dbname=wordpress \
+        --dbuser=wordpress \
+        --dbpass="$DB_PASSWORD" \
+        --dbhost=localhost \
+        --dbcharset=utf8mb4 \
+        --skip-check
+fi
+
+run_wp config set DISALLOW_FILE_EDIT true --raw
+run_wp config set WP_MEMORY_LIMIT 512M
+run_wp config set WP_MAX_MEMORY_LIMIT 768M
+run_wp config set WP_CACHE true --raw
+run_wp config set WP_REDIS_HOST 127.0.0.1
+run_wp config set WP_REDIS_PORT 6379 --raw
+
+if ! run_wp core is-installed >/dev/null 2>&1; then
+    run_wp core install \
+        --url="$SHOP_URL" \
+        --title="$SHOP_TITLE" \
+        --admin_user="$SHOP_ADMIN_USER" \
+        --admin_password="$SHOP_ADMIN_PASSWORD" \
+        --admin_email="$SHOP_ADMIN_EMAIL" \
+        --skip-email
+fi
+
+run_wp plugin install woocommerce --activate
+run_wp plugin install redis-cache --activate
+run_wp redis enable >/dev/null 2>&1 || true
+run_wp option update blog_public 0
+run_wp rewrite structure '/%postname%/' --hard
+run_wp rewrite flush --hard
+chown -R www-data:www-data "$wordpress_dir" "$data_dir/wordpress"
+find "$wordpress_dir" -type d -exec chmod 0755 {} +
+find "$wordpress_dir" -type f -exec chmod 0644 {} +
+chmod 0640 "$wordpress_dir/wp-config.php"
+
+log "Enabling Nginx and PHP-FPM."
+rm -f /etc/nginx/sites-enabled/default
+ln -sf /etc/nginx/sites-available/msfixit-shopos.conf /etc/nginx/sites-enabled/msfixit-shopos.conf
+nginx -t
+systemctl enable "$php_service" nginx.service
+systemctl restart "$php_service"
+systemctl restart nginx.service
+
+if [ -n "$CF_TUNNEL_TOKEN" ]; then
+    printf 'CF_TUNNEL_TOKEN=%s\n' "$CF_TUNNEL_TOKEN" > "$config_dir/cloudflared.env"
+    chmod 0600 "$config_dir/cloudflared.env"
+    systemctl enable msfixit-cloudflared.service
+    systemctl restart msfixit-cloudflared.service
+    tunnel_state=enabled
+else
+    systemctl disable msfixit-cloudflared.service 2>/dev/null || true
+    tunnel_state=disabled
+fi
+
+systemctl enable --now msfixit-health.timer msfixit-backup.timer
+/usr/local/sbin/msfixit-health || true
+
+touch "$marker"
+chmod 0600 "$marker"
+
+cat > "$credentials_file" <<EOF_CREDENTIALS
+Ms. FixIT ShopOS first-boot credentials
+=======================================
+
+Shop URL: ${SHOP_URL}
+WordPress user: ${SHOP_ADMIN_USER}
+WordPress password: ${SHOP_ADMIN_PASSWORD}
+
+SSH user: shopadmin
+SSH password: ${OS_ADMIN_PASSWORD}
+
+Cloudflare Tunnel: ${tunnel_state}
+LAN address: ${local_ip}
+
+Delete this file after saving the credentials in a password manager.
+EOF_CREDENTIALS
+chmod 0600 "$credentials_file"
+
+systemctl disable msfixit-firstboot.service 2>/dev/null || true
+log "ShopOS provisioning completed successfully."
