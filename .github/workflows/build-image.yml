@@ -1,0 +1,73 @@
+name: Build ShopOS image
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - image/**
+      - scripts/**
+      - Makefile
+      - .github/workflows/build-image.yml
+  workflow_dispatch:
+    inputs:
+      storage:
+        description: Storage target to build
+        required: true
+        default: usb
+        type: choice
+        options:
+          - usb
+          - sd
+          - nvme
+
+permissions:
+  contents: read
+
+concurrency:
+  group: shopos-image-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Validate source
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out ShopOS
+        uses: actions/checkout@v4
+
+      - name: Check shell syntax
+        run: make check
+
+  build:
+    name: Build Raspberry Pi 5 image
+    needs: validate
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 180
+
+    steps:
+      - name: Check out ShopOS
+        uses: actions/checkout@v4
+
+      - name: Select storage target
+        shell: bash
+        run: |
+          storage='${{ github.event.inputs.storage }}'
+          if [ -z "$storage" ]; then
+            storage=usb
+          fi
+          echo "STORAGE=$storage" >> "$GITHUB_ENV"
+
+      - name: Build flash image
+        run: bash scripts/build-image.sh "$STORAGE"
+
+      - name: Show image checksums
+        run: cat artifacts/*.sha256
+
+      - name: Upload flash image
+        uses: actions/upload-artifact@v4
+        with:
+          name: msfixit-shopos-rpi5-${{ env.STORAGE }}
+          path: artifacts/*
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
