@@ -1,31 +1,62 @@
 # Ms. FixIT ShopOS
 
-A minimal, reproducible Raspberry Pi appliance operating system for the Ms. FixIT WooCommerce shop.
+A minimal, reproducible Raspberry Pi 5 appliance operating system for the Ms. FixIT WooCommerce shop.
 
-## Goals
+## Current milestone: 0.1 bootstrap image
 
-- Run only the services required for the shop appliance
-- Provide WordPress and WooCommerce as the storefront
-- Keep supplier, pricing and order automation outside WordPress
-- Use Cloudflare Tunnel without exposing inbound router ports
-- Separate immutable system components from persistent shop data
-- Support backups, health checks and safe system updates
-- Never store production secrets in Git
+The repository now contains a build definition for a flashable ARM64 image based on Raspberry Pi's `rpi-image-gen` and Debian Trixie. The image contains only the shop web stack and operational services:
 
-## Project status
+- Nginx bound to localhost
+- PHP-FPM
+- MariaDB
+- Redis
+- WordPress/WooCommerce provisioning through `shopos-setup`
+- Cloudflare Tunnel client
+- nftables firewall
+- SSH bootstrap with either a supplied public key or a generated one-time password
+- systemd health checks, WordPress cron and local backups
 
-Early architecture and bootstrap phase. No production image is available yet.
+No production secrets are stored in Git.
 
-## Planned components
+## Build
 
-- Raspberry Pi image build
-- Nginx and PHP-FPM
-- MariaDB and Redis
-- WordPress and WooCommerce provisioning
-- Catalog service
-- Pricing engine
-- Order router
-- Supplier and marketplace connectors
-- Backup and health services
+Run on a native ARM64 Debian Bookworm/Trixie or 64-bit Raspberry Pi OS host:
 
-See `docs/` for the architecture and implementation roadmap as the project develops.
+```bash
+./scripts/build-image.sh
+```
+
+The output is written to:
+
+```text
+artifacts/msfixit-shopos-rpi5.img.xz
+artifacts/msfixit-shopos-rpi5.img.xz.sha256
+```
+
+The GitHub Actions workflow uses GitHub's ARM64 Ubuntu runner to produce the same artifact.
+
+## First boot
+
+See [`docs/FLASHING.md`](docs/FLASHING.md).
+
+## Security model
+
+- Nginx listens on `127.0.0.1:8080`; Cloudflare Tunnel is the public entry point.
+- MariaDB and Redis remain local.
+- Incoming traffic is denied by default.
+- SSH is accepted only from private IPv4 address ranges.
+- Root SSH login is disabled.
+- WordPress's built-in file editor is disabled after setup.
+- Cloudflare and database secrets live under `/etc/shopos` with root-only permissions.
+
+## Not implemented yet
+
+- Supplier API connectors
+- Marketplace connectors
+- Automatic pricing and margin rules
+- External/off-device backup transport
+- A/B atomic operating-system updates
+- Encrypted data partition
+- Production load and recovery testing
+
+This repository is public. Never commit API keys, Cloudflare tokens, database dumps or customer data.
