@@ -35,34 +35,32 @@ WooCommerce REST API
 +----------------------+----------------------+------------------+
 ```
 
-## Planned host services
+## Bootstrap host services
 
 - `nginx.service`
-- `php-fpm.service`
+- `php8.4-fpm.service`
 - `mariadb.service`
 - `redis-server.service`
-- `cloudflared.service`
-- `fixit-catalog.service`
-- `fixit-pricing.service`
-- `fixit-orders.service`
-- `fixit-health.service`
-- `fixit-backup.timer`
-- `fixit-sync.timer`
+- `cloudflared-shopos.service`
+- `shopos-firstboot.service`
+- `shopos-health.timer`
+- `shopos-backup.timer`
+- `shopos-wp-cron.timer`
 
 ## Data separation
 
-The operating system should be replaceable without losing shop data. Persistent data belongs below `/data`:
+Version 0.1 uses the root filesystem for application state so the first flashable prototype remains simple. A later storage milestone will move persistent data below `/data` and add an explicit data partition:
 
 ```text
 /data/mariadb
-/data/wordpress/uploads
+/data/wordpress
 /data/config
 /data/catalog
 /data/backups
 /data/logs
 ```
 
-The initial development image may use a simpler partition layout. A/B system partitions and a recovery partition are later milestones and must not block the first bootable prototype.
+A/B system partitions, encryption and a recovery partition remain planned milestones.
 
 ## Application boundaries
 
@@ -121,9 +119,9 @@ Responsible for:
 
 ## Security boundaries
 
-- MariaDB and Redis bind to localhost only.
-- Internal services bind to localhost or a private Unix socket.
-- Public HTTP traffic reaches Nginx only through Cloudflare Tunnel.
-- SSH uses keys only and is restricted to the administration network.
-- Every custom service runs under a dedicated unprivileged account.
-- Production configuration is supplied outside Git.
+- Nginx listens on localhost only.
+- MariaDB and Redis remain local.
+- Public HTTP traffic reaches Nginx through Cloudflare Tunnel.
+- SSH is limited to private IPv4 ranges by nftables.
+- Root SSH login is disabled.
+- Production secrets are supplied after flashing and are not stored in Git.
