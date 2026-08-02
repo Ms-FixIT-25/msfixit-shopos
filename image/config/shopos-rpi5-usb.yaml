@@ -1,8 +1,10 @@
 include:
   file: common.yaml
 
+# rpi-image-gen uses the removable-media profile for both microSD and
+# USB-attached SSD images. The output remains named explicitly for USB SSD.
 device:
-  storage_type: usb
+  storage_type: sd
 
 image:
   name: msfixit-shopos-rpi5-usb
