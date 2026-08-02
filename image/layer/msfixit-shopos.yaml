@@ -56,7 +56,8 @@ mmdebstrap:
       install -D -m 0755 image/assets/usr/local/sbin/shopos-backup "$1/usr/local/sbin/shopos-backup"
       install -D -m 0644 image/assets/var/www/shopos/index.html "$1/var/www/shopos/index.html"
     - |-
-      uchroot "$1" bash -euxo pipefail <<'EOCHROOT'
+      uchroot "$1" bash -- <<'EOCHROOT'
+      set -euxo pipefail
       getent group shopadmin >/dev/null || groupadd --system shopadmin
       id shopadmin >/dev/null 2>&1 || useradd --create-home --shell /bin/bash --groups sudo --password '!' shopadmin
       id cloudflared >/dev/null 2>&1 || useradd --system --home /var/lib/cloudflared --create-home --shell /usr/sbin/nologin cloudflared
