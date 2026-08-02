@@ -34,6 +34,16 @@ else
     git -C "$rig_dir" checkout --force "$rig_version"
 fi
 
+# rpi-image-gen v2.6.0 allows device.storage_type=usb in its layer metadata,
+# but its IDP v2 JSON schema accidentally omits usb. Apply the repository's
+# audited compatibility patch so USB-attached SSD/NVMe images retain correct
+# metadata instead of being mislabeled as SD media.
+if [ "$rig_version" = "v2.6.0" ]; then
+    usb_schema_patch="${root}/patches/rpi-image-gen-v2.6.0-idp-usb.patch"
+    git -C "$rig_dir" apply --check "$usb_schema_patch"
+    git -C "$rig_dir" apply "$usb_schema_patch"
+fi
+
 if [ "${SHOPOS_SKIP_BUILD_DEPS:-0}" != "1" ]; then
     sudo apt-get update
     sudo chmod o+x "$HOME"
