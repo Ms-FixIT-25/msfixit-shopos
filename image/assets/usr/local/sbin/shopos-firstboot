@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+marker=/var/lib/shopos/firstboot.done
+boot_dir=/boot/firmware
+login_note="$boot_dir/SHOPOS-FIRST-LOGIN.txt"
+key_file="$boot_dir/shopos-authorized_keys"
+home=/home/shopadmin
+
+install -d -m 0750 /var/lib/shopos
+install -d -m 0700 -o shopadmin -g shopadmin "$home/.ssh"
+
+if [[ -s "$key_file" ]]; then
+    install -m 0600 -o shopadmin -g shopadmin "$key_file" "$home/.ssh/authorized_keys"
+    passwd -l shopadmin >/dev/null
+    cat >"$login_note" <<'EOF'
+Ms. FixIT ShopOS is ready.
+
+SSH user: shopadmin
+Authentication: SSH key from shopos-authorized_keys
+Next command: sudo shopos-setup
+EOF
+else
+    password="$(openssl rand -hex 12)"
+    printf 'shopadmin:%s\n' "$password" | chpasswd
+    chage -d 0 shopadmin
+    cat >"$login_note" <<EOF
+Ms. FixIT ShopOS is ready.
+
+SSH user: shopadmin
+Temporary password: $password
+You must change this password at first login.
+Next command: sudo shopos-setup
+
+For key-only login, place your public key in shopos-authorized_keys
+on the boot partition and reboot before exposing the device.
+EOF
+fi
+
+chmod 0644 "$login_note" || true
+hostnamectl set-hostname msfixit-shopos
+touch "$marker"
