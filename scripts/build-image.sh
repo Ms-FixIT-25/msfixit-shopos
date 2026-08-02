@@ -17,7 +17,7 @@ if [[ ! -d "$cache_dir/.git" ]]; then
     git clone --depth 1 --branch "$version" https://github.com/raspberrypi/rpi-image-gen.git "$cache_dir"
 fi
 
-git -C "$cache_dir" fetch --depth 1 origin "refs/tags/$version:refs/tags/$version"
+git -C "$cache_dir" fetch --depth 1 --force origin "refs/tags/$version:refs/tags/$version"
 git -C "$cache_dir" checkout --force "$version"
 
 sudo "$cache_dir/install_deps.sh"
