@@ -1,0 +1,11 @@
+[Unit]
+Description=Run WordPress cron every five minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=5min
+AccuracySec=30s
+Persistent=true
+
+[Install]
+WantedBy=timers.target
