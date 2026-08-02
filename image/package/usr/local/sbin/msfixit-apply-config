@@ -1,0 +1,81 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+umask 077
+
+if [ "$(id -u)" -ne 0 ]; then
+    echo "Run this command with sudo." >&2
+    exit 1
+fi
+
+boot_root=/boot
+[ -d /boot/firmware ] && boot_root=/boot/firmware
+config_file="${1:-${boot_root}/shopos.env}"
+wordpress_dir=/srv/www/wordpress
+config_dir=/etc/msfixit-shopos
+
+[ -f "$config_file" ] || {
+    echo "Configuration file not found: $config_file" >&2
+    exit 1
+}
+
+SHOP_URL=""
+SHOP_ADMIN_USER="shopadmin"
+SHOP_ADMIN_EMAIL=""
+SHOP_ADMIN_PASSWORD=""
+OS_ADMIN_PASSWORD=""
+CF_TUNNEL_TOKEN=""
+
+while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%$'\r'}"
+    [[ -z "$line" || "$line" == \#* || "$line" != *=* ]] && continue
+    key="${line%%=*}"
+    value="${line#*=}"
+    value="${value#\"}"
+    value="${value%\"}"
+    value="${value#\'}"
+    value="${value%\'}"
+
+    case "$key" in
+        SHOP_URL|SHOP_ADMIN_USER|SHOP_ADMIN_EMAIL|SHOP_ADMIN_PASSWORD|OS_ADMIN_PASSWORD|CF_TUNNEL_TOKEN)
+            printf -v "$key" '%s' "$value"
+            ;;
+    esac
+done < "$config_file"
+
+run_wp() {
+    runuser -u www-data -- env HOME=/tmp /usr/local/bin/wp --path="$wordpress_dir" "$@"
+}
+
+if [ -n "$SHOP_URL" ]; then
+    run_wp option update home "$SHOP_URL"
+    run_wp option update siteurl "$SHOP_URL"
+fi
+
+if [ -n "$SHOP_ADMIN_EMAIL" ]; then
+    run_wp user update "$SHOP_ADMIN_USER" --user_email="$SHOP_ADMIN_EMAIL"
+    run_wp option update admin_email "$SHOP_ADMIN_EMAIL"
+fi
+
+if [ -n "$SHOP_ADMIN_PASSWORD" ]; then
+    run_wp user update "$SHOP_ADMIN_USER" --user_pass="$SHOP_ADMIN_PASSWORD"
+fi
+
+if [ -n "$OS_ADMIN_PASSWORD" ]; then
+    printf 'shopadmin:%s\n' "$OS_ADMIN_PASSWORD" | chpasswd
+fi
+
+if [ -n "$CF_TUNNEL_TOKEN" ]; then
+    install -d -m 0750 "$config_dir"
+    printf 'CF_TUNNEL_TOKEN=%s\n' "$CF_TUNNEL_TOKEN" > "$config_dir/cloudflared.env"
+    chmod 0600 "$config_dir/cloudflared.env"
+    systemctl enable --now msfixit-cloudflared.service
+else
+    rm -f "$config_dir/cloudflared.env"
+    systemctl disable --now msfixit-cloudflared.service 2>/dev/null || true
+fi
+
+run_wp cache flush >/dev/null 2>&1 || true
+systemctl restart nginx.service
+/usr/local/sbin/msfixit-health || true
+
+echo "ShopOS configuration applied successfully."
