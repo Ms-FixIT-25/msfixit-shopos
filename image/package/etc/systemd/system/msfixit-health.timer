@@ -1,0 +1,11 @@
+[Unit]
+Description=Run the ShopOS health check every minute
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+AccuracySec=15s
+Persistent=true
+
+[Install]
+WantedBy=timers.target
