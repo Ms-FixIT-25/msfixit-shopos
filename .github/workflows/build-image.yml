@@ -8,6 +8,13 @@ on:
       - scripts/**
       - Makefile
       - .github/workflows/build-image.yml
+  pull_request:
+    branches: [main]
+    paths:
+      - image/**
+      - scripts/**
+      - Makefile
+      - .github/workflows/build-image.yml
   workflow_dispatch:
     inputs:
       storage:
