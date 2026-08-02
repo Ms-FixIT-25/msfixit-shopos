@@ -1,0 +1,12 @@
+[Unit]
+Description=Ms. FixIT ShopOS health check
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/msfixit-health
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/run/msfixit-shopos /var/lib/msfixit-shopos
