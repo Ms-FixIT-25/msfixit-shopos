@@ -36,6 +36,7 @@ chmod 0755 \
     "$stage/usr/local/bin/cloudflared" \
     "$stage/usr/local/bin/wp" \
     "$stage/usr/local/sbin/msfixit-firstboot" \
+    "$stage/usr/local/sbin/msfixit-apply-config" \
     "$stage/usr/local/sbin/msfixit-health" \
     "$stage/usr/local/sbin/msfixit-backup" \
     "$stage/usr/local/sbin/msfixit-status"
