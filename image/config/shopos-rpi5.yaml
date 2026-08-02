@@ -1,0 +1,11 @@
+device:
+  layer: rpi5
+
+layer:
+  custom: msfixit-shopos
+
+image:
+  layer: image-rpios
+  boot_part_size: 200%
+  root_part_size: 700%
+  name: msfixit-shopos-rpi5
