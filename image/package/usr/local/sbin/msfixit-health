@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+set -u
+
+install -d -m 0755 /run/msfixit-shopos /var/lib/msfixit-shopos
+
+state="ok"
+failed=()
+services=(nginx mariadb redis-server)
+php_service="$(systemctl list-unit-files --type=service --no-legend 'php*-fpm.service' 2>/dev/null | awk 'NR==1 {print $1}')"
+[ -n "$php_service" ] && services+=("$php_service")
+
+for service in "${services[@]}"; do
+    if ! systemctl is-active --quiet "$service"; then
+        state="degraded"
+        failed+=("$service")
+    fi
+done
+
+if ! curl --silent --show-error --fail --max-time 10 http://127.0.0.1/ >/dev/null 2>&1; then
+    state="degraded"
+    failed+=("http")
+fi
+
+root_used="$(df -P / | awk 'NR==2 {gsub(/%/, "", $5); print $5}')"
+data_used="$(df -P /data 2>/dev/null | awk 'NR==2 {gsub(/%/, "", $5); print $5}')"
+[ -n "$root_used" ] || root_used=0
+[ -n "$data_used" ] || data_used=0
+
+if [ "$root_used" -ge 90 ] || [ "$data_used" -ge 90 ]; then
+    state="degraded"
+    failed+=("disk")
+fi
+
+temperature="unknown"
+if [ -r /sys/class/thermal/thermal_zone0/temp ]; then
+    raw_temp="$(cat /sys/class/thermal/thermal_zone0/temp)"
+    temperature="$(awk -v temp="$raw_temp" 'BEGIN {printf "%.1f", temp / 1000}')"
+fi
+
+failed_json="$(printf '%s\n' "${failed[@]:-}" | jq -R . | jq -s 'map(select(length > 0))')"
+
+jq -n \
+    --arg state "$state" \
+    --arg timestamp "$(date --iso-8601=seconds)" \
+    --arg temperature_c "$temperature" \
+    --argjson root_used_percent "$root_used" \
+    --argjson data_used_percent "$data_used" \
+    --argjson failed "$failed_json" \
+    '{state:$state,timestamp:$timestamp,temperature_c:$temperature_c,root_used_percent:$root_used_percent,data_used_percent:$data_used_percent,failed:$failed}' \
+    > /var/lib/msfixit-shopos/health.json
+
+printf '%s\n' "$state" > /run/msfixit-shopos/health.txt
+chmod 0644 /run/msfixit-shopos/health.txt /var/lib/msfixit-shopos/health.json
+
+[ "$state" = "ok" ]
