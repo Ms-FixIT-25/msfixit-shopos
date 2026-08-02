@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+state=ok
+messages=()
+
+check_service() {
+    local unit=$1
+    if ! systemctl is-active --quiet "$unit"; then
+        state=failed
+        messages+=("$unit is not active")
+    fi
+}
+
+for unit in nginx.service php8.4-fpm.service mariadb.service redis-server.service; do
+    check_service "$unit"
+done
+
+if systemctl is-enabled --quiet cloudflared-shopos.service 2>/dev/null; then
+    check_service cloudflared-shopos.service
+fi
+
+if ! curl -fsS --max-time 5 http://127.0.0.1:8080/healthz >/dev/null; then
+    state=failed
+    messages+=("local HTTP health endpoint failed")
+fi
+
+root_usage=$(df -P / | awk 'NR==2 {gsub("%","",$5); print $5}')
+if (( root_usage >= 90 )); then
+    state=failed
+    messages+=("root filesystem usage is ${root_usage}%")
+fi
+
+timestamp=$(date --iso-8601=seconds)
+messages_json='[]'
+if ((${#messages[@]})); then
+    messages_json=$(printf '%s\n' "${messages[@]}" | jq -R . | jq -s .)
+fi
+
+install -d -m 0750 /var/lib/shopos
+jq -n \
+    --arg status "$state" \
+    --arg checked_at "$timestamp" \
+    --argjson root_usage_percent "$root_usage" \
+    --argjson messages "$messages_json" \
+    '{status:$status, checked_at:$checked_at, root_usage_percent:$root_usage_percent, messages:$messages}' \
+    >/var/lib/shopos/health.json
+
+[[ "$state" == ok ]]
