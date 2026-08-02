@@ -5,6 +5,15 @@ device:
   user1sudo: passwd
   user1groups: adm,users
 
+locale:
+  default: de_AT.UTF-8
+  keyboard_keymap: de
+  keyboard_layout: German
+  timezone: Europe/Vienna
+
+ieee80211:
+  regdom: AT
+
 image:
   layer: image-rpios
   boot_part_size: 400%
