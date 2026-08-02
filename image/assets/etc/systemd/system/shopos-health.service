@@ -1,0 +1,14 @@
+[Unit]
+Description=Ms. FixIT ShopOS health check
+After=network-online.target nginx.service mariadb.service redis-server.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/shopos-health
+User=root
+Group=root
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/shopos
