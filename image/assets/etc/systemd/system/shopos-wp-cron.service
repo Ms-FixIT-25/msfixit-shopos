@@ -1,0 +1,11 @@
+[Unit]
+Description=Run due WordPress cron events
+After=mariadb.service
+ConditionPathExists=/var/lib/shopos/setup-complete
+
+[Service]
+Type=oneshot
+User=www-data
+Group=www-data
+ExecStart=/usr/local/bin/wp cron event run --due-now --path=/var/www/shopos --quiet
+Nice=10
