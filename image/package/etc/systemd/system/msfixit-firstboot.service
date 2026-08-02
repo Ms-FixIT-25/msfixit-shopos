@@ -1,0 +1,16 @@
+[Unit]
+Description=Ms. FixIT ShopOS first-boot provisioning
+Wants=network-online.target
+After=network-online.target local-fs.target
+ConditionPathExists=!/data/.shopos-initialized
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/msfixit-firstboot
+RemainAfterExit=yes
+Restart=on-failure
+RestartSec=30s
+TimeoutStartSec=20min
+
+[Install]
+WantedBy=multi-user.target
