@@ -14,5 +14,14 @@ image:
 layer:
   base: trixie-minbase
 
+locale:
+  default: de_AT.UTF-8
+  keyboard_keymap: de
+  keyboard_layout: German
+  timezone: Europe/Vienna
+
+ieee80211:
+  regdom: AT
+
 packages:
   - packages/msfixit-shopos_arm64.deb
