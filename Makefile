@@ -17,6 +17,7 @@ check:
 	bash -n scripts/build-image.sh
 	bash -n image/package/DEBIAN/postinst
 	bash -n image/package/usr/local/sbin/msfixit-firstboot
+	bash -n image/package/usr/local/sbin/msfixit-apply-config
 	bash -n image/package/usr/local/sbin/msfixit-health
 	bash -n image/package/usr/local/sbin/msfixit-backup
 	bash -n image/package/usr/local/sbin/msfixit-status
