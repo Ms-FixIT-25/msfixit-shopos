@@ -40,14 +40,14 @@ fi
         -c "shopos-rpi5-${storage}.yaml"
 )
 
-# Only inspect rpi-image-gen deployment directories. Searching the complete
-# build tree would descend into intentionally protected database directories
-# and can make an otherwise successful image build fail with EACCES.
+# Publish only the compressed flash image produced in a deploy directory.
+# The build tree also contains a 10 GiB raw image and Android sparse images;
+# neither belongs in the downloadable GitHub artifact.
 image_file="$(
-    find "$rig_dir/work" -maxdepth 2 -type f \
-        \( -name 'msfixit-shopos-*.img' \
+    find "$rig_dir/work" -mindepth 2 -maxdepth 2 -type f \
+        -path "$rig_dir/work/deploy-*/*" \
+        \( -name 'msfixit-shopos-*.img.zst' \
            -o -name 'msfixit-shopos-*.img.xz' \
-           -o -name 'msfixit-shopos-*.img.zst' \
            -o -name 'msfixit-shopos-*.img.gz' \) \
         ! -name '*.sparse.*' \
         -printf '%T@ %p\n' 2>/dev/null \
@@ -56,7 +56,7 @@ image_file="$(
 )"
 
 if [ -z "$image_file" ] || [ ! -f "$image_file" ]; then
-    echo "The image build completed without a discoverable flash image." >&2
+    echo "The image build completed without a compressed deploy image." >&2
     exit 1
 fi
 
