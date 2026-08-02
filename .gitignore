@@ -2,6 +2,9 @@
 .env
 .env.*
 !.env.example
+shopos.env
+**/shopos.env
+SHOPOS-CREDENTIALS.txt
 *.pem
 *.key
 *.p12
@@ -25,12 +28,16 @@ data/
 *.sql.gz
 *.dump
 
-# Image build output
+# Image and package build output
 build/
 out/
 artifacts/
+image/packages/
+*.deb
 *.img
 *.img.xz
+*.img.zst
+*.img.gz
 *.iso
 
 # Logs and temporary files
