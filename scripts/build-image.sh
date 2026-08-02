@@ -40,16 +40,23 @@ fi
         -c "shopos-rpi5-${storage}.yaml"
 )
 
+# Only inspect rpi-image-gen deployment directories. Searching the complete
+# build tree would descend into intentionally protected database directories
+# and can make an otherwise successful image build fail with EACCES.
 image_file="$(
-    find "$rig_dir" -type f \
-        \( -name '*.img' -o -name '*.img.xz' -o -name '*.img.zst' -o -name '*.img.gz' \) \
-        -printf '%T@ %p\n' \
+    find "$rig_dir/work" -maxdepth 2 -type f \
+        \( -name 'msfixit-shopos-*.img' \
+           -o -name 'msfixit-shopos-*.img.xz' \
+           -o -name 'msfixit-shopos-*.img.zst' \
+           -o -name 'msfixit-shopos-*.img.gz' \) \
+        ! -name '*.sparse.*' \
+        -printf '%T@ %p\n' 2>/dev/null \
         | sort -nr \
         | awk 'NR==1 {$1=""; sub(/^ /, ""); print}'
 )"
 
 if [ -z "$image_file" ] || [ ! -f "$image_file" ]; then
-    echo "The image build completed without a discoverable image file." >&2
+    echo "The image build completed without a discoverable flash image." >&2
     exit 1
 fi
 
