@@ -15,13 +15,23 @@ case "$storage" in
         ;;
 esac
 
+if [ "$(uname -m)" != "aarch64" ]; then
+    echo "ShopOS images must be built on a native ARM64 host." >&2
+    exit 1
+fi
+
 bash "${root}/scripts/build-package.sh"
+sha256sum --check "${root}/image/packages/msfixit-shopos_arm64.deb.sha256"
 
 if [ ! -d "$rig_dir/.git" ]; then
     rm -rf "$rig_dir"
     install -d -m 0755 "$(dirname "$rig_dir")"
     git clone --depth 1 --branch "$rig_version" \
         https://github.com/raspberrypi/rpi-image-gen.git "$rig_dir"
+else
+    git -C "$rig_dir" fetch --depth 1 --force origin \
+        "refs/tags/${rig_version}:refs/tags/${rig_version}"
+    git -C "$rig_dir" checkout --force "$rig_version"
 fi
 
 if [ "${SHOPOS_SKIP_BUILD_DEPS:-0}" != "1" ]; then
@@ -35,6 +45,7 @@ fi
 
 (
     cd "$rig_dir"
+    ./rpi-image-gen metadata --lint "${root}/image/config/common.yaml"
     ./rpi-image-gen build \
         -S "${root}/image" \
         -c "shopos-rpi5-${storage}.yaml"
