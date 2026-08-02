@@ -28,7 +28,7 @@ on:
           - nvme
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: shopos-image-${{ github.ref }}
@@ -70,7 +70,7 @@ jobs:
       - name: Show image checksums
         run: cat artifacts/*.sha256
 
-      - name: Upload flash image
+      - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
           name: msfixit-shopos-rpi5-${{ env.STORAGE }}
@@ -78,3 +78,40 @@ jobs:
           if-no-files-found: error
           retention-days: 14
           compression-level: 0
+
+      - name: Publish GitHub Release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && env.STORAGE == 'usb'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="$(tr -d '[:space:]' < image/VERSION)"
+          tag="v${version}"
+          title="Ms. FixIT ShopOS ${version}"
+          notes_file="$(mktemp)"
+
+          cat > "$notes_file" <<EOF
+          Flash-ready Raspberry Pi 5 USB-SSD image for Ms. FixIT ShopOS.
+
+          Included downloads:
+          - compressed ShopOS image
+          - portable SHA-256 checksum
+
+          The image was built on GitHub's native ARM64 runner. Physical first-boot validation on the target Raspberry Pi is still required before connecting the production domain.
+          EOF
+
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit "$tag" \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$title" \
+              --notes-file "$notes_file"
+            gh release upload "$tag" artifacts/* \
+              --repo "$GITHUB_REPOSITORY" \
+              --clobber
+          else
+            gh release create "$tag" artifacts/* \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "$title" \
+              --notes-file "$notes_file"
+          fi
