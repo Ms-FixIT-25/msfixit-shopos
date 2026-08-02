@@ -1,0 +1,29 @@
+[Unit]
+Description=Cloudflare Tunnel for Ms. FixIT ShopOS
+After=network-online.target nginx.service
+Wants=network-online.target
+ConditionPathExists=/etc/shopos/cloudflared.token
+
+[Service]
+Type=simple
+User=cloudflared
+Group=cloudflared
+LoadCredential=token:/etc/shopos/cloudflared.token
+ExecStart=/bin/sh -c 'exec /usr/local/bin/cloudflared tunnel --no-autoupdate run --token "$(cat "$CREDENTIALS_DIRECTORY/token")"'
+Restart=on-failure
+RestartSec=5s
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+CapabilityBoundingSet=
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target
