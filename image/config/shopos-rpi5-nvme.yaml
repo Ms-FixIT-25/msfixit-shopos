@@ -1,0 +1,8 @@
+include:
+  file: common.yaml
+
+device:
+  storage_type: nvme
+
+image:
+  name: msfixit-shopos-rpi5-nvme
