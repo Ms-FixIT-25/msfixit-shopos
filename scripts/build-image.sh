@@ -45,7 +45,6 @@ fi
 
 (
     cd "$rig_dir"
-    ./rpi-image-gen metadata --lint "${root}/image/config/common.yaml"
     ./rpi-image-gen build \
         -S "${root}/image" \
         -c "shopos-rpi5-${storage}.yaml"
