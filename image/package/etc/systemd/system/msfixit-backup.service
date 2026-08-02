@@ -1,0 +1,17 @@
+[Unit]
+Description=Ms. FixIT ShopOS local backup
+After=mariadb.service
+Requires=mariadb.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/msfixit-backup
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/data/backups
+ReadOnlyPaths=/data/wordpress /srv/www/wordpress /etc/msfixit-shopos
