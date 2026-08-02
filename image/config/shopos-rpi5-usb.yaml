@@ -1,10 +1,11 @@
 include:
   file: common.yaml
 
-# rpi-image-gen uses the removable-media profile for both microSD and
-# USB-attached SSD images. The output remains named explicitly for USB SSD.
+# A Raspberry Pi 5 booting from an SSD through a USB adapter uses the USB
+# storage profile. rpi-image-gen v2.6.0 accepts this in layer metadata; the
+# build script applies the matching one-line IDP schema compatibility patch.
 device:
-  storage_type: sd
+  storage_type: usb
 
 image:
   name: msfixit-shopos-rpi5-usb
