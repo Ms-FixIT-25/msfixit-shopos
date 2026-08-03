@@ -41,13 +41,37 @@ if (class_exists('WC_Shipping_Zones') && class_exists('WC_Shipping_Zone')) {
         $zone->set_zone_name($definition['name']);
         $zone->set_zone_order($definition['order']);
         $zone->save();
-
-        // Refresh only the country assignment. Existing shipping methods and
-        // their configured prices remain untouched on repeated provisioning.
         $zone->clear_locations();
         $zone->add_location($countryCode, 'country');
         $zone->save();
     }
 }
 
-WP_CLI::success('Sales restricted to AT, DE and CH with separate country shipping zones.');
+// The page contains only the technical two-step withdrawal function. The
+// country-specific withdrawal information itself remains a separately versioned
+// and approved legal document in the compliance database.
+$withdrawalPage = get_page_by_path('vertrag-widerrufen', OBJECT, 'page');
+if (!$withdrawalPage instanceof WP_Post) {
+    $withdrawalPageId = wp_insert_post([
+        'post_type' => 'page',
+        'post_status' => 'publish',
+        'post_title' => 'Vertrag widerrufen',
+        'post_name' => 'vertrag-widerrufen',
+        'post_content' => '[msfixit_withdrawal]',
+        'comment_status' => 'closed',
+    ], true);
+    if (is_wp_error($withdrawalPageId)) {
+        WP_CLI::warning('Withdrawal function page could not be created: ' . $withdrawalPageId->get_error_message());
+    } else {
+        update_post_meta((int) $withdrawalPageId, '_msfixit_shopos_managed', '1');
+    }
+} elseif (get_post_meta($withdrawalPage->ID, '_msfixit_shopos_managed', true) === '1') {
+    wp_update_post([
+        'ID' => $withdrawalPage->ID,
+        'post_status' => 'publish',
+        'post_title' => 'Vertrag widerrufen',
+        'post_content' => '[msfixit_withdrawal]',
+    ]);
+}
+
+WP_CLI::success('Sales restricted to AT, DE and CH with separate zones and electronic withdrawal function page.');
