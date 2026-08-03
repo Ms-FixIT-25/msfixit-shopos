@@ -10,6 +10,9 @@ ShopOS is structured as a **flash-image prototype**. The repository contains:
 - Raspberry Pi 5 targets for USB SSD, microSD and native NVMe
 - a native Nginx, PHP-FPM, MariaDB and Redis web stack
 - automated WordPress and WooCommerce first-boot provisioning
+- automatic Ms. FixIT branding with embedded logo, colors and site icon
+- automatic Storefront theme, homepage, shop pages and main-menu setup
+- Austrian WooCommerce defaults for country, euro, units and time zone
 - optional token-based Cloudflare Tunnel startup
 - LAN-restricted SSH and HTTP firewall rules
 - automatic health checks and daily local backups
@@ -18,6 +21,22 @@ ShopOS is structured as a **flash-image prototype**. The repository contains:
 The default and release target is currently the **Raspberry Pi 4 Model B with USB SSD**. Every generated filename contains the hardware target so Pi 4 and Pi 5 images cannot be confused.
 
 The first image still needs validation on the intended Raspberry Pi and storage hardware before production use.
+
+## Automatic shop setup
+
+After the operating-system first boot has completed, `msfixit-brand-shop.service` automatically:
+
+- installs and activates WooCommerce and Storefront idempotently
+- imports the embedded Ms. FixIT artwork into the media library
+- generates a header logo and square site icon
+- applies the navy, teal and pink brand colors
+- brands the public storefront and WordPress login screen
+- creates a homepage, repair/services page and contact page
+- creates WooCommerce pages and the primary navigation menu
+- creates unpublished placeholders for Impressum, Datenschutz, AGB and Widerruf/Rückgabe
+- keeps search-engine indexing disabled until the shop is deliberately approved
+
+Existing user-created pages are detected and protected from automatic replacement. Payments, shipping, taxes and legal texts are intentionally not invented by the appliance; the WordPress dashboard displays a go-live checklist for those decisions.
 
 ## Design goals
 
@@ -76,6 +95,7 @@ WordPress + WooCommerce
 Additional services:
 
 - `msfixit-firstboot.service`
+- `msfixit-brand-shop.service`
 - `msfixit-cloudflared.service`
 - `msfixit-health.timer`
 - `msfixit-backup.timer`
@@ -84,10 +104,13 @@ Additional services:
 
 ```bash
 sudo msfixit-status
+sudo msfixit-brand-shop
 sudo msfixit-apply-config
 sudo msfixit-health
 sudo msfixit-backup
 ```
+
+`sudo msfixit-brand-shop` reapplies the managed branding and missing ShopOS pages without overwriting existing pages that are not managed by ShopOS.
 
 ## Planned next components
 
