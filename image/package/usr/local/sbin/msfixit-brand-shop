@@ -56,7 +56,8 @@ for plugin in \
     msfixit-catalog-bridge.php \
     msfixit-commerce-region.php \
     msfixit-office-bridge.php \
-    msfixit-compliance.php; do
+    msfixit-compliance.php \
+    msfixit-compliance-runtime.php; do
     install -m 0644 \
         "$wordpress_assets/$plugin" \
         "$wordpress_dir/wp-content/mu-plugins/$plugin"
