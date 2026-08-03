@@ -5,7 +5,8 @@ Priority: optional
 Architecture: arm64
 Maintainer: Ms. FixIT <stefaniekilzer@gmail.com>
 Depends: nginx, mariadb-server, redis-server, php-fpm, php-cli, php-mysql, php-curl, php-gd, php-intl, php-mbstring, php-xml, php-zip, php-bcmath, php-imagick, php-redis, php-tcpdf, cups-client, curl, ca-certificates, jq, unzip, rsync, nftables, openssl, logrotate, sudo
-Description: Ms. FixIT ShopOS commerce appliance bootstrap
+Description: Ms. FixIT ShopOS commerce and DACH compliance appliance
  Installs and provisions the minimal web, database, cache, firewall,
  Cloudflare Tunnel, WordPress, WooCommerce, article master, immutable
- invoicing, dunning, ProSaldo handoff, fulfillment and print-queue services.
+ invoicing, dunning, ProSaldo handoff, fulfillment, print queues and
+ fail-closed Austrian/DACH legal, tax and product-compliance controls.
