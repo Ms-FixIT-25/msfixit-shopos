@@ -2,6 +2,7 @@ include:
   file: common.yaml
 
 device:
+  layer: rpi5
   storage_type: sd
 
 image:
