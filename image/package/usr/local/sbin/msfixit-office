@@ -1,0 +1,279 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+$library = '/usr/share/msfixit-shopos/office/office-lib.php';
+if (!is_file($library)) {
+    fwrite(STDERR, "Office library not found: {$library}\n");
+    exit(1);
+}
+require_once $library;
+
+function office_cli_fail(string $message, int $code = 1): never
+{
+    fwrite(STDERR, $message . PHP_EOL);
+    exit($code);
+}
+
+function office_cli_usage(): never
+{
+    $usage = <<<'TEXT'
+Ms. FixIT Office & Fulfillment
+
+Commands:
+  msfixit-office status
+  msfixit-office document-create TYPE JSON_FILE
+  msfixit-office document-finalize ID_OR_NUMBER
+  msfixit-office document-send ID_OR_NUMBER
+  msfixit-office payment-record DOCUMENT SOURCE EXTERNAL_ID AMOUNT [CURRENCY] [PAID_AT] [REFERENCE]
+  msfixit-office dunning-run [--dry-run]
+  msfixit-office reminder-approve REMINDER_ID
+  msfixit-office reminder-send REMINDER_ID
+  msfixit-office hold DOCUMENT on|off [REASON]
+  msfixit-office prosaldo-export YYYY-MM-DD YYYY-MM-DD
+  msfixit-office prosaldo-list
+  msfixit-office prosaldo-mark-imported EXPORT_ID
+  msfixit-office shipment-create JSON_FILE
+  msfixit-office label-import SHIPMENT_ID_OR_NUMBER FILE [TRACKING]
+  msfixit-office carrier-list
+  msfixit-office print-run [LIMIT]
+  msfixit-office worker-run [LIMIT]
+
+The database credential file can be overridden with OFFICE_ENV_PATH.
+TEXT;
+    fwrite(STDERR, $usage . PHP_EOL);
+    exit(2);
+}
+
+function office_cli_json_file(string $path): array
+{
+    if ($path === '-' || $path === '/dev/stdin') {
+        $content = stream_get_contents(STDIN);
+    } else {
+        if (!is_file($path) || !is_readable($path)) {
+            office_cli_fail("JSON file is unavailable: {$path}");
+        }
+        $content = file_get_contents($path);
+    }
+    if (!is_string($content) || trim($content) === '') {
+        office_cli_fail('JSON input is empty');
+    }
+    try {
+        $decoded = json_decode($content, true, 512, JSON_THROW_ON_ERROR);
+    } catch (JsonException $exception) {
+        office_cli_fail('Invalid JSON: ' . $exception->getMessage());
+    }
+    if (!is_array($decoded)) {
+        office_cli_fail('JSON root must be an object');
+    }
+    return $decoded;
+}
+
+function office_cli_output(mixed $value): void
+{
+    echo json_encode(
+        $value,
+        JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
+    ) . PHP_EOL;
+}
+
+function office_cli_status(PDO $pdo): array
+{
+    $counts = [];
+    foreach ([
+        'draft_documents' => "SELECT COUNT(*) FROM office_documents WHERE document_status = 'draft'",
+        'final_documents' => "SELECT COUNT(*) FROM office_documents WHERE document_status = 'final'",
+        'open_invoices' => "SELECT COUNT(*) FROM office_documents d WHERE d.document_type='invoice' AND d.document_status='final' AND d.gross_total > COALESCE((SELECT SUM(a.allocated_amount) FROM office_payment_allocations a WHERE a.document_id=d.id),0)",
+        'pending_reminders' => "SELECT COUNT(*) FROM office_reminders WHERE reminder_status IN ('pending','pending_approval')",
+        'pending_print_jobs' => "SELECT COUNT(*) FROM office_print_jobs WHERE print_status IN ('pending','retry')",
+        'pending_outbox' => "SELECT COUNT(*) FROM office_outbox WHERE event_status = 'pending'",
+        'failed_outbox' => "SELECT COUNT(*) FROM office_outbox WHERE event_status = 'failed'",
+        'shipments_without_labels' => "SELECT COUNT(*) FROM office_shipments WHERE shipment_status='draft' AND label_path IS NULL",
+        'prosaldo_exports_open' => "SELECT COUNT(*) FROM office_prosaldo_exports WHERE marked_imported_at IS NULL",
+    ] as $key => $sql) {
+        $counts[$key] = (int) $pdo->query($sql)->fetchColumn();
+    }
+
+    $config = office_business_config();
+    $missing = office_business_missing($config);
+    return [
+        'state' => $missing === [] ? 'configured' : 'configuration_required',
+        'business_config_missing' => $missing,
+        'tax_modes' => [
+            'AT' => office_tax_mode_for_country($config, 'AT'),
+            'DE' => office_tax_mode_for_country($config, 'DE'),
+            'CH' => office_tax_mode_for_country($config, 'CH'),
+        ],
+        'automation' => [
+            'auto_finalize_invoices' => office_bool($config['AUTO_FINALIZE_INVOICES'] ?? 'no'),
+            'auto_finalize_delivery_notes' => office_bool($config['AUTO_FINALIZE_DELIVERY_NOTES'] ?? 'no'),
+            'auto_send_invoices' => office_bool($config['AUTO_SEND_INVOICES'] ?? 'no'),
+            'auto_send_reminders' => office_bool($config['AUTO_SEND_REMINDERS'] ?? 'no'),
+            'auto_print_labels' => office_bool($config['AUTO_PRINT_LABELS'] ?? 'no'),
+        ],
+        'counts' => $counts,
+    ];
+}
+
+$arguments = $_SERVER['argv'];
+array_shift($arguments);
+$command = array_shift($arguments) ?? '';
+$envPath = getenv('OFFICE_ENV_PATH') ?: MSFIXIT_OFFICE_ADMIN_ENV;
+
+try {
+    $pdo = office_database($envPath);
+
+    switch ($command) {
+        case 'status':
+            office_cli_output(office_cli_status($pdo));
+            break;
+
+        case 'document-create':
+            if (count($arguments) < 2) {
+                office_cli_usage();
+            }
+            $id = office_create_document($pdo, strtolower($arguments[0]), office_cli_json_file($arguments[1]));
+            office_cli_output(office_get_document($pdo, $id));
+            break;
+
+        case 'document-finalize':
+            if (count($arguments) < 1) {
+                office_cli_usage();
+            }
+            office_cli_output(office_finalize_document($pdo, $arguments[0]));
+            break;
+
+        case 'document-send':
+            if (count($arguments) < 1) {
+                office_cli_usage();
+            }
+            $document = office_get_document($pdo, $arguments[0]);
+            office_dispatch_document($pdo, (string) $document['id']);
+            office_cli_output(['sent' => true, 'document_number' => $document['document_number']]);
+            break;
+
+        case 'payment-record':
+            if (count($arguments) < 4) {
+                office_cli_usage();
+            }
+            office_cli_output(office_record_payment($pdo, $arguments[0], [
+                'source' => $arguments[1],
+                'external_id' => $arguments[2],
+                'amount' => $arguments[3],
+                'currency' => $arguments[4] ?? 'EUR',
+                'paid_at' => $arguments[5] ?? date('Y-m-d H:i:s'),
+                'reference' => $arguments[6] ?? $arguments[0],
+            ]));
+            break;
+
+        case 'dunning-run':
+            office_cli_output(office_dunning_run($pdo, in_array('--dry-run', $arguments, true)));
+            break;
+
+        case 'reminder-approve':
+            if (count($arguments) < 1) {
+                office_cli_usage();
+            }
+            office_cli_output(office_finalize_reminder($pdo, $arguments[0]));
+            break;
+
+        case 'reminder-send':
+            if (count($arguments) < 1) {
+                office_cli_usage();
+            }
+            office_dispatch_reminder($pdo, $arguments[0]);
+            office_cli_output(['sent' => true, 'reminder_id' => $arguments[0]]);
+            break;
+
+        case 'hold':
+            if (count($arguments) < 2) {
+                office_cli_usage();
+            }
+            $document = office_get_document($pdo, $arguments[0]);
+            $enabled = strtolower($arguments[1]) === 'on';
+            if (!in_array(strtolower($arguments[1]), ['on', 'off'], true)) {
+                office_cli_fail('Hold mode must be on or off');
+            }
+            $statement = $pdo->prepare(
+                'INSERT INTO office_document_holds
+                 (document_id, dunning_blocked, dunning_block_reason, updated_by)
+                 VALUES (?, ?, ?, ?)
+                 ON DUPLICATE KEY UPDATE
+                    dunning_blocked = VALUES(dunning_blocked),
+                    dunning_block_reason = VALUES(dunning_block_reason),
+                    updated_by = VALUES(updated_by)'
+            );
+            $statement->execute([
+                $document['id'],
+                $enabled ? 1 : 0,
+                $enabled ? ($arguments[2] ?? 'Manuell gesperrt') : null,
+                get_current_user(),
+            ]);
+            office_cli_output(['document_number' => $document['document_number'], 'dunning_hold' => $enabled]);
+            break;
+
+        case 'prosaldo-export':
+            if (count($arguments) < 2) {
+                office_cli_usage();
+            }
+            office_cli_output(['export_path' => office_prosaldo_export($pdo, $arguments[0], $arguments[1])]);
+            break;
+
+        case 'prosaldo-list':
+            office_cli_output($pdo->query(
+                'SELECT * FROM office_prosaldo_exports ORDER BY created_at DESC LIMIT 100'
+            )->fetchAll());
+            break;
+
+        case 'prosaldo-mark-imported':
+            if (count($arguments) < 1) {
+                office_cli_usage();
+            }
+            $statement = $pdo->prepare(
+                "UPDATE office_prosaldo_exports
+                 SET export_status='imported', marked_imported_at=CURRENT_TIMESTAMP
+                 WHERE id=?"
+            );
+            $statement->execute([$arguments[0]]);
+            if ($statement->rowCount() < 1) {
+                office_cli_fail('ProSaldo export not found');
+            }
+            office_cli_output(['imported' => true, 'export_id' => $arguments[0]]);
+            break;
+
+        case 'shipment-create':
+            if (count($arguments) < 1) {
+                office_cli_usage();
+            }
+            $id = office_create_shipment($pdo, office_cli_json_file($arguments[0]));
+            $statement = $pdo->prepare('SELECT * FROM office_shipments WHERE id=?');
+            $statement->execute([$id]);
+            office_cli_output($statement->fetch());
+            break;
+
+        case 'label-import':
+            if (count($arguments) < 2) {
+                office_cli_usage();
+            }
+            office_cli_output(office_import_label($pdo, $arguments[0], $arguments[1], $arguments[2] ?? null));
+            break;
+
+        case 'carrier-list':
+            office_cli_output(office_carrier_list($pdo));
+            break;
+
+        case 'print-run':
+            office_cli_output(office_print_run($pdo, (int) ($arguments[0] ?? 20)));
+            break;
+
+        case 'worker-run':
+            office_cli_output(office_worker_run($pdo, (int) ($arguments[0] ?? 25)));
+            break;
+
+        default:
+            office_cli_usage();
+    }
+} catch (Throwable $exception) {
+    office_cli_fail('Office error: ' . $exception->getMessage());
+}
