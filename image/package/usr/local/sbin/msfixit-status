@@ -14,7 +14,7 @@ echo
 for service in nginx mariadb redis-server msfixit-cloudflared; do
     printf '%-34s %s\n' "$service" "$(systemctl is-active "$service" 2>/dev/null || true)"
 done
-for timer in msfixit-office-worker.timer msfixit-office-dunning.timer msfixit-office-print.timer msfixit-compliance-worker.timer; do
+for timer in msfixit-office-worker.timer msfixit-office-dunning.timer msfixit-office-print.timer msfixit-compliance-worker.timer msfixit-also-sync.timer; do
     if systemctl list-unit-files "$timer" --no-legend 2>/dev/null | grep -q .; then
         printf '%-34s %s\n' "$timer" "$(systemctl is-active "$timer" 2>/dev/null || true)"
     fi
@@ -38,7 +38,27 @@ if [ -f /etc/msfixit-shopos/catalog.env ]; then
         echo "Next article:    $next_value"
     fi
     echo "Pending events:  $pending_events"
-    echo "Sales region:    AT, DE, CH"
+
+    if mariadb shopos_catalog -Nse "SELECT 1 FROM supplier_feed_items LIMIT 1" >/dev/null 2>&1; then
+        echo
+        echo "AT pilot / ALSO: initialized"
+        pilot_enabled="$(sed -n 's/^AT_PILOT_ENABLED=//p' /etc/msfixit-shopos/also.env 2>/dev/null | tail -n1)"
+        also_enabled="$(sed -n 's/^ALSO_ENABLED=//p' /etc/msfixit-shopos/also.env 2>/dev/null | tail -n1)"
+        max_products="$(sed -n 's/^AT_PILOT_MAX_APPROVED_PRODUCTS=//p' /etc/msfixit-shopos/also.env 2>/dev/null | tail -n1)"
+        echo "Sales region:    Austria only"
+        echo "Pilot enabled:   ${pilot_enabled:-unknown}"
+        echo "ALSO live sync:  ${also_enabled:-unknown}"
+        echo "Product limit:   ${max_products:-30}"
+        printf '%-28s %s\n' "New feed items:" "$(mariadb shopos_catalog -Nse "SELECT COUNT(*) FROM supplier_feed_items WHERE review_status='new'" 2>/dev/null || echo unknown)"
+        printf '%-28s %s\n' "Items requiring review:" "$(mariadb shopos_catalog -Nse "SELECT COUNT(*) FROM supplier_feed_items WHERE review_status IN ('review','quarantined') OR price_review_required=1" 2>/dev/null || echo unknown)"
+        printf '%-28s %s\n' "WooCommerce drafts:" "$(mariadb shopos_catalog -Nse "SELECT COUNT(*) FROM supplier_feed_items WHERE review_status='draft_created'" 2>/dev/null || echo unknown)"
+        printf '%-28s %s\n' "Released manual orders:" "$(mariadb shopos_catalog -Nse "SELECT COUNT(*) FROM pilot_order_releases WHERE release_status='released'" 2>/dev/null || echo unknown)"
+        last_import="$(mariadb shopos_catalog -Nse "SELECT CONCAT(run_status, ' at ', COALESCE(finished_at, started_at), ', rows=', rows_total) FROM supplier_import_runs ORDER BY started_at DESC LIMIT 1" 2>/dev/null || true)"
+        echo "Last import:     ${last_import:-none}"
+        echo "Detailed ALSO status: sudo msfixit-also status"
+    else
+        echo "Sales region:    Austria pilot (ALSO staging not initialized)"
+    fi
 else
     echo "Article master: not initialized"
 fi
