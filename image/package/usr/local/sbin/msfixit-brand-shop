@@ -6,6 +6,7 @@ readonly wordpress_dir=/srv/www/wordpress
 readonly branding_dir=/usr/share/msfixit-shopos/branding
 readonly generated_branding_dir=/var/lib/msfixit-shopos/branding
 readonly wordpress_assets=/usr/share/msfixit-shopos/wordpress
+readonly config_dir=/etc/msfixit-shopos
 
 if [ "$(id -u)" -ne 0 ]; then
     echo "Run this command with sudo." >&2
@@ -41,6 +42,13 @@ run_wp core is-installed >/dev/null
 /usr/local/sbin/msfixit-office-init
 /usr/local/sbin/msfixit-also-init
 
+install -d -m 0750 "$config_dir"
+if [ ! -f "$config_dir/discovery.env" ]; then
+    install -m 0640 -o root -g www-data \
+        /usr/share/msfixit-shopos/discovery/discovery.env.example \
+        "$config_dir/discovery.env"
+fi
+
 if ! run_wp plugin is-installed woocommerce >/dev/null 2>&1; then
     run_wp plugin install woocommerce >/dev/null
 fi
@@ -51,7 +59,7 @@ if ! run_wp theme is-installed storefront >/dev/null 2>&1; then
 fi
 run_wp theme activate storefront >/dev/null
 
-install -d -m 0755 "$wordpress_dir/wp-content/mu-plugins" "$generated_branding_dir"
+install -d -m 0755 "$wordpress_dir/wp-content/mu-plugins" "$wordpress_dir/wp-content/mu-plugins/assets" "$generated_branding_dir"
 for plugin in \
     msfixit-branding.php \
     msfixit-catalog-bridge.php \
@@ -59,11 +67,16 @@ for plugin in \
     msfixit-office-bridge.php \
     msfixit-compliance.php \
     msfixit-compliance-runtime.php \
-    msfixit-at-pilot.php; do
+    msfixit-at-pilot.php \
+    msfixit-discovery.php \
+    zz-msfixit-discovery-compliance-sync.php \
+    zz-msfixit-discovery-assets.php; do
     install -m 0644 \
         "$wordpress_assets/$plugin" \
         "$wordpress_dir/wp-content/mu-plugins/$plugin"
 done
+install -m 0644 "$wordpress_assets/assets/msfixit-discovery.js" "$wordpress_dir/wp-content/mu-plugins/assets/msfixit-discovery.js"
+install -m 0644 "$wordpress_assets/assets/msfixit-discovery.css" "$wordpress_dir/wp-content/mu-plugins/assets/msfixit-discovery.css"
 
 php "$wordpress_assets/msfixit-render-branding.php" \
     "$branding_dir/msfixit-brand-full.webp" \
@@ -90,7 +103,7 @@ icon_id="$(ensure_media \
     'Ms. FixIT Einhorn')"
 
 unmanaged_page_ids=()
-for slug in startseite reparatur-services kontakt impressum datenschutz agb widerruf-rueckgabe vertrag-widerrufen; do
+for slug in startseite reparatur-services kontakt impressum datenschutz agb widerruf-rueckgabe vertrag-widerrufen kabel-zubehoer; do
     page_id="$(run_wp post list \
         --post_type=page \
         --name="$slug" \
@@ -116,6 +129,7 @@ export MSFIXIT_HERO_ID="$hero_id"
 export MSFIXIT_ICON_ID="$icon_id"
 run_wp eval-file "$wordpress_assets/msfixit-provision.php"
 run_wp eval-file "$wordpress_assets/msfixit-commerce-provision.php"
+run_wp eval-file "$wordpress_assets/msfixit-discovery-provision.php"
 
 run_wp option delete msfixit_shopos_protected_page_ids >/dev/null 2>&1 || true
 for page_id in "${unmanaged_page_ids[@]}"; do
@@ -125,4 +139,4 @@ done
 run_wp cache flush >/dev/null 2>&1 || true
 chown -R www-data:www-data "$wordpress_dir/wp-content"
 
-echo "Ms. FixIT WooCommerce branding, AT pilot, ALSO staging, article master, Office/Fulfillment and compliance core applied successfully."
+echo "Ms. FixIT WooCommerce branding, AT pilot, cable discovery, ALSO staging, article master, Office/Fulfillment and compliance core applied successfully."

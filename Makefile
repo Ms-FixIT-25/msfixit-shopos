@@ -42,6 +42,7 @@ check:
 	bash -n image/package/usr/local/sbin/msfixit-catalog-init
 	bash -n image/package/usr/local/sbin/msfixit-office-init
 	bash -n image/package/usr/local/sbin/msfixit-also-init
+	bash -n image/package/usr/local/sbin/msfixit-discovery
 	bash -n image/package/usr/local/sbin/msfixit-office-worker
 	bash -n image/package/usr/local/sbin/msfixit-office-dunning
 	bash -n image/package/usr/local/sbin/msfixit-office-print
@@ -63,6 +64,10 @@ check:
 	@test -s image/package/usr/share/msfixit-shopos/compliance/renderer-guards.sql
 	@test -s image/package/usr/share/msfixit-shopos/also/schema.sql
 	@test -s image/package/usr/share/msfixit-shopos/also/also.env.example
+	@test -s image/package/usr/share/msfixit-shopos/discovery/discovery.env.example
+	@test -s image/package/usr/share/msfixit-shopos/discovery/discovery-lib.php
+	@test -s image/package/usr/share/msfixit-shopos/wordpress/assets/msfixit-discovery.js
+	@test -s image/package/usr/share/msfixit-shopos/wordpress/assets/msfixit-discovery.css
 	@grep -q 'catalog_products' image/package/usr/share/msfixit-shopos/catalog/schema.sql
 	@grep -q 'no_reassign' image/package/usr/share/msfixit-shopos/catalog/guards.sql
 	@grep -q 'office_documents' image/package/usr/share/msfixit-shopos/office/schema.sql
@@ -77,12 +82,17 @@ check:
 	@grep -q 'advanced DACH tax invoice renderer' image/package/usr/share/msfixit-shopos/compliance/renderer-guards.sql
 	@grep -q 'supplier_import_runs' image/package/usr/share/msfixit-shopos/also/schema.sql
 	@grep -q 'AT_PILOT_AUTO_PUBLISH=no' image/package/usr/share/msfixit-shopos/also/also.env.example
+	@grep -q 'GOOGLE_MERCHANT_FEED_ENABLED=no' image/package/usr/share/msfixit-shopos/discovery/discovery.env.example
+	@grep -q 'msfixit_discovery_publication_audit' image/package/usr/share/msfixit-shopos/discovery/discovery-lib.php
 	@if command -v php >/dev/null 2>&1; then \
+		php -l tests/test-discovery.php; \
+		php tests/test-discovery.php; \
 		php -l image/package/usr/local/sbin/msfixit-catalog; \
 		php -l image/package/usr/local/sbin/msfixit-office; \
 		php -l image/package/usr/local/sbin/msfixit-compliance; \
 		php -l image/package/usr/local/sbin/msfixit-tax-decision; \
 		php -l image/package/usr/local/sbin/msfixit-also; \
+		php -l image/package/usr/share/msfixit-shopos/discovery/discovery-lib.php; \
 		php -l image/package/usr/share/msfixit-shopos/office/office-lib.php; \
 		php -l image/package/usr/share/msfixit-shopos/wordpress/msfixit-branding.php; \
 		php -l image/package/usr/share/msfixit-shopos/wordpress/msfixit-catalog-bridge.php; \
@@ -93,6 +103,9 @@ check:
 		php -l image/package/usr/share/msfixit-shopos/wordpress/msfixit-compliance-runtime.php; \
 		php -l image/package/usr/share/msfixit-shopos/wordpress/msfixit-at-pilot.php; \
 		php -l image/package/usr/share/msfixit-shopos/wordpress/msfixit-also-draft.php; \
+		php -l image/package/usr/share/msfixit-shopos/wordpress/msfixit-discovery.php; \
+		php -l image/package/usr/share/msfixit-shopos/wordpress/msfixit-discovery-provision.php; \
+		php -l image/package/usr/share/msfixit-shopos/wordpress/msfixit-discovery-cli.php; \
 		php -l image/package/usr/share/msfixit-shopos/wordpress/msfixit-provision.php; \
 		php -l image/package/usr/share/msfixit-shopos/wordpress/msfixit-render-branding.php; \
 	fi

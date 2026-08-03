@@ -43,7 +43,7 @@ concurrency:
 
 jobs:
   validate:
-    name: Validate AT pilot, ALSO, Office and compliance cores
+    name: Validate AT pilot, discovery, ALSO, Office and compliance cores
     runs-on: ubuntu-24.04
     services:
       mariadb:
@@ -62,14 +62,14 @@ jobs:
       - name: Check out ShopOS
         uses: actions/checkout@v7
 
-      - name: Check source syntax
-        run: make check
-
-      - name: Install database, PDF, SFTP and ZIP test clients
+      - name: Install database, PDF, SFTP and PHP test clients
         run: |
           sudo rm -f /etc/apt/sources.list.d/azure-cli.list
           sudo apt-get -o Acquire::Retries=3 update
           sudo apt-get -o Acquire::Retries=3 install --yes mariadb-client php-mysql php-mbstring php-zip php-tcpdf jq unzip openssh-client sshpass
+
+      - name: Check source syntax and cable discovery logic
+        run: make check
 
       - name: Test article master
         env:
@@ -177,9 +177,11 @@ jobs:
           - compressed Raspberry Pi 4B ShopOS image
           - portable SHA-256 checksum
 
-          This build defaults to a small Austria-only pop-up pilot. It includes guarded ALSO Austria SFTP catalogue staging, manual product and supplier-order approval, a 30-product pilot limit, permanent Ms. FixIT article numbers, immutable invoicing, ProSaldo handoffs, fulfillment and fail-closed Austrian/DACH compliance controls.
+          This build defaults to a small Austria-only cable pop-up pilot. It includes guarded ALSO Austria catalogue staging, permanent Ms. FixIT article numbers, accessible synonym search, filters for cable connectors and technical properties, indexable cable categories, product publication quality gates, enriched product structured data and a disabled-by-default Austrian Google Merchant feed.
 
-          ALSO XML live queries, order submission and dropshipping remain disabled until the reseller account receives its official account-specific guideline, endpoint, credentials and test approval. Supplier content is not scraped, products are never auto-published, and supplier orders are never sent automatically in pilot mode.
+          Filter combinations and internal search pages are kept out of the search index while clean category and product URLs remain crawlable. Search Console verification does not install analytics. The Merchant feed remains fail-closed until real Austrian shipping cost and delivery values are configured and tested.
+
+          ALSO XML live queries, order submission and dropshipping remain disabled until the reseller account receives its official account-specific guideline, endpoint, credentials and test approval. Products are never auto-published and supplier orders are never sent automatically in pilot mode.
           EOF
 
           if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
