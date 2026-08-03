@@ -57,7 +57,7 @@ if ($productId < 1) {
 
 $meta = [
     '_msfixit_pilot_mode' => 'at_popup',
-    '_msfixit_pilot_status' => 'review_required',
+    '_msfixit_pilot_status' => 'approved',
     '_msfixit_compliance_status' => 'pending',
     '_msfixit_supplier_code' => sanitize_text_field((string) ($payload['supplier_code'] ?? 'also-at')),
     '_msfixit_supplier_sku' => sanitize_text_field((string) ($payload['supplier_sku'] ?? '')),
