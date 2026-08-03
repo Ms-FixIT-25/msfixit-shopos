@@ -39,8 +39,9 @@ run_wp core is-installed >/dev/null
 # numbers and external supplier, barcode, POS, marketplace and ERP mappings.
 /usr/local/sbin/msfixit-catalog-init
 
-# Storefront provides a stable WooCommerce-compatible base. ShopOS branding and
-# the article-master bridge are MU plugins so both survive normal theme updates.
+# Storefront provides a stable WooCommerce-compatible base. ShopOS branding,
+# DACH restrictions and the article bridge are MU plugins so they survive
+# normal theme and plugin updates.
 if ! run_wp plugin is-installed woocommerce >/dev/null 2>&1; then
     run_wp plugin install woocommerce >/dev/null
 fi
@@ -58,6 +59,9 @@ install -m 0644 \
 install -m 0644 \
     "$wordpress_assets/msfixit-catalog-bridge.php" \
     "$wordpress_dir/wp-content/mu-plugins/msfixit-catalog-bridge.php"
+install -m 0644 \
+    "$wordpress_assets/msfixit-commerce-region.php" \
+    "$wordpress_dir/wp-content/mu-plugins/msfixit-commerce-region.php"
 
 php "$wordpress_assets/msfixit-render-branding.php" \
     "$branding_dir/msfixit-brand-full.webp" \
