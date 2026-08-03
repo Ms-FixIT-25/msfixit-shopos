@@ -31,8 +31,8 @@ The appliance deliberately starts in review mode:
 - automatic e-mail dispatch is off;
 - automatic printing is off;
 - reminder fees and interest are zero;
-- friendly reminders may be prepared automatically;
-- formal reminder levels require manual approval;
+- the friendly payment reminder is enabled;
+- formal reminder levels are disabled until deliberately reviewed and activated;
 - every carrier account is disabled.
 
 The settings live in `/etc/msfixit-shopos/business.env`. Secrets must never be committed to Git.
@@ -54,8 +54,10 @@ Each document starts as a draft. Finalization performs the following steps:
 3. allocate the next protected document number;
 4. render the PDF with TCPDF;
 5. calculate and store the PDF SHA-256 hash;
-6. mark the database snapshot final;
-7. create optional e-mail and print jobs.
+6. verify that positions, net amount, tax and gross amount match;
+7. reject tax-exempt profiles that contain charged tax;
+8. mark the database snapshot final;
+9. create optional e-mail and print jobs.
 
 Final document numbers use independent yearly sequences, for example:
 
@@ -67,9 +69,9 @@ MA-2026-000001   reminder
 VS-2026-000001   shipment
 ```
 
-A database trigger blocks changes to the commercial content of a final document. Final documents and their lines cannot be deleted. A correction therefore becomes a new credit note or correction document instead of rewriting history.
+A database trigger blocks changes to the commercial content and status of a final document. Final documents cannot be unlocked, deleted or extended with new lines. A correction therefore becomes a new credit note or correction document instead of rewriting history.
 
-## WooCommerce events
+## WooCommerce events and privileges
 
 The WordPress MU plugin queues these events:
 
@@ -92,6 +94,13 @@ The stored order snapshot includes:
 
 Repeated WooCommerce hooks cannot create duplicate invoices because source system, source document ID and document type are unique.
 
+The WordPress database user has only:
+
+- read access to Office status data;
+- insert access to `office_outbox`.
+
+It cannot create or modify invoices, payments, allocations or reminders. Those operations belong to the protected Office worker and administration users.
+
 ## Payments and open items
 
 Payments are stored separately and allocated to invoices. The system supports:
@@ -102,6 +111,8 @@ Payments are stored separately and allocated to invoices. The system supports:
 - overpayments without silently changing the invoice;
 - remaining open balance calculation;
 - payment-source audit data.
+
+Payments and allocations become immutable after recording. Allocations cannot exceed the payment amount and payment/document currencies must match.
 
 Example:
 
@@ -122,15 +133,15 @@ A future bank or payment-provider adapter writes into the same payment model. Th
 
 A daily systemd timer checks final overdue invoices with a remaining balance.
 
-Default levels are created separately for consumer and business customers in AT, DE and CH:
+Rules are stored separately for consumer and business customers in AT, DE and CH:
 
-| Level | Default time | Default action |
+| Level | Default time | Fresh-installation state |
 |---|---:|---|
-| 0 | 3 days after due date | friendly payment reminder |
-| 1 | 10 days after due date | approval required |
-| 2 | 17 days after due date | approval required |
+| 0 | 3 days after due date | enabled, friendly payment reminder |
+| 1 | 10 days after due date | disabled until reviewed |
+| 2 | 17 days after due date | disabled until reviewed |
 
-All default fees and interest rates are zero. Legal and contractual settings must be reviewed before enabling amounts.
+All default fees and interest rates are zero. Before activating a formal level, its country, customer type, timing, wording, fees, interest and approval requirement must be reviewed. A later ShopOS initialization does not overwrite a rule that was deliberately activated or changed.
 
 A document can be placed on a dunning hold, for example during a complaint or payment investigation:
 
@@ -145,7 +156,7 @@ Preview the next run:
 sudo msfixit-office dunning-run --dry-run
 ```
 
-Approve and render a formal reminder:
+Approve and render a prepared reminder:
 
 ```bash
 sudo msfixit-office reminder-approve REMINDER_UUID
@@ -176,6 +187,8 @@ Create a monthly handoff:
 sudo msfixit-office prosaldo-export 2026-08-01 2026-08-31
 ```
 
+The same period may be exported again, for example after a late credit note. Every handoff remains a separate timestamped and hashed package.
+
 After PDFs have been uploaded, reviewed and booked in ProSaldo, mark the ShopOS handoff complete:
 
 ```bash
@@ -184,6 +197,18 @@ sudo msfixit-office prosaldo-mark-imported EXPORT_UUID
 ```
 
 When ProSaldo adds a supported API, an adapter can replace the manual upload step without changing invoice numbers or the document database.
+
+## Structured electronic invoices
+
+The current renderer creates human-readable PDF invoices. A normal PDF is not automatically a structured EN-16931 electronic invoice.
+
+Before a future German establishment, German domestic B2B obligation or EU cross-border structured-invoice requirement applies, ShopOS needs an additional structured adapter such as:
+
+- XRechnung/UBL;
+- ZUGFeRD with embedded structured data;
+- another EN-16931-compatible format required by the recipient or accounting system.
+
+That adapter must use the same immutable document snapshot and archive its XML plus hash next to the PDF. It must not rebuild historical invoice content from later-changing WooCommerce data.
 
 ## Delivery notes
 
