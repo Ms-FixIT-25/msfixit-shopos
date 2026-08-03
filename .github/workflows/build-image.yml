@@ -90,6 +90,11 @@ jobs:
           MYSQL_PWD: shopos-ci-root
         run: sudo env MYSQL_PWD="$MYSQL_PWD" bash tests/test-office-guards.sh
 
+      - name: Test least-privilege WordPress Office access
+        env:
+          MYSQL_PWD: shopos-ci-root
+        run: sudo env MYSQL_PWD="$MYSQL_PWD" bash tests/test-office-privileges.sh
+
   build:
     name: Build ShopOS image
     needs: validate
