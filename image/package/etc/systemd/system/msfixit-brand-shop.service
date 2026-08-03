@@ -1,0 +1,17 @@
+[Unit]
+Description=Ms. FixIT branded WooCommerce setup
+Wants=network-online.target
+After=network-online.target msfixit-firstboot.service
+ConditionPathExists=/data/.shopos-initialized
+ConditionPathExists=!/data/.shopos-branded
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/msfixit-brand-shop
+ExecStartPost=/usr/bin/touch /data/.shopos-branded
+Restart=on-failure
+RestartSec=30s
+TimeoutStartSec=20min
+
+[Install]
+WantedBy=multi-user.target
