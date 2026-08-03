@@ -17,6 +17,14 @@ on:
       - .github/workflows/build-image.yml
   workflow_dispatch:
     inputs:
+      device:
+        description: Raspberry Pi target
+        required: true
+        default: rpi4
+        type: choice
+        options:
+          - rpi4
+          - rpi5
       storage:
         description: Storage target to build
         required: true
@@ -46,7 +54,7 @@ jobs:
         run: make check
 
   build:
-    name: Build Raspberry Pi 5 image
+    name: Build ShopOS image
     needs: validate
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 180
@@ -55,17 +63,26 @@ jobs:
       - name: Check out ShopOS
         uses: actions/checkout@v4
 
-      - name: Select storage target
+      - name: Select target
         shell: bash
         run: |
+          device='${{ github.event.inputs.device }}'
           storage='${{ github.event.inputs.storage }}'
+          if [ -z "$device" ]; then
+            device=rpi4
+          fi
           if [ -z "$storage" ]; then
             storage=usb
           fi
+          if [ "$device" = rpi4 ] && [ "$storage" = nvme ]; then
+            echo "Raspberry Pi 4B has no native NVMe target; select USB for an NVMe USB enclosure." >&2
+            exit 2
+          fi
+          echo "DEVICE=$device" >> "$GITHUB_ENV"
           echo "STORAGE=$storage" >> "$GITHUB_ENV"
 
       - name: Build flash image
-        run: bash scripts/build-image.sh "$STORAGE"
+        run: bash scripts/build-image.sh "$DEVICE" "$STORAGE"
 
       - name: Show image checksums
         run: cat artifacts/*.sha256
@@ -73,14 +90,14 @@ jobs:
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
-          name: msfixit-shopos-rpi5-${{ env.STORAGE }}
+          name: msfixit-shopos-${{ env.DEVICE }}-${{ env.STORAGE }}
           path: artifacts/*
           if-no-files-found: error
           retention-days: 14
           compression-level: 0
 
-      - name: Publish GitHub Release
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && env.STORAGE == 'usb'
+      - name: Publish Raspberry Pi 4B GitHub Release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && env.DEVICE == 'rpi4' && env.STORAGE == 'usb'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -91,13 +108,13 @@ jobs:
           notes_file="$(mktemp)"
 
           cat > "$notes_file" <<EOF
-          Flash-ready Raspberry Pi 5 USB-SSD image for Ms. FixIT ShopOS.
+          Flash-ready Raspberry Pi 4 Model B USB-SSD image for Ms. FixIT ShopOS.
 
           Included downloads:
-          - compressed ShopOS image
+          - compressed Raspberry Pi 4B ShopOS image
           - portable SHA-256 checksum
 
-          The image was built on GitHub's native ARM64 runner. Physical first-boot validation on the target Raspberry Pi is still required before connecting the production domain.
+          Do not flash the earlier Raspberry Pi 5 image onto a Raspberry Pi 4B. USB boot on a Pi 4B requires a sufficiently recent EEPROM bootloader. Physical first-boot validation on the target Raspberry Pi is still required before connecting the production domain.
           EOF
 
           if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then

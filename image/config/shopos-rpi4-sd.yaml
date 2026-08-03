@@ -2,8 +2,8 @@ include:
   file: common.yaml
 
 device:
-  layer: rpi5
+  layer: rpi4
   storage_type: sd
 
 image:
-  name: msfixit-shopos-rpi5-sd
+  name: msfixit-shopos-rpi4-sd

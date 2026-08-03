@@ -5,6 +5,7 @@ include:
 # storage profile. rpi-image-gen v2.6.0 accepts this in layer metadata; the
 # build script applies the matching one-line IDP schema compatibility patch.
 device:
+  layer: rpi5
   storage_type: usb
 
 image:

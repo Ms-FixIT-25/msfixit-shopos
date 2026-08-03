@@ -2,19 +2,39 @@
 set -Eeuo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-storage="${1:-usb}"
+device="${1:-rpi4}"
+storage="${2:-usb}"
 rig_version="${RPI_IMAGE_GEN_VERSION:-v2.6.0}"
 rig_dir="${RPI_IMAGE_GEN_DIR:-${root}/.cache/rpi-image-gen-${rig_version}}"
 artifacts_dir="${root}/artifacts"
-image_name="msfixit-shopos-rpi5-${storage}"
+image_name="msfixit-shopos-${device}-${storage}"
+config_name="shopos-${device}-${storage}.yaml"
+
+case "$device" in
+    rpi4|rpi5) ;;
+    *)
+        echo "Usage: $0 [rpi4|rpi5] [usb|sd|nvme]" >&2
+        exit 2
+        ;;
+esac
 
 case "$storage" in
     usb|sd|nvme) ;;
     *)
-        echo "Usage: $0 [usb|sd|nvme]" >&2
+        echo "Usage: $0 [rpi4|rpi5] [usb|sd|nvme]" >&2
         exit 2
         ;;
 esac
+
+if [ "$device" = "rpi4" ] && [ "$storage" = "nvme" ]; then
+    echo "Raspberry Pi 4B has no native NVMe target; use usb for an NVMe USB enclosure." >&2
+    exit 2
+fi
+
+if [ ! -f "${root}/image/config/${config_name}" ]; then
+    echo "Missing image configuration: image/config/${config_name}" >&2
+    exit 1
+fi
 
 if [ "$(uname -m)" != "aarch64" ]; then
     echo "ShopOS images must be built on a native ARM64 host." >&2
@@ -39,7 +59,7 @@ fi
 # but its IDP v2 schema accidentally omits usb. Patch the pinned builder so a
 # USB-attached SSD/NVMe image retains correct metadata instead of pretending
 # to be an SD-card image.
-if [ "$rig_version" = "v2.6.0" ]; then
+if [ "$rig_version" = "v2.6.0" ] && [ "$storage" = "usb" ]; then
     usb_schema_patch="${root}/patches/rpi-image-gen-v2.6.0-idp-usb.patch"
     git -C "$rig_dir" apply --check "$usb_schema_patch"
     git -C "$rig_dir" apply "$usb_schema_patch"
@@ -58,11 +78,11 @@ fi
     cd "$rig_dir"
     ./rpi-image-gen build \
         -S "${root}/image" \
-        -c "shopos-rpi5-${storage}.yaml"
+        -c "$config_name"
 )
 
 # Publish only the selected compressed flash image produced in a deploy
-# directory. The protected build tree also contains a 10 GiB raw image,
+# directory. The protected build tree also contains a large raw image,
 # chroots and sparse images that do not belong in the download artifact.
 deploy_dir="$(
     find "$rig_dir/work" -maxdepth 1 -type d -name 'deploy-*' -printf '%T@ %p\n' \
@@ -98,5 +118,7 @@ cp "$image_file" "$artifacts_dir/$image_basename"
     sha256sum "$image_basename" > "$image_basename.sha256"
 )
 
+printf 'Device:      %s\n' "$device"
+printf 'Storage:     %s\n' "$storage"
 printf 'Flash image: %s\n' "$artifacts_dir/$image_basename"
 printf 'Checksum:    %s\n' "$artifacts_dir/$image_basename.sha256"

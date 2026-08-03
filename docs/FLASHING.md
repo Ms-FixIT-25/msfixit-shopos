@@ -1,22 +1,48 @@
 # Flashing Ms. FixIT ShopOS
 
-## Supported target
+## Supported targets
 
-The initial image targets **Raspberry Pi 5 (ARM64)**. Separate build configurations exist for:
+ShopOS has separate ARM64 images for each Raspberry Pi generation. Never substitute one model's image for another.
 
-- USB SSD (`usb`, default build)
-- microSD (`sd`)
-- NVMe (`nvme`)
+Raspberry Pi 4 Model B:
 
-Use wired Ethernet for the first boot.
+- USB SSD or NVMe in a USB enclosure: `msfixit-shopos-rpi4-usb`
+- microSD: `msfixit-shopos-rpi4-sd`
 
-## 1. Download the image
+Raspberry Pi 5:
 
-Open the repository's **Actions** tab, select **Build ShopOS image**, open the successful run and download the `msfixit-shopos-rpi5-*` artifact.
+- USB SSD: `msfixit-shopos-rpi5-usb`
+- microSD: `msfixit-shopos-rpi5-sd`
+- native PCIe NVMe: `msfixit-shopos-rpi5-nvme`
 
-The artifact contains:
+The current GitHub Release defaults to the Raspberry Pi 4B USB-SSD image. Use wired Ethernet for the first boot.
 
-- the compressed flash image (`.img.xz`, `.img.zst`, `.img.gz` or `.img`)
+## Raspberry Pi 4B USB-boot requirement
+
+A Raspberry Pi 4B boots through its EEPROM bootloader. USB mass-storage boot must be supported and enabled in its boot order. Early Pi 4 bootloaders may need an update.
+
+When unsure, first boot Raspberry Pi OS from microSD and run:
+
+```bash
+sudo rpi-eeprom-update
+sudo raspi-config
+```
+
+In `raspi-config`, open **Advanced Options > Boot Order** and select an option that includes USB boot. An NVMe drive connected through a USB enclosure is treated as USB storage, not native NVMe.
+
+## 1. Download the correct image
+
+Open the repository's **Releases** page and choose the asset whose filename contains your exact Raspberry Pi model and storage type.
+
+For this installation use:
+
+```text
+msfixit-shopos-rpi4-usb.img.xz
+```
+
+The release contains:
+
+- the compressed flash image
 - a matching SHA-256 checksum file
 
 Verify the checksum before flashing.
@@ -24,13 +50,13 @@ Verify the checksum before flashing.
 Linux:
 
 ```bash
-sha256sum -c msfixit-shopos-*.sha256
+sha256sum -c msfixit-shopos-rpi4-usb.img.xz.sha256
 ```
 
 Windows PowerShell:
 
 ```powershell
-Get-FileHash .\msfixit-shopos-*.img.xz -Algorithm SHA256
+Get-FileHash .\msfixit-shopos-rpi4-usb.img.xz -Algorithm SHA256
 ```
 
 Compare the displayed hash with the value in the `.sha256` file.
@@ -41,10 +67,10 @@ Use Raspberry Pi Imager or balenaEtcher.
 
 In Raspberry Pi Imager:
 
-1. Select the Raspberry Pi 5.
+1. Select **Raspberry Pi 4** as the device.
 2. Choose **Use custom** as the operating system.
-3. Select the ShopOS image.
-4. Select the correct SSD, SD card or NVMe device.
+3. Select the matching `msfixit-shopos-rpi4-*` image.
+4. Select the correct USB SSD or microSD card.
 5. Flash and verify it.
 
 Do not use Raspberry Pi Imager's user-account customization. ShopOS creates and manages its own `shopadmin` account.
@@ -75,7 +101,7 @@ If passwords are left empty, ShopOS generates random passwords and writes them t
 
 1. Connect Ethernet.
 2. Insert or connect the flashed storage device.
-3. Start the Raspberry Pi.
+3. Start the Raspberry Pi 4B.
 4. Allow the first-boot provisioning to finish.
 
 The first boot needs internet access because WP-CLI downloads the selected WordPress release, WooCommerce and the Redis cache plugin. Provisioning can take several minutes and automatically retries after a temporary failure.

@@ -1,5 +1,4 @@
 device:
-  layer: rpi5
   hostname: msfixit-shopos
   user1: shopadmin
   user1sudo: passwd
