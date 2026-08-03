@@ -43,7 +43,7 @@ concurrency:
 
 jobs:
   validate:
-    name: Validate article, Office and fulfillment cores
+    name: Validate article, Office, fulfillment and DACH compliance cores
     runs-on: ubuntu-24.04
     services:
       mariadb:
@@ -95,6 +95,11 @@ jobs:
         env:
           MYSQL_PWD: shopos-ci-root
         run: sudo env MYSQL_PWD="$MYSQL_PWD" bash tests/test-office-privileges.sh
+
+      - name: Test Austrian and DACH legal compliance kernel
+        env:
+          MYSQL_PWD: shopos-ci-root
+        run: sudo env MYSQL_PWD="$MYSQL_PWD" GITHUB_WORKSPACE="$GITHUB_WORKSPACE" bash tests/test-compliance.sh
 
   build:
     name: Build ShopOS image
@@ -152,9 +157,9 @@ jobs:
           - compressed Raspberry Pi 4B ShopOS image
           - portable SHA-256 checksum
 
-          This build includes DACH WooCommerce, the permanent Ms. FixIT article master, immutable invoice and delivery-note documents, payment allocation, guarded reminders, ProSaldo handoff packages, shipment/label storage and CUPS print queues.
+          This build includes DACH WooCommerce, the permanent Ms. FixIT article master, immutable invoicing, guarded reminders, ProSaldo handoffs, fulfillment, print queues and a fail-closed Austrian/DACH compliance kernel for market, legal-text, tax, product-safety, EPR, withdrawal, threshold and retention decisions.
 
-          Production tax profiles, legal wording, payment providers, shipping prices, carrier contracts/API credentials, Swiss customs workflow and real printers still require deliberate configuration and physical testing. Carrier APIs remain disabled until contract-specific onboarding is completed.
+          Technical controls do not replace final review of legal texts, tax treatment, registrations or individual cases by qualified Austrian/DACH legal and tax professionals. Production markets remain closed until the corresponding approvals and evidence are recorded.
           EOF
 
           if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
