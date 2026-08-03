@@ -34,32 +34,29 @@ In `raspi-config`, open **Advanced Options > Boot Order** and select an option t
 
 Open the repository's **Releases** page and choose the asset whose filename contains your exact Raspberry Pi model and storage type.
 
-For this installation use:
+For this installation use the compressed image beginning with:
 
 ```text
-msfixit-shopos-rpi4-usb.img.xz
+msfixit-shopos-rpi4-usb.img
 ```
 
-The release contains:
-
-- the compressed flash image
-- a matching SHA-256 checksum file
+Depending on the current builder, the compression suffix may be `.zst`, `.xz` or `.gz`. The release also contains the matching `.sha256` file.
 
 Verify the checksum before flashing.
 
 Linux:
 
 ```bash
-sha256sum -c msfixit-shopos-rpi4-usb.img.xz.sha256
+sha256sum -c msfixit-shopos-rpi4-usb.img.*.sha256
 ```
 
 Windows PowerShell:
 
 ```powershell
-Get-FileHash .\msfixit-shopos-rpi4-usb.img.xz -Algorithm SHA256
+Get-FileHash .\msfixit-shopos-rpi4-usb.img.zst -Algorithm SHA256
 ```
 
-Compare the displayed hash with the value in the `.sha256` file.
+Use the actual downloaded suffix and compare the displayed hash with the value in the `.sha256` file.
 
 ## 2. Flash the storage device
 
@@ -97,14 +94,28 @@ Never commit this file or its values to GitHub.
 
 If passwords are left empty, ShopOS generates random passwords and writes them to `SHOPOS-CREDENTIALS.txt` on the boot partition after successful provisioning.
 
-## 4. First boot
+## 4. First boot and automatic shop setup
 
 1. Connect Ethernet.
 2. Insert or connect the flashed storage device.
 3. Start the Raspberry Pi 4B.
-4. Allow the first-boot provisioning to finish.
+4. Allow both provisioning stages to finish.
 
-The first boot needs internet access because WP-CLI downloads the selected WordPress release, WooCommerce and the Redis cache plugin. Provisioning can take several minutes and automatically retries after a temporary failure.
+The first stage configures MariaDB, PHP-FPM, Redis, Nginx, WordPress, WooCommerce, credentials and optional Cloudflare Tunnel access. The second stage runs `msfixit-brand-shop.service` and prepares the visible shop.
+
+The branded shop stage automatically:
+
+- activates the WooCommerce-compatible Storefront theme
+- imports the embedded Ms. FixIT artwork
+- generates and assigns the header logo and site icon
+- applies the navy, teal and pink color scheme
+- creates the homepage, repair/services and contact pages
+- creates the WooCommerce pages and main navigation
+- sets Austria, euro, metric units and Europe/Vienna defaults
+- leaves legal pages as unpublished drafts
+- keeps search-engine indexing disabled
+
+The first boot needs internet access because WP-CLI downloads the selected WordPress release, WooCommerce, Storefront and the Redis cache plugin. Both stages may take several minutes and retry after a temporary failure. Do not disconnect power while the activity LED and network traffic indicate ongoing setup.
 
 Without a configured public URL, open the Raspberry Pi's LAN address in a browser:
 
@@ -118,13 +129,34 @@ SSH is allowed only from private LAN address ranges:
 ssh shopadmin@RASPBERRY-PI-IP
 ```
 
-## 5. Administration commands
+## 5. What still requires a real decision
+
+ShopOS intentionally does not guess legally or commercially sensitive settings. Before public launch, complete and test:
+
+- payment provider and test payment
+- shipping zones, prices and returns
+- tax display for the actual business situation
+- Impressum, Datenschutz, AGB and Widerruf/Rückgabe
+- external backup destination and restore test
+- final domain, HTTPS and indexing approval
+
+The WordPress dashboard displays this as a go-live checklist.
+
+## 6. Administration commands
 
 Display status:
 
 ```bash
 sudo msfixit-status
 ```
+
+Reapply missing ShopOS branding and managed pages:
+
+```bash
+sudo msfixit-brand-shop
+```
+
+This command is idempotent and protects pages that were not created and managed by ShopOS.
 
 Apply a changed `shopos.env` without reflashing:
 
@@ -146,7 +178,7 @@ sudo msfixit-backup
 
 Local backups are stored below `/data/backups` and retained for 14 days. A separate external backup target is still required before production use.
 
-## 6. Credentials cleanup
+## 7. Credentials cleanup
 
 After saving generated credentials in a password manager, delete `SHOPOS-CREDENTIALS.txt` from the boot partition:
 

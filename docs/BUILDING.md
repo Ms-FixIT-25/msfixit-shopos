@@ -12,6 +12,8 @@ Use a native ARM64 Debian Bookworm/Trixie or Ubuntu build host. The build script
 make check
 ```
 
+The check target validates the shell scripts and, when PHP is installed on the build host, also performs PHP syntax checks for the branding MU plugin, WordPress provisioner and image renderer.
+
 ## Build only the appliance package
 
 ```bash
@@ -26,6 +28,8 @@ image/packages/msfixit-shopos_arm64.deb.sha256
 ```
 
 The package bundles pinned and SHA-256-verified WP-CLI and ARM64 Cloudflare Tunnel binaries. Their exact versions, source URLs and checksums are written into `/usr/share/msfixit-shopos/build-info.txt` inside the image.
+
+The optimized Ms. FixIT WebP artwork is stored as compact repository-safe base64 source text. During package construction it is decoded, checked against its fixed SHA-256 value, and the base64 source is removed from the final package. PHP GD generates the header and site-icon variants during branded shop provisioning.
 
 ## Build a Raspberry Pi 4B image
 
@@ -70,12 +74,12 @@ A Pi 4B has no native NVMe target. An NVMe drive connected through a USB enclosu
 ## Optional variables
 
 ```bash
-SHOPOS_VERSION=0.1.1 \
+SHOPOS_VERSION=0.2.0 \
 RPI_IMAGE_GEN_VERSION=v2.6.0 \
 make image-rpi4-usb
 ```
 
-Cloudflared and WP-CLI are pinned in `scripts/build-package.sh`; changing them also requires updating their trusted SHA-256 values.
+Cloudflared and WP-CLI are pinned in `scripts/build-package.sh`; changing them also requires updating their trusted SHA-256 values. Replacing the embedded brand artwork likewise requires updating `MSFIXIT_BRAND_SHA256` after inspecting the new optimized asset.
 
 ## GitHub Actions
 
