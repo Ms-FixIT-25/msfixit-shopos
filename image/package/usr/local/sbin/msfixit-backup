@@ -30,6 +30,13 @@ if [ -d /data/office ]; then
     tar -C /data -czf "${workdir}/office-data.tar.gz" office
 fi
 
+# Import history and supplier payloads are already preserved in shopos_catalog.
+# Keep only compact human review reports in the normal backup, not every raw
+# wholesaler feed archive.
+if [ -d /data/suppliers/also/reports ]; then
+    tar -C /data/suppliers/also -czf "${workdir}/also-reports.tar.gz" reports
+fi
+
 if [ -f /srv/www/wordpress/wp-config.php ]; then
     install -m 0600 /srv/www/wordpress/wp-config.php "${workdir}/wp-config.php"
 fi
