@@ -12,7 +12,10 @@ ShopOS is structured as a **flash-image prototype**. The repository contains:
 - automated WordPress and WooCommerce first-boot provisioning
 - automatic Ms. FixIT branding with embedded logo, colors and site icon
 - automatic Storefront theme, homepage, shop pages and main-menu setup
-- Austrian WooCommerce defaults for country, euro, units and time zone
+- initial sales and shipping restriction to Austria, Germany and Switzerland
+- an independent article master with immutable `MF-00000001` numbers
+- generic mappings for suppliers, GTIN/EAN, WooCommerce, POS, marketplaces and ERP/SAP
+- supplier-offer, channel-listing and reliable integration-outbox tables
 - optional token-based Cloudflare Tunnel startup
 - LAN-restricted SSH and HTTP firewall rules
 - automatic health checks and daily local backups
@@ -33,10 +36,28 @@ After the operating-system first boot has completed, `msfixit-brand-shop.service
 - brands the public storefront and WordPress login screen
 - creates a homepage, repair/services page and contact page
 - creates WooCommerce pages and the primary navigation menu
+- restricts sales and delivery addresses to AT, DE and CH
+- creates a DACH shipping zone without inventing shipping prices
+- initializes the independent Ms. FixIT article master
+- installs the WooCommerce bridge that assigns permanent `MF-…` SKUs
 - creates unpublished placeholders for Impressum, Datenschutz, AGB and Widerruf/Rückgabe
 - keeps search-engine indexing disabled until the shop is deliberately approved
 
-Existing user-created pages are detected and protected from automatic replacement. Payments, shipping, taxes and legal texts are intentionally not invented by the appliance; the WordPress dashboard displays a go-live checklist for those decisions.
+Existing user-created pages are detected and protected from automatic replacement. Payment providers, shipping rates, taxes, Swiss customs handling and legal texts are intentionally not invented by the appliance; the WordPress dashboard displays a go-live checklist for those decisions.
+
+## Article identity and expansion
+
+WooCommerce is treated as one sales channel, not as the owner of product identity. Every product and every independently sellable variation receives a permanent number such as:
+
+```text
+MF-00000001
+```
+
+Supplier article numbers, WooCommerce IDs, EAN/GTIN, a future ready2order or other POS ID, marketplace listing IDs and a future SAP material number are stored as mappings to the same Ms. FixIT article.
+
+The integration outbox records changes so a later physical shop, POS, ERP, supplier connector or marketplace adapter can be added at the edge without rewriting the article core.
+
+See [`docs/ARTICLE_MASTER.md`](docs/ARTICLE_MASTER.md) for the numbering, database and mapping rules.
 
 ## Design goals
 
@@ -77,6 +98,7 @@ See:
 - [`docs/FLASHING.md`](docs/FLASHING.md) for flashing and first boot
 - [`docs/BUILDING.md`](docs/BUILDING.md) for local and CI builds
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) for system boundaries
+- [`docs/ARTICLE_MASTER.md`](docs/ARTICLE_MASTER.md) for article numbers and integrations
 
 ## Runtime services
 
@@ -87,9 +109,9 @@ Cloudflare Tunnel (optional)
             |
          PHP-FPM
             |
-WordPress + WooCommerce
-      |             |
-   MariaDB        Redis
+WordPress + WooCommerce ---- Ms. FixIT article master
+      |             |              |
+   MariaDB        Redis      mapping + outbox tables
 ```
 
 Additional services:
@@ -105,18 +127,23 @@ Additional services:
 ```bash
 sudo msfixit-status
 sudo msfixit-brand-shop
+sudo msfixit-catalog list
+sudo msfixit-catalog show MF-00000001
+sudo msfixit-catalog export-csv /data/backups/article-master.csv
 sudo msfixit-apply-config
 sudo msfixit-health
 sudo msfixit-backup
 ```
 
-`sudo msfixit-brand-shop` reapplies the managed branding and missing ShopOS pages without overwriting existing pages that are not managed by ShopOS.
+`sudo msfixit-brand-shop` reapplies the managed branding, DACH restrictions, article bridge and missing ShopOS pages without overwriting existing pages that are not managed by ShopOS.
 
 ## Planned next components
 
-- supplier catalog connectors
+- supplier API connectors feeding `catalog_supplier_offers`
 - guarded pricing engine
 - automatic supplier order routing
+- ready2order or other POS adapter
+- SAP/ERP adapter
 - marketplace connectors
 - external encrypted backup target
 - A/B operating-system updates
