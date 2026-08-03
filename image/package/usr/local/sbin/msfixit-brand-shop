@@ -37,8 +37,15 @@ run_wp core is-installed >/dev/null
 
 # Storefront provides a stable WooCommerce-compatible base. ShopOS branding is
 # applied through an MU plugin so the design survives normal theme updates.
-run_wp plugin install woocommerce --activate >/dev/null
-run_wp theme install storefront --activate >/dev/null
+if ! run_wp plugin is-installed woocommerce >/dev/null 2>&1; then
+    run_wp plugin install woocommerce >/dev/null
+fi
+run_wp plugin activate woocommerce >/dev/null
+
+if ! run_wp theme is-installed storefront >/dev/null 2>&1; then
+    run_wp theme install storefront >/dev/null
+fi
+run_wp theme activate storefront >/dev/null
 
 install -d -m 0755 "$wordpress_dir/wp-content/mu-plugins" "$generated_branding_dir"
 install -m 0644 \
