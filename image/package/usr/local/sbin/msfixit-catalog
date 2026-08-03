@@ -1,0 +1,502 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+const CATALOG_ENV = '/etc/msfixit-shopos/catalog.env';
+
+function fail(string $message, int $code = 1): never
+{
+    fwrite(STDERR, $message . PHP_EOL);
+    exit($code);
+}
+
+function usage(): never
+{
+    $text = <<<'TEXT'
+Ms. FixIT article master
+
+Commands:
+  msfixit-catalog create NAME [TYPE] [PARENT_ARTICLE]
+  msfixit-catalog map ARTICLE NAMESPACE EXTERNAL_ID [PRIMARY]
+  msfixit-catalog resolve NAMESPACE EXTERNAL_ID
+  msfixit-catalog show ARTICLE
+  msfixit-catalog list [LIMIT]
+  msfixit-catalog offer ARTICLE SUPPLIER SUPPLIER_SKU [PRICE] [CURRENCY] [STOCK] [STATUS]
+  msfixit-catalog channel ARTICLE CHANNEL EXTERNAL_ID [CHANNEL_SKU] [STATUS]
+  msfixit-catalog export-csv [OUTPUT_FILE]
+  msfixit-catalog pending [LIMIT]
+
+Examples:
+  sudo msfixit-catalog create "Lenovo ThinkPad USB-C Dock" simple
+  sudo msfixit-catalog map MF-00000001 supplier:ingram 12345678 primary
+  sudo msfixit-catalog map MF-00000001 gtin:ean13 4000000000000 primary
+  sudo msfixit-catalog channel MF-00000001 woocommerce 384 MF-00000001 active
+TEXT;
+
+    fwrite(STDERR, $text . PHP_EOL);
+    exit(2);
+}
+
+function loadEnv(string $path): array
+{
+    if (!is_file($path) || !is_readable($path)) {
+        fail("Catalog configuration is unavailable: {$path}");
+    }
+
+    $result = [];
+    foreach (file($path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [] as $line) {
+        $line = trim($line);
+        if ($line === '' || str_starts_with($line, '#') || !str_contains($line, '=')) {
+            continue;
+        }
+        [$key, $value] = explode('=', $line, 2);
+        $result[trim($key)] = trim($value);
+    }
+
+    foreach (['CATALOG_DB_HOST', 'CATALOG_DB_PORT', 'CATALOG_DB_NAME', 'CATALOG_DB_USER', 'CATALOG_DB_PASSWORD'] as $required) {
+        if (!isset($result[$required]) || $result[$required] === '') {
+            fail("Missing catalog setting: {$required}");
+        }
+    }
+
+    return $result;
+}
+
+function database(): PDO
+{
+    static $pdo = null;
+    if ($pdo instanceof PDO) {
+        return $pdo;
+    }
+
+    $env = loadEnv(CATALOG_ENV);
+    $dsn = sprintf(
+        'mysql:host=%s;port=%s;dbname=%s;charset=utf8mb4',
+        $env['CATALOG_DB_HOST'],
+        $env['CATALOG_DB_PORT'],
+        $env['CATALOG_DB_NAME']
+    );
+
+    $pdo = new PDO($dsn, $env['CATALOG_DB_USER'], $env['CATALOG_DB_PASSWORD'], [
+        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+        PDO::ATTR_EMULATE_PREPARES => false,
+    ]);
+
+    return $pdo;
+}
+
+function uuidV4(): string
+{
+    $bytes = random_bytes(16);
+    $bytes[6] = chr((ord($bytes[6]) & 0x0f) | 0x40);
+    $bytes[8] = chr((ord($bytes[8]) & 0x3f) | 0x80);
+    $hex = bin2hex($bytes);
+
+    return sprintf('%s-%s-%s-%s-%s',
+        substr($hex, 0, 8),
+        substr($hex, 8, 4),
+        substr($hex, 12, 4),
+        substr($hex, 16, 4),
+        substr($hex, 20, 12)
+    );
+}
+
+function requireArticle(string $article): string
+{
+    $article = strtoupper(trim($article));
+    if (!preg_match('/^MF-[0-9]{8}$/', $article)) {
+        fail("Invalid Ms. FixIT article number: {$article}");
+    }
+    return $article;
+}
+
+function findProduct(PDO $pdo, string $article): array
+{
+    $statement = $pdo->prepare(
+        'SELECT p.*, parent.article_number AS parent_article_number
+         FROM catalog_products p
+         LEFT JOIN catalog_products parent ON parent.id = p.parent_id
+         WHERE p.article_number = ?'
+    );
+    $statement->execute([requireArticle($article)]);
+    $product = $statement->fetch();
+    if (!$product) {
+        fail("Unknown article number: {$article}");
+    }
+    return $product;
+}
+
+function emitEvent(PDO $pdo, string $productId, string $eventType, array $payload): void
+{
+    $statement = $pdo->prepare(
+        'INSERT INTO catalog_sync_outbox
+         (event_uuid, aggregate_type, aggregate_id, event_type, payload_json)
+         VALUES (?, ?, ?, ?, ?)'
+    );
+    $statement->execute([
+        uuidV4(),
+        'product',
+        $productId,
+        $eventType,
+        json_encode($payload, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+    ]);
+}
+
+function createProduct(PDO $pdo, string $name, string $type, ?string $parentArticle): string
+{
+    $name = trim($name);
+    $type = strtolower(trim($type));
+    if ($name === '') {
+        fail('Product name must not be empty.');
+    }
+    if (!preg_match('/^[a-z][a-z0-9_-]{1,31}$/', $type)) {
+        fail('Product type contains unsupported characters.');
+    }
+
+    $parentId = null;
+    if ($parentArticle !== null && $parentArticle !== '') {
+        $parentId = findProduct($pdo, $parentArticle)['id'];
+    }
+
+    $pdo->beginTransaction();
+    try {
+        $sequence = $pdo->query(
+            "SELECT next_value FROM catalog_sequences WHERE sequence_name = 'article_number' FOR UPDATE"
+        )->fetchColumn();
+        if ($sequence === false) {
+            throw new RuntimeException('Article-number sequence is missing.');
+        }
+
+        $number = (int) $sequence;
+        if ($number < 1 || $number > 99999999) {
+            throw new RuntimeException('Article-number range is exhausted.');
+        }
+
+        $article = sprintf('MF-%08d', $number);
+        $id = uuidV4();
+
+        $pdo->exec(
+            "UPDATE catalog_sequences SET next_value = next_value + 1 WHERE sequence_name = 'article_number'"
+        );
+
+        $statement = $pdo->prepare(
+            'INSERT INTO catalog_products
+             (id, article_number, parent_id, product_type, product_name, status)
+             VALUES (?, ?, ?, ?, ?, ?)'
+        );
+        $statement->execute([$id, $article, $parentId, $type, $name, 'draft']);
+
+        $statement = $pdo->prepare(
+            'INSERT INTO catalog_identifiers
+             (product_id, namespace, external_id, is_primary)
+             VALUES (?, ?, ?, 1)'
+        );
+        $statement->execute([$id, 'shopos:article', $article]);
+
+        emitEvent($pdo, $id, 'product.created', [
+            'article_number' => $article,
+            'product_name' => $name,
+            'product_type' => $type,
+            'parent_article_number' => $parentArticle ?: null,
+        ]);
+
+        $pdo->commit();
+        return $article;
+    } catch (Throwable $exception) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        throw $exception;
+    }
+}
+
+function addMapping(PDO $pdo, string $article, string $namespace, string $externalId, bool $primary): void
+{
+    $product = findProduct($pdo, $article);
+    $namespace = strtolower(trim($namespace));
+    $externalId = trim($externalId);
+
+    if (!preg_match('/^[a-z0-9][a-z0-9:_-]{1,79}$/', $namespace)) {
+        fail('Namespace must use lowercase letters, numbers, colon, underscore or hyphen.');
+    }
+    if ($externalId === '' || mb_strlen($externalId) > 191) {
+        fail('External identifier is empty or too long.');
+    }
+
+    $existing = $pdo->prepare(
+        'SELECT product_id FROM catalog_identifiers WHERE namespace = ? AND external_id = ?'
+    );
+    $existing->execute([$namespace, $externalId]);
+    $mappedProduct = $existing->fetchColumn();
+    if ($mappedProduct !== false && $mappedProduct !== $product['id']) {
+        fail("Identifier {$namespace}:{$externalId} is already assigned to another article.");
+    }
+
+    $pdo->beginTransaction();
+    try {
+        if ($primary) {
+            $statement = $pdo->prepare(
+                'UPDATE catalog_identifiers SET is_primary = 0 WHERE product_id = ? AND namespace = ?'
+            );
+            $statement->execute([$product['id'], $namespace]);
+        }
+
+        $statement = $pdo->prepare(
+            'INSERT INTO catalog_identifiers
+             (product_id, namespace, external_id, is_primary)
+             VALUES (?, ?, ?, ?)
+             ON DUPLICATE KEY UPDATE
+                product_id = VALUES(product_id),
+                is_primary = VALUES(is_primary),
+                valid_until = NULL'
+        );
+        $statement->execute([$product['id'], $namespace, $externalId, $primary ? 1 : 0]);
+
+        emitEvent($pdo, $product['id'], 'identifier.mapped', [
+            'article_number' => $product['article_number'],
+            'namespace' => $namespace,
+            'external_id' => $externalId,
+            'is_primary' => $primary,
+        ]);
+
+        $pdo->commit();
+    } catch (Throwable $exception) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        throw $exception;
+    }
+}
+
+function productDetails(PDO $pdo, array $product): array
+{
+    $statement = $pdo->prepare(
+        'SELECT namespace, external_id, is_primary, valid_from, valid_until
+         FROM catalog_identifiers
+         WHERE product_id = ?
+         ORDER BY namespace, is_primary DESC, external_id'
+    );
+    $statement->execute([$product['id']]);
+    $product['identifiers'] = $statement->fetchAll();
+
+    $statement = $pdo->prepare(
+        'SELECT supplier_code, supplier_sku, purchase_price, currency,
+                stock_quantity, stock_status, lead_time_days, active, last_seen_at
+         FROM catalog_supplier_offers
+         WHERE product_id = ?
+         ORDER BY active DESC, supplier_code, supplier_sku'
+    );
+    $statement->execute([$product['id']]);
+    $product['supplier_offers'] = $statement->fetchAll();
+
+    $statement = $pdo->prepare(
+        'SELECT channel_code, external_id, channel_sku, listing_status, last_sync_at
+         FROM catalog_channel_listings
+         WHERE product_id = ?
+         ORDER BY channel_code, external_id'
+    );
+    $statement->execute([$product['id']]);
+    $product['channel_listings'] = $statement->fetchAll();
+
+    return $product;
+}
+
+function outputJson(mixed $data): void
+{
+    echo json_encode($data, JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . PHP_EOL;
+}
+
+$arguments = $_SERVER['argv'];
+array_shift($arguments);
+$command = array_shift($arguments) ?? '';
+$pdo = database();
+
+try {
+    switch ($command) {
+        case 'create':
+            $name = $arguments[0] ?? '';
+            $type = $arguments[1] ?? 'simple';
+            $parent = $arguments[2] ?? null;
+            echo createProduct($pdo, $name, $type, $parent) . PHP_EOL;
+            break;
+
+        case 'map':
+            if (count($arguments) < 3) {
+                usage();
+            }
+            addMapping(
+                $pdo,
+                $arguments[0],
+                $arguments[1],
+                $arguments[2],
+                strtolower($arguments[3] ?? '') === 'primary'
+            );
+            echo "Mapping saved." . PHP_EOL;
+            break;
+
+        case 'resolve':
+            if (count($arguments) < 2) {
+                usage();
+            }
+            $statement = $pdo->prepare(
+                'SELECT p.*, i.namespace, i.external_id
+                 FROM catalog_identifiers i
+                 INNER JOIN catalog_products p ON p.id = i.product_id
+                 WHERE i.namespace = ? AND i.external_id = ? AND i.valid_until IS NULL'
+            );
+            $statement->execute([strtolower(trim($arguments[0])), trim($arguments[1])]);
+            $product = $statement->fetch();
+            if (!$product) {
+                fail('No matching article was found.', 3);
+            }
+            outputJson(productDetails($pdo, $product));
+            break;
+
+        case 'show':
+            $article = $arguments[0] ?? '';
+            outputJson(productDetails($pdo, findProduct($pdo, $article)));
+            break;
+
+        case 'list':
+            $limit = max(1, min(1000, (int) ($arguments[0] ?? 100)));
+            $statement = $pdo->prepare(
+                'SELECT article_number, product_name, product_type, status,
+                        version_number, created_at, updated_at
+                 FROM catalog_products
+                 ORDER BY article_number
+                 LIMIT ?'
+            );
+            $statement->bindValue(1, $limit, PDO::PARAM_INT);
+            $statement->execute();
+            outputJson($statement->fetchAll());
+            break;
+
+        case 'offer':
+            if (count($arguments) < 3) {
+                usage();
+            }
+            $product = findProduct($pdo, $arguments[0]);
+            $supplier = strtolower(trim($arguments[1]));
+            $supplierSku = trim($arguments[2]);
+            $price = ($arguments[3] ?? '') === '' ? null : (float) $arguments[3];
+            $currency = strtoupper(trim($arguments[4] ?? 'EUR'));
+            $stock = ($arguments[5] ?? '') === '' ? null : (float) $arguments[5];
+            $status = strtolower(trim($arguments[6] ?? 'unknown'));
+            if (!preg_match('/^[a-z0-9][a-z0-9_-]{1,63}$/', $supplier)) {
+                fail('Invalid supplier code.');
+            }
+            if (!preg_match('/^[A-Z]{3}$/', $currency)) {
+                fail('Currency must be a three-letter code.');
+            }
+
+            $statement = $pdo->prepare(
+                'INSERT INTO catalog_supplier_offers
+                 (product_id, supplier_code, supplier_sku, purchase_price, currency,
+                  stock_quantity, stock_status, last_seen_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                 ON DUPLICATE KEY UPDATE
+                    product_id = VALUES(product_id),
+                    purchase_price = VALUES(purchase_price),
+                    currency = VALUES(currency),
+                    stock_quantity = VALUES(stock_quantity),
+                    stock_status = VALUES(stock_status),
+                    active = 1,
+                    last_seen_at = CURRENT_TIMESTAMP'
+            );
+            $statement->execute([
+                $product['id'], $supplier, $supplierSku, $price, $currency, $stock, $status,
+            ]);
+            addMapping($pdo, $product['article_number'], "supplier:{$supplier}", $supplierSku, true);
+            echo "Supplier offer saved." . PHP_EOL;
+            break;
+
+        case 'channel':
+            if (count($arguments) < 3) {
+                usage();
+            }
+            $product = findProduct($pdo, $arguments[0]);
+            $channel = strtolower(trim($arguments[1]));
+            $externalId = trim($arguments[2]);
+            $channelSku = trim($arguments[3] ?? $product['article_number']);
+            $status = strtolower(trim($arguments[4] ?? 'active'));
+
+            $statement = $pdo->prepare(
+                'INSERT INTO catalog_channel_listings
+                 (product_id, channel_code, external_id, channel_sku, listing_status, last_sync_at)
+                 VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                 ON DUPLICATE KEY UPDATE
+                    product_id = VALUES(product_id),
+                    channel_sku = VALUES(channel_sku),
+                    listing_status = VALUES(listing_status),
+                    last_sync_at = CURRENT_TIMESTAMP'
+            );
+            $statement->execute([$product['id'], $channel, $externalId, $channelSku, $status]);
+            addMapping($pdo, $product['article_number'], "channel:{$channel}", $externalId, true);
+            echo "Channel listing saved." . PHP_EOL;
+            break;
+
+        case 'export-csv':
+            $path = $arguments[0] ?? '-';
+            $stream = $path === '-' ? STDOUT : fopen($path, 'wb');
+            if (!is_resource($stream)) {
+                fail("Unable to open export file: {$path}");
+            }
+            fputcsv($stream, [
+                'article_number', 'product_name', 'product_type', 'status',
+                'parent_article_number', 'identifiers_json', 'updated_at',
+            ], ';');
+            $statement = $pdo->query(
+                'SELECT p.*, parent.article_number AS parent_article_number
+                 FROM catalog_products p
+                 LEFT JOIN catalog_products parent ON parent.id = p.parent_id
+                 ORDER BY p.article_number'
+            );
+            foreach ($statement as $product) {
+                $ids = $pdo->prepare(
+                    'SELECT namespace, external_id, is_primary
+                     FROM catalog_identifiers
+                     WHERE product_id = ? AND valid_until IS NULL
+                     ORDER BY namespace, is_primary DESC, external_id'
+                );
+                $ids->execute([$product['id']]);
+                fputcsv($stream, [
+                    $product['article_number'],
+                    $product['product_name'],
+                    $product['product_type'],
+                    $product['status'],
+                    $product['parent_article_number'],
+                    json_encode($ids->fetchAll(), JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE),
+                    $product['updated_at'],
+                ], ';');
+            }
+            if ($path !== '-') {
+                fclose($stream);
+                echo "Export written to {$path}" . PHP_EOL;
+            }
+            break;
+
+        case 'pending':
+            $limit = max(1, min(1000, (int) ($arguments[0] ?? 100)));
+            $statement = $pdo->prepare(
+                "SELECT id, event_uuid, aggregate_type, aggregate_id, event_type,
+                        payload_json, attempts, available_at, created_at
+                 FROM catalog_sync_outbox
+                 WHERE event_status = 'pending' AND available_at <= CURRENT_TIMESTAMP
+                 ORDER BY id
+                 LIMIT ?"
+            );
+            $statement->bindValue(1, $limit, PDO::PARAM_INT);
+            $statement->execute();
+            outputJson($statement->fetchAll());
+            break;
+
+        default:
+            usage();
+    }
+} catch (PDOException $exception) {
+    fail('Catalog database error: ' . $exception->getMessage());
+} catch (Throwable $exception) {
+    fail('Catalog error: ' . $exception->getMessage());
+}
