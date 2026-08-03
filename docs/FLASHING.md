@@ -101,7 +101,7 @@ If passwords are left empty, ShopOS generates random passwords and writes them t
 3. Start the Raspberry Pi 4B.
 4. Allow both provisioning stages to finish.
 
-The first stage configures MariaDB, PHP-FPM, Redis, Nginx, WordPress, WooCommerce, credentials and optional Cloudflare Tunnel access. The second stage runs `msfixit-brand-shop.service` and prepares the visible shop.
+The first stage configures MariaDB, PHP-FPM, Redis, Nginx, WordPress, WooCommerce, credentials and optional Cloudflare Tunnel access. The second stage runs `msfixit-brand-shop.service` and prepares the visible shop plus the independent article master.
 
 The branded shop stage automatically:
 
@@ -111,6 +111,11 @@ The branded shop stage automatically:
 - applies the navy, teal and pink color scheme
 - creates the homepage, repair/services and contact pages
 - creates the WooCommerce pages and main navigation
+- restricts sales and delivery addresses to Austria, Germany and Switzerland
+- creates separate shipping zones for Austria, Germany and Switzerland without inventing shipping prices
+- initializes the `shopos_catalog` article-master database
+- installs the WooCommerce bridge for immutable `MF-00000001` article numbers
+- preserves supplier, old SKU, barcode, POS, marketplace and future ERP/SAP numbers as mappings
 - sets Austria, euro, metric units and Europe/Vienna defaults
 - leaves legal pages as unpublished drafts
 - keeps search-engine indexing disabled
@@ -134,7 +139,8 @@ ssh shopadmin@RASPBERRY-PI-IP
 ShopOS intentionally does not guess legally or commercially sensitive settings. Before public launch, complete and test:
 
 - payment provider and test payment
-- shipping zones, prices and returns
+- shipping prices and return costs for AT, DE and CH
+- Swiss import, customs and tax handling
 - tax display for the actual business situation
 - Impressum, Datenschutz, AGB and Widerruf/Rückgabe
 - external backup destination and restore test
@@ -142,7 +148,38 @@ ShopOS intentionally does not guess legally or commercially sensitive settings. 
 
 The WordPress dashboard displays this as a go-live checklist.
 
-## 6. Administration commands
+## 6. Article-master administration
+
+List current articles:
+
+```bash
+sudo msfixit-catalog list
+```
+
+Inspect one article and all mappings:
+
+```bash
+sudo msfixit-catalog show MF-00000001
+```
+
+Add supplier, barcode, POS or ERP mappings:
+
+```bash
+sudo msfixit-catalog map MF-00000001 supplier:ingram 12345678 primary
+sudo msfixit-catalog map MF-00000001 gtin:ean13 4000000000000 primary
+sudo msfixit-catalog map MF-00000001 pos:ready2order 9182 primary
+sudo msfixit-catalog map MF-00000001 erp:sap 1000004711 primary
+```
+
+Export for another system:
+
+```bash
+sudo msfixit-catalog export-csv /data/backups/article-master.csv
+```
+
+See `docs/ARTICLE_MASTER.md` for the complete model and namespace rules.
+
+## 7. Administration commands
 
 Display status:
 
@@ -150,7 +187,7 @@ Display status:
 sudo msfixit-status
 ```
 
-Reapply missing ShopOS branding and managed pages:
+Reapply missing ShopOS branding, DACH restrictions and managed pages:
 
 ```bash
 sudo msfixit-brand-shop
@@ -176,9 +213,9 @@ Create a backup immediately:
 sudo msfixit-backup
 ```
 
-Local backups are stored below `/data/backups` and retained for 14 days. A separate external backup target is still required before production use.
+Local backups include WordPress, uploads, ShopOS configuration and the complete `shopos_catalog` database. They are stored below `/data/backups` and retained for 14 days. A separate external backup target is still required before production use.
 
-## 7. Credentials cleanup
+## 8. Credentials cleanup
 
 After saving generated credentials in a password manager, delete `SHOPOS-CREDENTIALS.txt` from the boot partition:
 

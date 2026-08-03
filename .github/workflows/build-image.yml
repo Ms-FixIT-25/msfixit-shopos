@@ -6,6 +6,7 @@ on:
     paths:
       - image/**
       - scripts/**
+      - docs/**
       - Makefile
       - .github/workflows/build-image.yml
   pull_request:
@@ -13,6 +14,7 @@ on:
     paths:
       - image/**
       - scripts/**
+      - docs/**
       - Makefile
       - .github/workflows/build-image.yml
   workflow_dispatch:
@@ -44,14 +46,84 @@ concurrency:
 
 jobs:
   validate:
-    name: Validate source
+    name: Validate source and article master
     runs-on: ubuntu-24.04
+    services:
+      mariadb:
+        image: mariadb:11.4
+        env:
+          MARIADB_ROOT_PASSWORD: shopos-ci-root
+          MARIADB_DATABASE: shopos_catalog
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
     steps:
       - name: Check out ShopOS
         uses: actions/checkout@v7
 
-      - name: Check shell syntax
+      - name: Check source syntax
         run: make check
+
+      - name: Install catalog test clients
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes mariadb-client php-mysql
+
+      - name: Apply and test article-master schema
+        shell: bash
+        env:
+          MYSQL_PWD: shopos-ci-root
+        run: |
+          set -Eeuo pipefail
+          db=(mariadb --host=127.0.0.1 --port=3306 --user=root shopos_catalog)
+          "${db[@]}" < image/package/usr/share/msfixit-shopos/catalog/schema.sql
+          "${db[@]}" < image/package/usr/share/msfixit-shopos/catalog/guards.sql
+
+          cat > /tmp/catalog.env <<'EOF_CATALOG'
+          CATALOG_DB_HOST=127.0.0.1
+          CATALOG_DB_PORT=3306
+          CATALOG_DB_NAME=shopos_catalog
+          CATALOG_DB_USER=root
+          CATALOG_DB_PASSWORD=shopos-ci-root
+          EOF_CATALOG
+          sudo install -d -m 0750 /etc/msfixit-shopos
+          sudo install -m 0600 /tmp/catalog.env /etc/msfixit-shopos/catalog.env
+
+          article="$(sudo php image/package/usr/local/sbin/msfixit-catalog create 'CI Test Product' simple)"
+          test "$article" = MF-00000001
+
+          sudo php image/package/usr/local/sbin/msfixit-catalog \
+            map "$article" supplier:ci SUP-100 primary
+          sudo php image/package/usr/local/sbin/msfixit-catalog \
+            offer "$article" ci SUP-100 42.50 EUR 7 available
+          sudo php image/package/usr/local/sbin/msfixit-catalog \
+            channel "$article" woocommerce 384 "$article" active
+          sudo php image/package/usr/local/sbin/msfixit-catalog show "$article" \
+            | jq -e '.article_number == "MF-00000001"'
+          sudo php image/package/usr/local/sbin/msfixit-catalog \
+            resolve supplier:ci SUP-100 \
+            | jq -e '.article_number == "MF-00000001"'
+          sudo php image/package/usr/local/sbin/msfixit-catalog \
+            export-csv /tmp/article-master.csv
+          grep -q 'MF-00000001' /tmp/article-master.csv
+
+          if "${db[@]}" --execute="UPDATE catalog_products SET article_number='MF-99999999' WHERE article_number='MF-00000001'"; then
+            echo 'Article-number immutability trigger did not block an update.' >&2
+            exit 1
+          fi
+
+          if "${db[@]}" --execute="DELETE FROM catalog_products WHERE article_number='MF-00000001'"; then
+            echo 'Archive-only trigger did not block a delete.' >&2
+            exit 1
+          fi
+
+          trigger_count="$("${db[@]}" --batch --skip-column-names \
+            --execute="SELECT COUNT(*) FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA='shopos_catalog'")"
+          test "$trigger_count" -ge 5
 
   build:
     name: Build ShopOS image
@@ -114,7 +186,9 @@ jobs:
           - compressed Raspberry Pi 4B ShopOS image
           - portable SHA-256 checksum
 
-          Do not flash the earlier Raspberry Pi 5 image onto a Raspberry Pi 4B. USB boot on a Pi 4B requires a sufficiently recent EEPROM bootloader. Physical first-boot validation on the target Raspberry Pi is still required before connecting the production domain.
+          This build includes the branded WooCommerce setup, the initial AT/DE/CH sales region and the independent Ms. FixIT article master with supplier, barcode, POS, marketplace and ERP/SAP mappings.
+
+          Payment methods, country-specific shipping prices, taxes, Swiss customs handling and legal texts still require deliberate configuration and testing. Physical first-boot validation on the target Raspberry Pi is required before connecting the production domain.
           EOF
 
           if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then

@@ -12,7 +12,12 @@ Use a native ARM64 Debian Bookworm/Trixie or Ubuntu build host. The build script
 make check
 ```
 
-The check target validates the shell scripts and, when PHP is installed on the build host, also performs PHP syntax checks for the branding MU plugin, WordPress provisioner and image renderer.
+The check target validates:
+
+- shell syntax for image, first-boot, backup, health and catalog tools;
+- PHP syntax for the branding, DACH and article-master WordPress components;
+- the article-master CLI;
+- presence of the MariaDB catalog schema and core tables.
 
 ## Build only the appliance package
 
@@ -28,6 +33,8 @@ image/packages/msfixit-shopos_arm64.deb.sha256
 ```
 
 The package bundles pinned and SHA-256-verified WP-CLI and ARM64 Cloudflare Tunnel binaries. Their exact versions, source URLs and checksums are written into `/usr/share/msfixit-shopos/build-info.txt` inside the image.
+
+The build information also records the article-master schema version and a checksum of `catalog/schema.sql` so the database contract included in an image is auditable.
 
 The optimized Ms. FixIT WebP artwork is stored as compact repository-safe base64 source text. During package construction it is decoded, checked against its fixed SHA-256 value, and the base64 source is removed from the final package. PHP GD generates the header and site-icon variants during branded shop provisioning.
 
@@ -74,12 +81,21 @@ A Pi 4B has no native NVMe target. An NVMe drive connected through a USB enclosu
 ## Optional variables
 
 ```bash
-SHOPOS_VERSION=0.2.0 \
+SHOPOS_VERSION=0.3.0 \
 RPI_IMAGE_GEN_VERSION=v2.6.0 \
 make image-rpi4-usb
 ```
 
 Cloudflared and WP-CLI are pinned in `scripts/build-package.sh`; changing them also requires updating their trusted SHA-256 values. Replacing the embedded brand artwork likewise requires updating `MSFIXIT_BRAND_SHA256` after inspecting the new optimized asset.
+
+## Runtime database initialization
+
+The image contains the schema but does not bake production database passwords into Git or the image metadata. During branded first-boot provisioning, `msfixit-catalog-init`:
+
+1. creates the separate `shopos_catalog` database;
+2. generates independent random credentials for the root-only CLI and the limited WordPress bridge;
+3. applies the versioned schema and immutability triggers;
+4. stores credentials below `/etc/msfixit-shopos` with restricted permissions.
 
 ## GitHub Actions
 
