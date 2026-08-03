@@ -15,6 +15,6 @@ IOSchedulingPriority=7
 PrivateTmp=yes
 ProtectHome=yes
 ProtectSystem=strict
-ReadWritePaths=/data/suppliers/also /run/msfixit-shopos /etc/msfixit-shopos
+ReadWritePaths=/data/suppliers/also /run/msfixit-shopos
 NoNewPrivileges=yes
 TimeoutStartSec=30min
