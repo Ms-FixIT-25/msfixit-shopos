@@ -26,6 +26,9 @@ image-rpi5-nvme:
 check:
 	bash -n scripts/build-package.sh
 	bash -n scripts/build-image.sh
+	bash -n tests/test-catalog.sh
+	bash -n tests/test-office.sh
+	bash -n tests/test-office-guards.sh
 	bash -n image/package/DEBIAN/postinst
 	bash -n image/package/usr/local/sbin/msfixit-firstboot
 	bash -n image/package/usr/local/sbin/msfixit-brand-shop
@@ -46,6 +49,7 @@ check:
 	@grep -q 'no_reassign' image/package/usr/share/msfixit-shopos/catalog/guards.sql
 	@grep -q 'office_documents' image/package/usr/share/msfixit-shopos/office/schema.sql
 	@grep -q 'office_document_holds' image/package/usr/share/msfixit-shopos/office/operational.sql
+	@grep -q 'allocations_immutable' image/package/usr/share/msfixit-shopos/office/operational.sql
 	@if command -v php >/dev/null 2>&1; then \
 		php -l image/package/usr/local/sbin/msfixit-catalog; \
 		php -l image/package/usr/local/sbin/msfixit-office; \
