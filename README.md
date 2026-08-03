@@ -13,6 +13,7 @@ ShopOS is structured as a **flash-image prototype**. The repository contains:
 - automatic Ms. FixIT branding with embedded logo, colors and site icon
 - automatic Storefront theme, homepage, shop pages and main-menu setup
 - initial sales and shipping restriction to Austria, Germany and Switzerland
+- separate shipping zones for Austria, Germany and Switzerland
 - an independent article master with immutable `MF-00000001` numbers
 - generic mappings for suppliers, GTIN/EAN, WooCommerce, POS, marketplaces and ERP/SAP
 - supplier-offer, channel-listing and reliable integration-outbox tables
@@ -37,7 +38,7 @@ After the operating-system first boot has completed, `msfixit-brand-shop.service
 - creates a homepage, repair/services page and contact page
 - creates WooCommerce pages and the primary navigation menu
 - restricts sales and delivery addresses to AT, DE and CH
-- creates a DACH shipping zone without inventing shipping prices
+- creates separate AT, DE and CH shipping zones without inventing shipping prices
 - initializes the independent Ms. FixIT article master
 - installs the WooCommerce bridge that assigns permanent `MF-…` SKUs
 - creates unpublished placeholders for Impressum, Datenschutz, AGB and Widerruf/Rückgabe
