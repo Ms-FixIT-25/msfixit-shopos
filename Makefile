@@ -29,12 +29,18 @@ check:
 	bash -n image/package/DEBIAN/postinst
 	bash -n image/package/usr/local/sbin/msfixit-firstboot
 	bash -n image/package/usr/local/sbin/msfixit-brand-shop
+	bash -n image/package/usr/local/sbin/msfixit-catalog-init
 	bash -n image/package/usr/local/sbin/msfixit-apply-config
 	bash -n image/package/usr/local/sbin/msfixit-health
 	bash -n image/package/usr/local/sbin/msfixit-backup
 	bash -n image/package/usr/local/sbin/msfixit-status
+	@test -s image/package/usr/share/msfixit-shopos/catalog/schema.sql
+	@grep -q 'catalog_products' image/package/usr/share/msfixit-shopos/catalog/schema.sql
 	@if command -v php >/dev/null 2>&1; then \
+		php -l image/package/usr/local/sbin/msfixit-catalog; \
 		php -l image/package/usr/share/msfixit-shopos/wordpress/msfixit-branding.php; \
+		php -l image/package/usr/share/msfixit-shopos/wordpress/msfixit-catalog-bridge.php; \
+		php -l image/package/usr/share/msfixit-shopos/wordpress/msfixit-commerce-provision.php; \
 		php -l image/package/usr/share/msfixit-shopos/wordpress/msfixit-provision.php; \
 		php -l image/package/usr/share/msfixit-shopos/wordpress/msfixit-render-branding.php; \
 	fi
