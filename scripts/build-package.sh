@@ -94,7 +94,9 @@ install -d -m 0755 "$stage/usr/share/msfixit-shopos"
         "$stage/usr/share/msfixit-shopos/office/office-lib.php" \
         "$stage/usr/share/msfixit-shopos/compliance/schema.sql" \
         "$stage/usr/share/msfixit-shopos/compliance/guards.sql" \
-        "$stage/usr/share/msfixit-shopos/wordpress/msfixit-compliance.php"
+        "$stage/usr/share/msfixit-shopos/compliance/strict-guards.sql" \
+        "$stage/usr/share/msfixit-shopos/wordpress/msfixit-compliance.php" \
+        "$stage/usr/share/msfixit-shopos/wordpress/msfixit-compliance-runtime.php"
 } > "$stage/usr/share/msfixit-shopos/build-info.txt"
 
 rm -rf "$output_dir"
