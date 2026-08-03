@@ -1,16 +1,27 @@
-.PHONY: package image-usb image-sd image-nvme check
+.PHONY: package image-usb image-sd image-rpi4-usb image-rpi4-sd image-rpi5-usb image-rpi5-sd image-rpi5-nvme check
 
 package:
 	bash scripts/build-package.sh
 
-image-usb:
-	bash scripts/build-image.sh usb
+# Default targets match the currently intended Raspberry Pi 4 Model B.
+image-usb: image-rpi4-usb
 
-image-sd:
-	bash scripts/build-image.sh sd
+image-sd: image-rpi4-sd
 
-image-nvme:
-	bash scripts/build-image.sh nvme
+image-rpi4-usb:
+	bash scripts/build-image.sh rpi4 usb
+
+image-rpi4-sd:
+	bash scripts/build-image.sh rpi4 sd
+
+image-rpi5-usb:
+	bash scripts/build-image.sh rpi5 usb
+
+image-rpi5-sd:
+	bash scripts/build-image.sh rpi5 sd
+
+image-rpi5-nvme:
+	bash scripts/build-image.sh rpi5 nvme
 
 check:
 	bash -n scripts/build-package.sh
