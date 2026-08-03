@@ -1,0 +1,20 @@
+[Unit]
+Description=Ms. FixIT ALSO Austria catalogue synchronization
+After=network-online.target mariadb.service
+Wants=network-online.target
+ConditionPathExists=/etc/msfixit-shopos/also.env
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/usr/local/sbin/msfixit-also sync
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+ReadWritePaths=/data/suppliers/also /run/msfixit-shopos /etc/msfixit-shopos
+NoNewPrivileges=yes
+TimeoutStartSec=30min
