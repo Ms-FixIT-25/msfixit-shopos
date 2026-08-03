@@ -35,11 +35,13 @@ check:
 	bash -n tests/test-compliance-strict.sh
 	bash -n tests/test-compliance-numbering.sh
 	bash -n tests/test-tax-renderer-boundary.sh
+	bash -n tests/test-also.sh
 	bash -n image/package/DEBIAN/postinst
 	bash -n image/package/usr/local/sbin/msfixit-firstboot
 	bash -n image/package/usr/local/sbin/msfixit-brand-shop
 	bash -n image/package/usr/local/sbin/msfixit-catalog-init
 	bash -n image/package/usr/local/sbin/msfixit-office-init
+	bash -n image/package/usr/local/sbin/msfixit-also-init
 	bash -n image/package/usr/local/sbin/msfixit-office-worker
 	bash -n image/package/usr/local/sbin/msfixit-office-dunning
 	bash -n image/package/usr/local/sbin/msfixit-office-print
@@ -59,6 +61,8 @@ check:
 	@test -s image/package/usr/share/msfixit-shopos/compliance/strict-migrations.sql
 	@test -s image/package/usr/share/msfixit-shopos/compliance/tax-decision-migrations.sql
 	@test -s image/package/usr/share/msfixit-shopos/compliance/renderer-guards.sql
+	@test -s image/package/usr/share/msfixit-shopos/also/schema.sql
+	@test -s image/package/usr/share/msfixit-shopos/also/also.env.example
 	@grep -q 'catalog_products' image/package/usr/share/msfixit-shopos/catalog/schema.sql
 	@grep -q 'no_reassign' image/package/usr/share/msfixit-shopos/catalog/guards.sql
 	@grep -q 'office_documents' image/package/usr/share/msfixit-shopos/office/schema.sql
@@ -71,11 +75,14 @@ check:
 	@grep -q 'before number allocation' image/package/usr/share/msfixit-shopos/compliance/strict-migrations.sql
 	@grep -q 'superseding decision' image/package/usr/share/msfixit-shopos/compliance/tax-decision-migrations.sql
 	@grep -q 'advanced DACH tax invoice renderer' image/package/usr/share/msfixit-shopos/compliance/renderer-guards.sql
+	@grep -q 'supplier_import_runs' image/package/usr/share/msfixit-shopos/also/schema.sql
+	@grep -q 'AT_PILOT_AUTO_PUBLISH=no' image/package/usr/share/msfixit-shopos/also/also.env.example
 	@if command -v php >/dev/null 2>&1; then \
 		php -l image/package/usr/local/sbin/msfixit-catalog; \
 		php -l image/package/usr/local/sbin/msfixit-office; \
 		php -l image/package/usr/local/sbin/msfixit-compliance; \
 		php -l image/package/usr/local/sbin/msfixit-tax-decision; \
+		php -l image/package/usr/local/sbin/msfixit-also; \
 		php -l image/package/usr/share/msfixit-shopos/office/office-lib.php; \
 		php -l image/package/usr/share/msfixit-shopos/wordpress/msfixit-branding.php; \
 		php -l image/package/usr/share/msfixit-shopos/wordpress/msfixit-catalog-bridge.php; \
@@ -84,6 +91,8 @@ check:
 		php -l image/package/usr/share/msfixit-shopos/wordpress/msfixit-office-bridge.php; \
 		php -l image/package/usr/share/msfixit-shopos/wordpress/msfixit-compliance.php; \
 		php -l image/package/usr/share/msfixit-shopos/wordpress/msfixit-compliance-runtime.php; \
+		php -l image/package/usr/share/msfixit-shopos/wordpress/msfixit-at-pilot.php; \
+		php -l image/package/usr/share/msfixit-shopos/wordpress/msfixit-also-draft.php; \
 		php -l image/package/usr/share/msfixit-shopos/wordpress/msfixit-provision.php; \
 		php -l image/package/usr/share/msfixit-shopos/wordpress/msfixit-render-branding.php; \
 	fi
