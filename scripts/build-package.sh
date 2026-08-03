@@ -77,7 +77,8 @@ install -d -m 0755 "$stage/usr/share/msfixit-shopos"
         "$stage/usr/local/bin/cloudflared" \
         "$stage/usr/local/bin/wp" \
         "$brand_file" \
-        "$stage/usr/share/msfixit-shopos/catalog/schema.sql"
+        "$stage/usr/share/msfixit-shopos/catalog/schema.sql" \
+        "$stage/usr/share/msfixit-shopos/catalog/guards.sql"
 } > "$stage/usr/share/msfixit-shopos/build-info.txt"
 
 rm -rf "$output_dir"
