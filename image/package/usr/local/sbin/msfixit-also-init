@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+umask 077
+
+readonly config_dir=/etc/msfixit-shopos
+readonly also_dir="${config_dir}/also"
+readonly config_file="${config_dir}/also.env"
+readonly config_example=/usr/share/msfixit-shopos/also/also.env.example
+readonly schema_file=/usr/share/msfixit-shopos/also/schema.sql
+readonly catalog_env="${config_dir}/catalog.env"
+readonly data_root=/data/suppliers/also
+
+if [ "$(id -u)" -ne 0 ]; then
+    echo "Run this command with sudo." >&2
+    exit 1
+fi
+
+for required in "$config_example" "$schema_file" "$catalog_env"; do
+    [ -f "$required" ] || {
+        echo "Required ALSO connector source is missing: $required" >&2
+        exit 1
+    }
+done
+
+install -d -m 0750 "$config_dir" "$also_dir"
+install -d -m 0750 \
+    "$data_root" \
+    "$data_root/incoming" \
+    "$data_root/archive" \
+    "$data_root/quarantine" \
+    "$data_root/reports"
+chown -R root:www-data "$data_root"
+
+if [ ! -f "$config_file" ]; then
+    install -m 0640 -o root -g www-data "$config_example" "$config_file"
+fi
+
+# shellcheck disable=SC1090
+set -a
+source "$catalog_env"
+set +a
+
+MYSQL_PWD="$CATALOG_DB_PASSWORD" mariadb \
+    --host="$CATALOG_DB_HOST" \
+    --port="$CATALOG_DB_PORT" \
+    --user="$CATALOG_DB_USER" \
+    "$CATALOG_DB_NAME" < "$schema_file"
+
+systemctl enable msfixit-also-sync.timer
+systemctl start msfixit-also-sync.timer
+
+echo "AT pilot and ALSO connector initialized. The connector remains inactive until ALSO_ENABLED=yes and credentials are configured."
