@@ -66,8 +66,30 @@ if ($source_width < 1000 || $source_height < 1000) {
     exit(1);
 }
 
-$header = msfixit_crop_resize($source_image, 45, 35, 1165, 720, 1000, 618);
-$icon = msfixit_crop_resize($source_image, 20, 35, 620, 620, 512, 512);
+// The crop coordinates originate from the supplied 1254 x 1254 artwork and
+// are scaled to the embedded optimized source size so the result is stable.
+$scale_x = $source_width / 1254;
+$scale_y = $source_height / 1254;
+$scaled = static fn (int $value, float $scale): int => max(1, (int) round($value * $scale));
+
+$header = msfixit_crop_resize(
+    $source_image,
+    $scaled(45, $scale_x),
+    $scaled(35, $scale_y),
+    $scaled(1165, $scale_x),
+    $scaled(720, $scale_y),
+    1000,
+    618
+);
+$icon = msfixit_crop_resize(
+    $source_image,
+    $scaled(20, $scale_x),
+    $scaled(35, $scale_y),
+    $scaled(620, $scale_x),
+    $scaled(620, $scale_y),
+    512,
+    512
+);
 
 if (!imagewebp($header, $output_dir . '/msfixit-brand-header.webp', 90)) {
     fwrite(STDERR, "Unable to write header logo.\n");
