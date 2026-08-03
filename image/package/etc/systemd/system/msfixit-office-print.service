@@ -1,0 +1,22 @@
+[Unit]
+Description=Ms. FixIT document and label print queue
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/msfixit-shopos/office-worker.env
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/msfixit-office-print
+User=root
+Group=lp
+Nice=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadOnlyPaths=/data/office /etc/msfixit-shopos
+ReadWritePaths=/var/lib/msfixit-shopos /run/msfixit-shopos
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictRealtime=true

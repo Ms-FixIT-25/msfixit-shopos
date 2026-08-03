@@ -35,13 +35,14 @@ ensure_media() {
 
 run_wp core is-installed >/dev/null
 
-# The independent article master is the source of truth for Ms. FixIT article
-# numbers and external supplier, barcode, POS, marketplace and ERP mappings.
+# Separate application databases remain the source of truth for article identity
+# and for immutable commercial documents, payments, reminders and shipments.
 /usr/local/sbin/msfixit-catalog-init
+/usr/local/sbin/msfixit-office-init
 
 # Storefront provides a stable WooCommerce-compatible base. ShopOS branding,
-# DACH restrictions and the article bridge are MU plugins so they survive
-# normal theme and plugin updates.
+# DACH restrictions, article mapping and Office event hooks are MU plugins so
+# they survive normal theme and plugin updates.
 if ! run_wp plugin is-installed woocommerce >/dev/null 2>&1; then
     run_wp plugin install woocommerce >/dev/null
 fi
@@ -53,15 +54,15 @@ fi
 run_wp theme activate storefront >/dev/null
 
 install -d -m 0755 "$wordpress_dir/wp-content/mu-plugins" "$generated_branding_dir"
-install -m 0644 \
-    "$wordpress_assets/msfixit-branding.php" \
-    "$wordpress_dir/wp-content/mu-plugins/msfixit-branding.php"
-install -m 0644 \
-    "$wordpress_assets/msfixit-catalog-bridge.php" \
-    "$wordpress_dir/wp-content/mu-plugins/msfixit-catalog-bridge.php"
-install -m 0644 \
-    "$wordpress_assets/msfixit-commerce-region.php" \
-    "$wordpress_dir/wp-content/mu-plugins/msfixit-commerce-region.php"
+for plugin in \
+    msfixit-branding.php \
+    msfixit-catalog-bridge.php \
+    msfixit-commerce-region.php \
+    msfixit-office-bridge.php; do
+    install -m 0644 \
+        "$wordpress_assets/$plugin" \
+        "$wordpress_dir/wp-content/mu-plugins/$plugin"
+done
 
 php "$wordpress_assets/msfixit-render-branding.php" \
     "$branding_dir/msfixit-brand-full.webp" \
@@ -126,4 +127,4 @@ done
 run_wp cache flush >/dev/null 2>&1 || true
 chown -R www-data:www-data "$wordpress_dir/wp-content"
 
-echo "Ms. FixIT WooCommerce branding, DACH shop structure and article master applied successfully."
+echo "Ms. FixIT WooCommerce branding, DACH shop, article master and Office/Fulfillment core applied successfully."

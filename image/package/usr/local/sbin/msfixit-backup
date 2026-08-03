@@ -13,15 +13,21 @@ trap 'rm -rf "$workdir"' EXIT
 mariadb-dump --single-transaction --quick --lock-tables=false wordpress \
     | gzip -9 > "${workdir}/wordpress.sql.gz"
 
-if mariadb --batch --skip-column-names \
-    -e "SELECT SCHEMA_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME='shopos_catalog'" \
-    | grep -qx shopos_catalog; then
-    mariadb-dump --single-transaction --quick --lock-tables=false shopos_catalog \
-        | gzip -9 > "${workdir}/shopos-catalog.sql.gz"
-fi
+for database in shopos_catalog shopos_office; do
+    if mariadb --batch --skip-column-names \
+        -e "SELECT SCHEMA_NAME FROM information_schema.SCHEMATA WHERE SCHEMA_NAME='${database}'" \
+        | grep -qx "$database"; then
+        mariadb-dump --single-transaction --quick --lock-tables=false "$database" \
+            | gzip -9 > "${workdir}/${database}.sql.gz"
+    fi
+done
 
 if [ -d /data/wordpress/uploads ]; then
     tar -C /data/wordpress -czf "${workdir}/uploads.tar.gz" uploads
+fi
+
+if [ -d /data/office ]; then
+    tar -C /data -czf "${workdir}/office-data.tar.gz" office
 fi
 
 if [ -f /srv/www/wordpress/wp-config.php ]; then

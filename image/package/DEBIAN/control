@@ -4,7 +4,8 @@ Section: admin
 Priority: optional
 Architecture: arm64
 Maintainer: Ms. FixIT <stefaniekilzer@gmail.com>
-Depends: nginx, mariadb-server, redis-server, php-fpm, php-cli, php-mysql, php-curl, php-gd, php-intl, php-mbstring, php-xml, php-zip, php-bcmath, php-imagick, php-redis, curl, ca-certificates, jq, unzip, rsync, nftables, openssl, logrotate, sudo
-Description: Ms. FixIT ShopOS appliance bootstrap
+Depends: nginx, mariadb-server, redis-server, php-fpm, php-cli, php-mysql, php-curl, php-gd, php-intl, php-mbstring, php-xml, php-zip, php-bcmath, php-imagick, php-redis, php-tcpdf, cups-client, curl, ca-certificates, jq, unzip, rsync, nftables, openssl, logrotate, sudo
+Description: Ms. FixIT ShopOS commerce appliance bootstrap
  Installs and provisions the minimal web, database, cache, firewall,
- Cloudflare Tunnel, WordPress and WooCommerce services used by ShopOS.
+ Cloudflare Tunnel, WordPress, WooCommerce, article master, immutable
+ invoicing, dunning, ProSaldo handoff, fulfillment and print-queue services.

@@ -6,6 +6,7 @@ on:
     paths:
       - image/**
       - scripts/**
+      - tests/**
       - docs/**
       - Makefile
       - .github/workflows/build-image.yml
@@ -14,6 +15,7 @@ on:
     paths:
       - image/**
       - scripts/**
+      - tests/**
       - docs/**
       - Makefile
       - .github/workflows/build-image.yml
@@ -24,18 +26,13 @@ on:
         required: true
         default: rpi4
         type: choice
-        options:
-          - rpi4
-          - rpi5
+        options: [rpi4, rpi5]
       storage:
         description: Storage target to build
         required: true
         default: usb
         type: choice
-        options:
-          - usb
-          - sd
-          - nvme
+        options: [usb, sd, nvme]
 
 permissions:
   contents: write
@@ -46,7 +43,7 @@ concurrency:
 
 jobs:
   validate:
-    name: Validate source and article master
+    name: Validate article, Office and fulfillment cores
     runs-on: ubuntu-24.04
     services:
       mariadb:
@@ -68,69 +65,42 @@ jobs:
       - name: Check source syntax
         run: make check
 
-      - name: Install catalog test clients
+      - name: Install database, PDF and ZIP test clients
         run: |
-          sudo apt-get update
-          sudo apt-get install --yes mariadb-client php-mysql
+          sudo rm -f /etc/apt/sources.list.d/azure-cli.list
+          sudo apt-get -o Acquire::Retries=3 update
+          sudo apt-get -o Acquire::Retries=3 install --yes mariadb-client php-mysql php-zip php-tcpdf jq unzip
 
-      - name: Apply and test article-master schema
-        shell: bash
+      - name: Test article master
         env:
           MYSQL_PWD: shopos-ci-root
-        run: |
-          set -Eeuo pipefail
-          db=(mariadb --host=127.0.0.1 --port=3306 --user=root shopos_catalog)
-          "${db[@]}" < image/package/usr/share/msfixit-shopos/catalog/schema.sql
-          "${db[@]}" < image/package/usr/share/msfixit-shopos/catalog/guards.sql
+        run: bash tests/test-catalog.sh
 
-          cat > /tmp/catalog.env <<'EOF_CATALOG'
-          CATALOG_DB_HOST=127.0.0.1
-          CATALOG_DB_PORT=3306
-          CATALOG_DB_NAME=shopos_catalog
-          CATALOG_DB_USER=root
-          CATALOG_DB_PASSWORD=shopos-ci-root
-          EOF_CATALOG
-          sudo install -d -m 0750 /etc/msfixit-shopos
-          sudo install -m 0600 /tmp/catalog.env /etc/msfixit-shopos/catalog.env
+      - name: Test protected Office and fulfillment data
+        env:
+          MYSQL_PWD: shopos-ci-root
+        run: sudo env MYSQL_PWD="$MYSQL_PWD" GITHUB_WORKSPACE="$GITHUB_WORKSPACE" bash tests/test-office.sh
 
-          article="$(sudo php image/package/usr/local/sbin/msfixit-catalog create 'CI Test Product' simple)"
-          test "$article" = MF-00000001
+      - name: Test versioned Office migrations
+        env:
+          MYSQL_PWD: shopos-ci-root
+        run: sudo env MYSQL_PWD="$MYSQL_PWD" bash tests/test-office-migrations.sh
 
-          sudo php image/package/usr/local/sbin/msfixit-catalog \
-            map "$article" supplier:ci SUP-100 primary
-          sudo php image/package/usr/local/sbin/msfixit-catalog \
-            offer "$article" ci SUP-100 42.50 EUR 7 available
-          sudo php image/package/usr/local/sbin/msfixit-catalog \
-            channel "$article" woocommerce 384 "$article" active
-          sudo php image/package/usr/local/sbin/msfixit-catalog show "$article" \
-            | jq -e '.article_number == "MF-00000001"'
-          sudo php image/package/usr/local/sbin/msfixit-catalog \
-            resolve supplier:ci SUP-100 \
-            | jq -e '.article_number == "MF-00000001"'
-          sudo php image/package/usr/local/sbin/msfixit-catalog \
-            export-csv /tmp/article-master.csv
-          grep -q 'MF-00000001' /tmp/article-master.csv
+      - name: Test immutable document and payment guards
+        env:
+          MYSQL_PWD: shopos-ci-root
+        run: sudo env MYSQL_PWD="$MYSQL_PWD" bash tests/test-office-guards.sh
 
-          if "${db[@]}" --execute="UPDATE catalog_products SET article_number='MF-99999999' WHERE article_number='MF-00000001'"; then
-            echo 'Article-number immutability trigger did not block an update.' >&2
-            exit 1
-          fi
-
-          if "${db[@]}" --execute="DELETE FROM catalog_products WHERE article_number='MF-00000001'"; then
-            echo 'Archive-only trigger did not block a delete.' >&2
-            exit 1
-          fi
-
-          trigger_count="$("${db[@]}" --batch --skip-column-names \
-            --execute="SELECT COUNT(*) FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA='shopos_catalog'")"
-          test "$trigger_count" -ge 5
+      - name: Test least-privilege WordPress Office access
+        env:
+          MYSQL_PWD: shopos-ci-root
+        run: sudo env MYSQL_PWD="$MYSQL_PWD" bash tests/test-office-privileges.sh
 
   build:
     name: Build ShopOS image
     needs: validate
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 180
-
     steps:
       - name: Check out ShopOS
         uses: actions/checkout@v7
@@ -140,12 +110,8 @@ jobs:
         run: |
           device='${{ github.event.inputs.device }}'
           storage='${{ github.event.inputs.storage }}'
-          if [ -z "$device" ]; then
-            device=rpi4
-          fi
-          if [ -z "$storage" ]; then
-            storage=usb
-          fi
+          [ -n "$device" ] || device=rpi4
+          [ -n "$storage" ] || storage=usb
           if [ "$device" = rpi4 ] && [ "$storage" = nvme ]; then
             echo "Raspberry Pi 4B has no native NVMe target; select USB for an NVMe USB enclosure." >&2
             exit 2
@@ -186,23 +152,14 @@ jobs:
           - compressed Raspberry Pi 4B ShopOS image
           - portable SHA-256 checksum
 
-          This build includes the branded WooCommerce setup, the initial AT/DE/CH sales region and the independent Ms. FixIT article master with supplier, barcode, POS, marketplace and ERP/SAP mappings.
+          This build includes DACH WooCommerce, the permanent Ms. FixIT article master, immutable invoice and delivery-note documents, payment allocation, guarded reminders, ProSaldo handoff packages, shipment/label storage and CUPS print queues.
 
-          Payment methods, country-specific shipping prices, taxes, Swiss customs handling and legal texts still require deliberate configuration and testing. Physical first-boot validation on the target Raspberry Pi is required before connecting the production domain.
+          Production tax profiles, legal wording, payment providers, shipping prices, carrier contracts/API credentials, Swiss customs workflow and real printers still require deliberate configuration and physical testing. Carrier APIs remain disabled until contract-specific onboarding is completed.
           EOF
 
           if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release edit "$tag" \
-              --repo "$GITHUB_REPOSITORY" \
-              --title "$title" \
-              --notes-file "$notes_file"
-            gh release upload "$tag" artifacts/* \
-              --repo "$GITHUB_REPOSITORY" \
-              --clobber
+            gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --title "$title" --notes-file "$notes_file"
+            gh release upload "$tag" artifacts/* --repo "$GITHUB_REPOSITORY" --clobber
           else
-            gh release create "$tag" artifacts/* \
-              --repo "$GITHUB_REPOSITORY" \
-              --target "$GITHUB_SHA" \
-              --title "$title" \
-              --notes-file "$notes_file"
+            gh release create "$tag" artifacts/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "$title" --notes-file "$notes_file"
           fi

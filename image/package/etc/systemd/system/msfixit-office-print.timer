@@ -1,0 +1,12 @@
+[Unit]
+Description=Run Ms. FixIT print queue
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=1min
+AccuracySec=10s
+Persistent=true
+Unit=msfixit-office-print.service
+
+[Install]
+WantedBy=timers.target

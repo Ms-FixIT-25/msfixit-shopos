@@ -56,6 +56,11 @@ chmod 0755 \
     "$stage/usr/local/sbin/msfixit-brand-shop" \
     "$stage/usr/local/sbin/msfixit-catalog-init" \
     "$stage/usr/local/sbin/msfixit-catalog" \
+    "$stage/usr/local/sbin/msfixit-office-init" \
+    "$stage/usr/local/sbin/msfixit-office" \
+    "$stage/usr/local/sbin/msfixit-office-worker" \
+    "$stage/usr/local/sbin/msfixit-office-dunning" \
+    "$stage/usr/local/sbin/msfixit-office-print" \
     "$stage/usr/local/sbin/msfixit-apply-config" \
     "$stage/usr/local/sbin/msfixit-health" \
     "$stage/usr/local/sbin/msfixit-backup" \
@@ -72,13 +77,18 @@ install -d -m 0755 "$stage/usr/share/msfixit-shopos"
     printf 'WP_CLI_SHA256=%s\n' "$wp_cli_sha256"
     printf 'MSFIXIT_BRAND_SHA256=%s\n' "$brand_sha256"
     printf 'CATALOG_SCHEMA_VERSION=1\n'
+    printf 'OFFICE_SCHEMA_VERSION=2\n'
     printf 'BUILD_UTC=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     sha256sum \
         "$stage/usr/local/bin/cloudflared" \
         "$stage/usr/local/bin/wp" \
         "$brand_file" \
         "$stage/usr/share/msfixit-shopos/catalog/schema.sql" \
-        "$stage/usr/share/msfixit-shopos/catalog/guards.sql"
+        "$stage/usr/share/msfixit-shopos/catalog/guards.sql" \
+        "$stage/usr/share/msfixit-shopos/office/schema.sql" \
+        "$stage/usr/share/msfixit-shopos/office/operational.sql" \
+        "$stage/usr/share/msfixit-shopos/office/migrations.sql" \
+        "$stage/usr/share/msfixit-shopos/office/office-lib.php"
 } > "$stage/usr/share/msfixit-shopos/build-info.txt"
 
 rm -rf "$output_dir"

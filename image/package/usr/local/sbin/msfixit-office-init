@@ -1,0 +1,131 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+umask 077
+
+readonly config_dir=/etc/msfixit-shopos
+readonly carrier_config_dir="${config_dir}/carriers"
+readonly admin_env="${config_dir}/office.env"
+readonly wordpress_env="${config_dir}/office-wordpress.env"
+readonly worker_env="${config_dir}/office-worker.env"
+readonly business_env="${config_dir}/business.env"
+readonly schema_file=/usr/share/msfixit-shopos/office/schema.sql
+readonly operational_file=/usr/share/msfixit-shopos/office/operational.sql
+readonly migrations_file=/usr/share/msfixit-shopos/office/migrations.sql
+readonly business_example=/usr/share/msfixit-shopos/office/business.env.example
+readonly database_name=shopos_office
+readonly admin_user=shopos_office_admin
+readonly wordpress_user=shopos_office_wp
+readonly worker_user=shopos_office_worker
+
+if [ "$(id -u)" -ne 0 ]; then
+    echo "Run this command with sudo." >&2
+    exit 1
+fi
+
+random_secret() {
+    openssl rand -hex 24
+}
+
+read_value() {
+    local file="$1" key="$2"
+    [ -f "$file" ] || return 0
+    sed -n "s/^${key}=//p" "$file" | tail -n 1
+}
+
+for required_file in "$schema_file" "$operational_file" "$migrations_file" "$business_example"; do
+    [ -f "$required_file" ] || {
+        echo "Office source file not found: $required_file" >&2
+        exit 1
+    }
+done
+
+install -d -m 0750 "$config_dir" "$carrier_config_dir"
+install -d -m 0750 /data/office
+install -d -m 0750 /data/office/documents
+install -d -m 0750 /data/office/documents/invoices
+install -d -m 0750 /data/office/documents/credit-notes
+install -d -m 0750 /data/office/documents/delivery-notes
+install -d -m 0750 /data/office/documents/reminders
+install -d -m 0750 /data/office/documents/customs
+install -d -m 0750 /data/office/labels
+install -d -m 0750 /data/office/manifests
+install -d -m 0750 /data/office/exports
+install -d -m 0750 /data/office/exports/prosaldo
+install -d -m 0750 /data/office/print-queue
+install -d -m 0750 /data/office/archive
+chown -R root:www-data /data/office
+chmod 0750 /data/office /data/office/*
+
+admin_password="$(read_value "$admin_env" OFFICE_DB_PASSWORD)"
+wordpress_password="$(read_value "$wordpress_env" OFFICE_DB_PASSWORD)"
+worker_password="$(read_value "$worker_env" OFFICE_DB_PASSWORD)"
+admin_password="${admin_password:-$(random_secret)}"
+wordpress_password="${wordpress_password:-$(random_secret)}"
+worker_password="${worker_password:-$(random_secret)}"
+
+mariadb <<EOF_SQL
+CREATE DATABASE IF NOT EXISTS ${database_name}
+    CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+CREATE USER IF NOT EXISTS '${admin_user}'@'localhost' IDENTIFIED BY '${admin_password}';
+ALTER USER '${admin_user}'@'localhost' IDENTIFIED BY '${admin_password}';
+GRANT ALL PRIVILEGES ON ${database_name}.* TO '${admin_user}'@'localhost';
+
+CREATE USER IF NOT EXISTS '${wordpress_user}'@'localhost' IDENTIFIED BY '${wordpress_password}';
+ALTER USER '${wordpress_user}'@'localhost' IDENTIFIED BY '${wordpress_password}';
+REVOKE ALL PRIVILEGES, GRANT OPTION FROM '${wordpress_user}'@'localhost';
+GRANT SELECT ON ${database_name}.* TO '${wordpress_user}'@'localhost';
+
+CREATE USER IF NOT EXISTS '${worker_user}'@'localhost' IDENTIFIED BY '${worker_password}';
+ALTER USER '${worker_user}'@'localhost' IDENTIFIED BY '${worker_password}';
+GRANT SELECT, INSERT, UPDATE ON ${database_name}.* TO '${worker_user}'@'localhost';
+FLUSH PRIVILEGES;
+EOF_SQL
+
+mariadb "$database_name" < "$schema_file"
+mariadb "$database_name" < "$operational_file"
+mariadb "$database_name" < "$migrations_file"
+
+mariadb <<EOF_WORDPRESS_GRANT
+GRANT INSERT ON ${database_name}.office_outbox TO '${wordpress_user}'@'localhost';
+FLUSH PRIVILEGES;
+EOF_WORDPRESS_GRANT
+
+cat > "$admin_env" <<EOF_ADMIN
+OFFICE_DB_HOST=127.0.0.1
+OFFICE_DB_PORT=3306
+OFFICE_DB_NAME=${database_name}
+OFFICE_DB_USER=${admin_user}
+OFFICE_DB_PASSWORD=${admin_password}
+EOF_ADMIN
+chmod 0600 "$admin_env"
+chown root:root "$admin_env"
+
+cat > "$wordpress_env" <<EOF_WORDPRESS
+OFFICE_DB_HOST=127.0.0.1
+OFFICE_DB_PORT=3306
+OFFICE_DB_NAME=${database_name}
+OFFICE_DB_USER=${wordpress_user}
+OFFICE_DB_PASSWORD=${wordpress_password}
+EOF_WORDPRESS
+chmod 0640 "$wordpress_env"
+chown root:www-data "$wordpress_env"
+
+cat > "$worker_env" <<EOF_WORKER
+OFFICE_DB_HOST=127.0.0.1
+OFFICE_DB_PORT=3306
+OFFICE_DB_NAME=${database_name}
+OFFICE_DB_USER=${worker_user}
+OFFICE_DB_PASSWORD=${worker_password}
+EOF_WORKER
+chmod 0600 "$worker_env"
+chown root:root "$worker_env"
+
+if [ ! -f "$business_env" ]; then
+    install -m 0640 -o root -g www-data "$business_example" "$business_env"
+fi
+
+systemctl enable msfixit-office-worker.timer msfixit-office-dunning.timer msfixit-office-print.timer
+systemctl start msfixit-office-worker.timer msfixit-office-dunning.timer msfixit-office-print.timer
+
+echo "Ms. FixIT office and fulfillment core initialized successfully."

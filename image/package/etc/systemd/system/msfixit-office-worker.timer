@@ -1,0 +1,12 @@
+[Unit]
+Description=Run Ms. FixIT Office event worker
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+AccuracySec=10s
+Persistent=true
+Unit=msfixit-office-worker.service
+
+[Install]
+WantedBy=timers.target
