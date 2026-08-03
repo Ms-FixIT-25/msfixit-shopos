@@ -106,6 +106,11 @@ jobs:
           MYSQL_PWD: shopos-ci-root
         run: sudo env MYSQL_PWD="$MYSQL_PWD" GITHUB_WORKSPACE="$GITHUB_WORKSPACE" bash tests/test-compliance-strict.sh
 
+      - name: Test compliance rejection before invoice numbering
+        env:
+          MYSQL_PWD: shopos-ci-root
+        run: sudo env MYSQL_PWD="$MYSQL_PWD" bash tests/test-compliance-numbering.sh
+
   build:
     name: Build ShopOS image
     needs: validate
