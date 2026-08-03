@@ -101,6 +101,11 @@ jobs:
           MYSQL_PWD: shopos-ci-root
         run: sudo env MYSQL_PWD="$MYSQL_PWD" GITHUB_WORKSPACE="$GITHUB_WORKSPACE" bash tests/test-compliance.sh
 
+      - name: Test strict DACH evidence and tax-case guards
+        env:
+          MYSQL_PWD: shopos-ci-root
+        run: sudo env MYSQL_PWD="$MYSQL_PWD" GITHUB_WORKSPACE="$GITHUB_WORKSPACE" bash tests/test-compliance-strict.sh
+
   build:
     name: Build ShopOS image
     needs: validate
