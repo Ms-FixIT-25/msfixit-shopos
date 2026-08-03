@@ -1,0 +1,12 @@
+[Unit]
+Description=Run Ms. FixIT ShopOS DACH compliance worker
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+AccuracySec=15s
+Persistent=true
+Unit=msfixit-compliance-worker.service
+
+[Install]
+WantedBy=timers.target

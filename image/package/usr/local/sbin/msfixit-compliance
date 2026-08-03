@@ -1,0 +1,961 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+$officeLibrary = '/usr/share/msfixit-shopos/office/office-lib.php';
+if (!is_file($officeLibrary)) {
+    fwrite(STDERR, "Office library not found: {$officeLibrary}\n");
+    exit(1);
+}
+require_once $officeLibrary;
+
+function compliance_fail(string $message, int $code = 1): never
+{
+    fwrite(STDERR, $message . PHP_EOL);
+    exit($code);
+}
+
+function compliance_usage(): never
+{
+    fwrite(STDERR, <<<'TEXT'
+Ms. FixIT ShopOS DACH Compliance
+
+Commands:
+  msfixit-compliance status [AT|DE|CH]
+  msfixit-compliance market-approve COUNTRY ACTOR
+  msfixit-compliance market-suspend COUNTRY REASON
+  msfixit-compliance legal-approve JSON_FILE
+  msfixit-compliance registration-set JSON_FILE
+  msfixit-compliance supplier-set JSON_FILE
+  msfixit-compliance supplier-market-set JSON_FILE
+  msfixit-compliance product-set JSON_FILE
+  msfixit-compliance product-check ARTICLE COUNTRY
+  msfixit-compliance tax-decide JSON_FILE
+  msfixit-compliance threshold-status [YEAR]
+  msfixit-compliance withdrawal-list [STATUS]
+  msfixit-compliance withdrawal-status ID STATUS [NOTE]
+  msfixit-compliance archive-document DOCUMENT_ID COUNTRY
+  msfixit-compliance worker-run [LIMIT]
+
+All approvals require a named actor and evidence where the command accepts it.
+Production facts, registration numbers and legal texts must never be guessed.
+TEXT);
+    exit(2);
+}
+
+function compliance_json_file(string $path): array
+{
+    $content = $path === '-' ? stream_get_contents(STDIN) : @file_get_contents($path);
+    if (!is_string($content) || trim($content) === '') {
+        throw new InvalidArgumentException("JSON input is unavailable or empty: {$path}");
+    }
+    $value = json_decode($content, true, 512, JSON_THROW_ON_ERROR);
+    if (!is_array($value)) {
+        throw new InvalidArgumentException('JSON root must be an object');
+    }
+    return $value;
+}
+
+function compliance_output(mixed $value): void
+{
+    echo json_encode($value, JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . PHP_EOL;
+}
+
+function compliance_country(string $country): string
+{
+    $country = strtoupper(trim($country));
+    if (!in_array($country, ['AT', 'DE', 'CH'], true)) {
+        throw new InvalidArgumentException("Unsupported market country: {$country}");
+    }
+    return $country;
+}
+
+function compliance_required(array $input, string $key): string
+{
+    $value = trim((string) ($input[$key] ?? ''));
+    if ($value === '') {
+        throw new InvalidArgumentException("Missing required field: {$key}");
+    }
+    return $value;
+}
+
+function compliance_bool(mixed $value): int
+{
+    return in_array(strtolower(trim((string) $value)), ['1', 'yes', 'true', 'on', 'ja'], true) ? 1 : 0;
+}
+
+function compliance_hash_file_or_null(?string $path): ?string
+{
+    $path = trim((string) $path);
+    if ($path === '') {
+        return null;
+    }
+    if (!is_file($path) || !is_readable($path)) {
+        throw new RuntimeException("Evidence file is unavailable: {$path}");
+    }
+    $hash = hash_file('sha256', $path);
+    if ($hash === false) {
+        throw new RuntimeException("Unable to hash evidence file: {$path}");
+    }
+    return $hash;
+}
+
+function compliance_audit(PDO $pdo, string $eventType, string $objectType, string $objectReference, array $payload, string $actorType = 'system', ?string $actorReference = null): void
+{
+    $previous = $pdo->query('SELECT event_sha256 FROM compliance_audit_log ORDER BY id DESC LIMIT 1')->fetchColumn();
+    $eventUuid = office_uuid();
+    $createdAt = (new DateTimeImmutable())->format(DATE_ATOM);
+    $canonical = office_json([
+        'event_uuid' => $eventUuid,
+        'actor_type' => $actorType,
+        'actor_reference' => $actorReference,
+        'event_type' => $eventType,
+        'object_type' => $objectType,
+        'object_reference' => $objectReference,
+        'payload' => $payload,
+        'previous' => $previous ?: null,
+        'created_at' => $createdAt,
+    ]);
+    $hash = hash('sha256', $canonical);
+    $statement = $pdo->prepare(
+        'INSERT INTO compliance_audit_log
+         (event_uuid, actor_type, actor_reference, event_type, object_type,
+          object_reference, event_payload_json, previous_event_sha256, event_sha256, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+    );
+    $statement->execute([
+        $eventUuid, $actorType, $actorReference, $eventType, $objectType,
+        $objectReference, office_json($payload), $previous ?: null, $hash,
+        (new DateTimeImmutable())->format('Y-m-d H:i:s'),
+    ]);
+}
+
+function compliance_market(PDO $pdo, string $country): array
+{
+    $statement = $pdo->prepare('SELECT * FROM compliance_market_profiles WHERE country_code=?');
+    $statement->execute([compliance_country($country)]);
+    $market = $statement->fetch();
+    if (!$market) {
+        throw new RuntimeException("Compliance market profile not found: {$country}");
+    }
+    return $market;
+}
+
+function compliance_missing_legal(PDO $pdo, string $country, string $customerType): array
+{
+    $requiredColumn = $customerType === 'business' ? 'required_for_b2b' : 'required_for_b2c';
+    $statement = $pdo->prepare(
+        "SELECT r.document_type
+           FROM compliance_market_required_documents r
+          WHERE r.country_code=? AND r.{$requiredColumn}=1
+            AND NOT EXISTS (
+                SELECT 1 FROM compliance_legal_documents d
+                 WHERE d.country_code=r.country_code
+                   AND d.document_type=r.document_type
+                   AND d.active=1 AND d.approval_status='approved'
+                   AND d.valid_from <= CURRENT_DATE
+                   AND (d.valid_until IS NULL OR d.valid_until >= CURRENT_DATE)
+            )
+          ORDER BY r.document_type"
+    );
+    $statement->execute([$country]);
+    return array_map(static fn(array $row): string => (string) $row['document_type'], $statement->fetchAll());
+}
+
+function compliance_active_legal(PDO $pdo, string $country, string $customerType): array
+{
+    $requiredColumn = $customerType === 'business' ? 'required_for_b2b' : 'required_for_b2c';
+    $statement = $pdo->prepare(
+        "SELECT d.document_type, d.version_label, d.wp_page_slug, d.content_sha256,
+                d.file_path, d.file_sha256, d.valid_from, d.valid_until
+           FROM compliance_market_required_documents r
+           JOIN compliance_legal_documents d
+             ON d.country_code=r.country_code AND d.document_type=r.document_type
+          WHERE r.country_code=? AND r.{$requiredColumn}=1
+            AND d.active=1 AND d.approval_status='approved'
+            AND d.valid_from <= CURRENT_DATE
+            AND (d.valid_until IS NULL OR d.valid_until >= CURRENT_DATE)
+          ORDER BY d.document_type"
+    );
+    $statement->execute([$country]);
+    return $statement->fetchAll();
+}
+
+function compliance_registration(PDO $pdo, string $country, string $entity, string $type): ?array
+{
+    $statement = $pdo->prepare(
+        "SELECT * FROM compliance_business_registrations
+          WHERE country_code=? AND legal_entity_code=? AND registration_type=?
+            AND registration_status='verified'
+            AND (valid_from IS NULL OR valid_from <= CURRENT_DATE)
+            AND (valid_until IS NULL OR valid_until >= CURRENT_DATE)"
+    );
+    $statement->execute([$country, $entity, $type]);
+    $row = $statement->fetch();
+    return $row ?: null;
+}
+
+function compliance_product_check(PDO $pdo, string $article, string $country): array
+{
+    $country = compliance_country($country);
+    $statement = $pdo->prepare(
+        'SELECT p.*, s.direct_to_customer, s.dispatcher_legal_entity_code,
+                sm.verification_status AS supplier_market_status,
+                sm.packaging_registration, sm.packaging_system_participation,
+                sm.eee_registration AS supplier_eee_registration,
+                sm.battery_registration AS supplier_battery_registration
+           FROM compliance_product_markets p
+           LEFT JOIN compliance_suppliers s ON s.supplier_code=p.supplier_code
+           LEFT JOIN compliance_supplier_markets sm
+             ON sm.supplier_code=p.supplier_code AND sm.country_code=p.country_code
+          WHERE p.article_number=? AND p.country_code=?'
+    );
+    $statement->execute([$article, $country]);
+    $product = $statement->fetch();
+    if (!$product) {
+        return ['approved' => false, 'article_number' => $article, 'country_code' => $country, 'missing' => ['product_market_record']];
+    }
+
+    $missing = [];
+    foreach (['product_identifier','manufacturer_name','manufacturer_postal_address','manufacturer_email'] as $field) {
+        if (trim((string) ($product[$field] ?? '')) === '') {
+            $missing[] = $field;
+        }
+    }
+    if (!filter_var((string) $product['manufacturer_email'], FILTER_VALIDATE_EMAIL)) {
+        $missing[] = 'manufacturer_email_valid';
+    }
+    if ((int) $product['manufacturer_outside_eu'] === 1 && in_array($country, ['AT','DE'], true)) {
+        foreach (['eu_responsible_person_name','eu_responsible_person_postal_address','eu_responsible_person_email'] as $field) {
+            if (trim((string) ($product[$field] ?? '')) === '') {
+                $missing[] = $field;
+            }
+        }
+        if (!filter_var((string) $product['eu_responsible_person_email'], FILTER_VALIDATE_EMAIL)) {
+            $missing[] = 'eu_responsible_person_email_valid';
+        }
+    }
+    if (trim((string) ($product['safety_warnings_de'] ?? '')) === '') {
+        $missing[] = 'safety_warnings_de';
+    }
+    if (!$product['delivery_min_days'] || !$product['delivery_max_days'] || (int) $product['delivery_max_days'] < (int) $product['delivery_min_days']) {
+        $missing[] = 'valid_delivery_window';
+    }
+    if ((int) $product['ce_required'] === 1 && (int) $product['ce_confirmed'] !== 1) {
+        $missing[] = 'ce_confirmation';
+    }
+    if (in_array($country, ['AT','DE'], true) && (int) ($product['legal_guarantee_months'] ?? 0) < 24) {
+        $missing[] = 'b2c_legal_guarantee_24_months';
+    }
+
+    $direct = (int) ($product['direct_to_customer'] ?? 0) === 1;
+    $supplierVerified = ($product['supplier_market_status'] ?? '') === 'verified';
+    if ($country === 'DE') {
+        $sellerPackaging = compliance_registration($pdo, 'DE', 'seller', 'LUCID')
+            && compliance_registration($pdo, 'DE', 'seller', 'PACKAGING_SYSTEM');
+        $supplierPackaging = $direct && $supplierVerified
+            && trim((string) ($product['packaging_registration'] ?? '')) !== ''
+            && trim((string) ($product['packaging_system_participation'] ?? '')) !== '';
+        if (!$sellerPackaging && !$supplierPackaging) {
+            $missing[] = 'de_packaging_registration_and_system_participation';
+        }
+        if ((int) $product['electrical_equipment'] === 1) {
+            $eee = trim((string) ($product['eee_registration_number'] ?? $product['supplier_eee_registration'] ?? ''));
+            if ($eee === '') {
+                $missing[] = 'de_eee_registration';
+            }
+        }
+        if ((int) $product['contains_battery'] === 1) {
+            $battery = trim((string) ($product['battery_registration_number'] ?? $product['supplier_battery_registration'] ?? ''));
+            if ($battery === '') {
+                $missing[] = 'de_battery_registration';
+            }
+        }
+    }
+    if ($country === 'AT') {
+        $sellerPackaging = compliance_registration($pdo, 'AT', 'seller', 'PACKAGING_SYSTEM');
+        $supplierPackaging = $direct && $supplierVerified
+            && trim((string) ($product['packaging_system_participation'] ?? '')) !== '';
+        if (!$sellerPackaging && !$supplierPackaging) {
+            $missing[] = 'at_packaging_system_participation';
+        }
+        if ((int) $product['electrical_equipment'] === 1) {
+            $eee = trim((string) ($product['eee_registration_number'] ?? $product['supplier_eee_registration'] ?? ''));
+            if ($eee === '') {
+                $missing[] = 'at_eee_registration';
+            }
+        }
+        if ((int) $product['contains_battery'] === 1) {
+            $battery = trim((string) ($product['battery_registration_number'] ?? $product['supplier_battery_registration'] ?? ''));
+            if ($battery === '') {
+                $missing[] = 'at_battery_registration';
+            }
+        }
+    }
+
+    if (($product['approval_status'] ?? '') !== 'approved') {
+        $missing[] = 'product_approval';
+    }
+    $missing = array_values(array_unique($missing));
+    return [
+        'approved' => $missing === [],
+        'article_number' => $article,
+        'country_code' => $country,
+        'supplier_code' => $product['supplier_code'],
+        'missing' => $missing,
+        'delivery_days' => [$product['delivery_min_days'], $product['delivery_max_days']],
+    ];
+}
+
+function compliance_threshold_status(PDO $pdo, int $year): array
+{
+    $rules = $pdo->query('SELECT * FROM compliance_threshold_rules WHERE enabled=1 ORDER BY rule_code')->fetchAll();
+    $result = [];
+    foreach ($rules as $rule) {
+        $counterType = match ($rule['rule_code']) {
+            'AT_SMALL_BUSINESS' => 'at_total_turnover',
+            'EU_B2C_DISTANCE_SALES' => 'eu_b2c_distance_sales',
+            'EU_SME_CROSS_BORDER' => 'eu_sme_cross_border',
+            default => null,
+        };
+        $amount = 0.0;
+        if ($counterType !== null) {
+            $statement = $pdo->prepare(
+                'SELECT COALESCE(SUM(amount_eur),0) FROM compliance_sales_counters
+                  WHERE calendar_year=? AND counter_type=?'
+            );
+            $statement->execute([$year, $counterType]);
+            $amount = (float) $statement->fetchColumn();
+        }
+        $threshold = (float) $rule['threshold_amount'];
+        $tolerance = $rule['tolerance_amount'] !== null ? (float) $rule['tolerance_amount'] : null;
+        $result[$rule['rule_code']] = [
+            'amount_eur' => round($amount, 2),
+            'threshold' => $threshold,
+            'tolerance' => $tolerance,
+            'usage_percent' => $threshold > 0 ? round(($amount / $threshold) * 100, 2) : null,
+            'threshold_exceeded' => $counterType !== null && $amount > $threshold,
+            'tolerance_exceeded' => $counterType !== null && $tolerance !== null && $amount > $tolerance,
+            'action' => $rule['enforcement_action'],
+            'effective_from' => $rule['effective_from'],
+        ];
+    }
+    return $result;
+}
+
+function compliance_status(PDO $pdo, ?string $country = null): array
+{
+    $countries = $country ? [compliance_country($country)] : ['AT','DE','CH'];
+    $markets = [];
+    foreach ($countries as $code) {
+        $market = compliance_market($pdo, $code);
+        $markets[$code] = [
+            'b2c_enabled' => (bool) $market['b2c_enabled'],
+            'b2b_enabled' => (bool) $market['b2b_enabled'],
+            'legal_review_status' => $market['legal_review_status'],
+            'tax_review_status' => $market['tax_review_status'],
+            'product_review_status' => $market['product_review_status'],
+            'settlement_currency' => $market['settlement_currency'],
+            'withdrawal_policy' => $market['withdrawal_policy'],
+            'withdrawal_function_required_from' => $market['withdrawal_function_required_from'],
+            'retention_years' => (int) $market['accounting_retention_years'],
+            'missing_legal_b2c' => compliance_missing_legal($pdo, $code, 'consumer'),
+            'missing_legal_b2b' => compliance_missing_legal($pdo, $code, 'business'),
+        ];
+    }
+    return [
+        'state' => array_reduce($markets, static fn(bool $ok, array $m): bool => $ok && $m['legal_review_status'] === 'approved' && $m['tax_review_status'] === 'approved', true)
+            ? 'approved' : 'review_required',
+        'markets' => $markets,
+        'thresholds' => compliance_threshold_status($pdo, (int) date('Y')),
+        'pending_withdrawals' => (int) $pdo->query("SELECT COUNT(*) FROM compliance_withdrawals WHERE request_status NOT IN ('completed','rejected')")->fetchColumn(),
+        'unapproved_products' => (int) $pdo->query("SELECT COUNT(*) FROM compliance_product_markets WHERE approval_status <> 'approved'")->fetchColumn(),
+    ];
+}
+
+function compliance_legal_approve(PDO $pdo, array $input): array
+{
+    $country = compliance_country(compliance_required($input, 'country_code'));
+    $type = compliance_required($input, 'document_type');
+    $version = compliance_required($input, 'version_label');
+    $hash = strtolower(compliance_required($input, 'content_sha256'));
+    if (!preg_match('/^[0-9a-f]{64}$/', $hash)) {
+        throw new InvalidArgumentException('content_sha256 must be a lowercase SHA-256 value');
+    }
+    $actor = compliance_required($input, 'approved_by');
+    $id = office_uuid();
+    $filePath = trim((string) ($input['file_path'] ?? '')) ?: null;
+    $fileHash = $filePath ? compliance_hash_file_or_null($filePath) : null;
+    $pdo->beginTransaction();
+    try {
+        $pdo->prepare(
+            "UPDATE compliance_legal_documents
+                SET active=0
+              WHERE country_code=? AND document_type=? AND active=1"
+        )->execute([$country, $type]);
+        $statement = $pdo->prepare(
+            'INSERT INTO compliance_legal_documents
+             (id,country_code,document_type,version_label,wp_page_slug,content_sha256,
+              file_path,file_sha256,valid_from,valid_until,approval_status,approved_at,
+              approved_by,active,source_notes)
+             VALUES (?,?,?,?,?,?,?,?,?,?,\'approved\',CURRENT_TIMESTAMP,?,1,?)'
+        );
+        $statement->execute([
+            $id, $country, $type, $version,
+            trim((string) ($input['wp_page_slug'] ?? '')) ?: null,
+            $hash, $filePath, $fileHash,
+            (string) ($input['valid_from'] ?? date('Y-m-d')),
+            trim((string) ($input['valid_until'] ?? '')) ?: null,
+            $actor, trim((string) ($input['source_notes'] ?? '')) ?: null,
+        ]);
+        compliance_audit($pdo, 'legal_document.approved', 'legal_document', $id, [
+            'country' => $country, 'type' => $type, 'version' => $version, 'hash' => $hash,
+        ], 'administrator', $actor);
+        $pdo->commit();
+    } catch (Throwable $exception) {
+        $pdo->rollBack();
+        throw $exception;
+    }
+    return ['id' => $id, 'country_code' => $country, 'document_type' => $type, 'version_label' => $version, 'active' => true];
+}
+
+function compliance_registration_set(PDO $pdo, array $input): array
+{
+    $country = compliance_country(compliance_required($input, 'country_code'));
+    $entity = compliance_required($input, 'legal_entity_code');
+    $type = strtoupper(compliance_required($input, 'registration_type'));
+    $number = compliance_required($input, 'registration_number');
+    $holder = compliance_required($input, 'holder_name');
+    $status = strtolower((string) ($input['registration_status'] ?? 'unverified'));
+    if (!in_array($status, ['unverified','verified','expired','suspended'], true)) {
+        throw new InvalidArgumentException('Invalid registration_status');
+    }
+    $actor = trim((string) ($input['verified_by'] ?? '')) ?: null;
+    if ($status === 'verified' && !$actor) {
+        throw new InvalidArgumentException('verified_by is required for a verified registration');
+    }
+    $evidencePath = trim((string) ($input['evidence_path'] ?? '')) ?: null;
+    $evidenceHash = $evidencePath ? compliance_hash_file_or_null($evidencePath) : null;
+    $id = office_uuid();
+    $statement = $pdo->prepare(
+        'INSERT INTO compliance_business_registrations
+         (id,country_code,legal_entity_code,registration_type,registration_number,holder_name,
+          registration_status,valid_from,valid_until,evidence_path,evidence_sha256,verified_at,
+          verified_by,verification_source)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+         ON DUPLICATE KEY UPDATE
+          registration_number=VALUES(registration_number), holder_name=VALUES(holder_name),
+          registration_status=VALUES(registration_status), valid_from=VALUES(valid_from),
+          valid_until=VALUES(valid_until), evidence_path=VALUES(evidence_path),
+          evidence_sha256=VALUES(evidence_sha256), verified_at=VALUES(verified_at),
+          verified_by=VALUES(verified_by), verification_source=VALUES(verification_source)'
+    );
+    $statement->execute([
+        $id,$country,$entity,$type,$number,$holder,$status,
+        trim((string) ($input['valid_from'] ?? '')) ?: null,
+        trim((string) ($input['valid_until'] ?? '')) ?: null,
+        $evidencePath,$evidenceHash,$status === 'verified' ? date('Y-m-d H:i:s') : null,
+        $actor,trim((string) ($input['verification_source'] ?? '')) ?: null,
+    ]);
+    compliance_audit($pdo, 'registration.set', 'registration', "{$country}:{$entity}:{$type}", [
+        'status' => $status, 'number' => $number, 'evidence_sha256' => $evidenceHash,
+    ], 'administrator', $actor);
+    return ['country_code'=>$country,'legal_entity_code'=>$entity,'registration_type'=>$type,'status'=>$status];
+}
+
+function compliance_supplier_set(PDO $pdo, array $input): array
+{
+    $code = compliance_required($input, 'supplier_code');
+    $status = strtolower((string) ($input['status'] ?? 'review_required'));
+    $actor = trim((string) ($input['approved_by'] ?? '')) ?: null;
+    if ($status === 'approved' && !$actor) {
+        throw new InvalidArgumentException('approved_by is required for approved suppliers');
+    }
+    $statement = $pdo->prepare(
+        'INSERT INTO compliance_suppliers
+         (supplier_code,legal_name,country_code,direct_to_customer,dispatcher_legal_entity_code,
+          contact_email,status,approved_at,approved_by)
+         VALUES (?,?,?,?,?,?,?,?,?)
+         ON DUPLICATE KEY UPDATE legal_name=VALUES(legal_name),country_code=VALUES(country_code),
+          direct_to_customer=VALUES(direct_to_customer),dispatcher_legal_entity_code=VALUES(dispatcher_legal_entity_code),
+          contact_email=VALUES(contact_email),status=VALUES(status),approved_at=VALUES(approved_at),approved_by=VALUES(approved_by)'
+    );
+    $statement->execute([
+        $code,compliance_required($input,'legal_name'),strtoupper(compliance_required($input,'country_code')),
+        compliance_bool($input['direct_to_customer'] ?? false),
+        trim((string) ($input['dispatcher_legal_entity_code'] ?? '')) ?: null,
+        trim((string) ($input['contact_email'] ?? '')) ?: null,
+        $status,$status === 'approved' ? date('Y-m-d H:i:s') : null,$actor,
+    ]);
+    compliance_audit($pdo, 'supplier.set', 'supplier', $code, ['status'=>$status,'direct_to_customer'=>compliance_bool($input['direct_to_customer'] ?? false)], 'administrator', $actor);
+    return ['supplier_code'=>$code,'status'=>$status];
+}
+
+function compliance_supplier_market_set(PDO $pdo, array $input): array
+{
+    $code = compliance_required($input, 'supplier_code');
+    $country = compliance_country(compliance_required($input, 'country_code'));
+    $status = strtolower((string) ($input['verification_status'] ?? 'review_required'));
+    $actor = trim((string) ($input['verified_by'] ?? '')) ?: null;
+    if ($status === 'verified' && !$actor) {
+        throw new InvalidArgumentException('verified_by is required for verified supplier markets');
+    }
+    $evidencePath = trim((string) ($input['evidence_path'] ?? '')) ?: null;
+    $evidenceHash = $evidencePath ? compliance_hash_file_or_null($evidencePath) : null;
+    $statement = $pdo->prepare(
+        'INSERT INTO compliance_supplier_markets
+         (supplier_code,country_code,actual_dispatcher_name,packaging_registration,
+          packaging_system_participation,eee_registration,battery_registration,
+          authorized_representative,verification_status,verified_at,verified_by,evidence_path,evidence_sha256)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+         ON DUPLICATE KEY UPDATE actual_dispatcher_name=VALUES(actual_dispatcher_name),
+          packaging_registration=VALUES(packaging_registration),packaging_system_participation=VALUES(packaging_system_participation),
+          eee_registration=VALUES(eee_registration),battery_registration=VALUES(battery_registration),
+          authorized_representative=VALUES(authorized_representative),verification_status=VALUES(verification_status),
+          verified_at=VALUES(verified_at),verified_by=VALUES(verified_by),evidence_path=VALUES(evidence_path),evidence_sha256=VALUES(evidence_sha256)'
+    );
+    $statement->execute([
+        $code,$country,trim((string) ($input['actual_dispatcher_name'] ?? '')) ?: null,
+        trim((string) ($input['packaging_registration'] ?? '')) ?: null,
+        trim((string) ($input['packaging_system_participation'] ?? '')) ?: null,
+        trim((string) ($input['eee_registration'] ?? '')) ?: null,
+        trim((string) ($input['battery_registration'] ?? '')) ?: null,
+        trim((string) ($input['authorized_representative'] ?? '')) ?: null,
+        $status,$status === 'verified' ? date('Y-m-d H:i:s') : null,$actor,$evidencePath,$evidenceHash,
+    ]);
+    compliance_audit($pdo, 'supplier_market.set', 'supplier_market', "{$code}:{$country}", ['status'=>$status,'evidence_sha256'=>$evidenceHash], 'administrator', $actor);
+    return ['supplier_code'=>$code,'country_code'=>$country,'status'=>$status];
+}
+
+function compliance_product_set(PDO $pdo, array $input): array
+{
+    $article = compliance_required($input, 'article_number');
+    $country = compliance_country(compliance_required($input, 'country_code'));
+    $status = strtolower((string) ($input['approval_status'] ?? 'review_required'));
+    $actor = trim((string) ($input['approved_by'] ?? '')) ?: null;
+    if ($status === 'approved' && !$actor) {
+        throw new InvalidArgumentException('approved_by is required for approved products');
+    }
+    $evidencePath = trim((string) ($input['evidence_path'] ?? '')) ?: null;
+    $evidenceHash = $evidencePath ? compliance_hash_file_or_null($evidencePath) : null;
+    $statement = $pdo->prepare(
+        'INSERT INTO compliance_product_markets
+         (article_number,country_code,supplier_code,product_identifier,manufacturer_name,
+          manufacturer_postal_address,manufacturer_email,eu_responsible_person_name,
+          eu_responsible_person_postal_address,eu_responsible_person_email,manufacturer_outside_eu,
+          safety_warnings_de,safety_warnings_fr,safety_warnings_it,instructions_languages,
+          ce_required,ce_confirmed,electrical_equipment,contains_battery,eee_registration_number,
+          battery_registration_number,delivery_min_days,delivery_max_days,legal_guarantee_months,
+          withdrawal_exception_code,economic_operator_role,approval_status,approved_at,approved_by,
+          evidence_path,evidence_sha256)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+         ON DUPLICATE KEY UPDATE supplier_code=VALUES(supplier_code),product_identifier=VALUES(product_identifier),
+          manufacturer_name=VALUES(manufacturer_name),manufacturer_postal_address=VALUES(manufacturer_postal_address),
+          manufacturer_email=VALUES(manufacturer_email),eu_responsible_person_name=VALUES(eu_responsible_person_name),
+          eu_responsible_person_postal_address=VALUES(eu_responsible_person_postal_address),
+          eu_responsible_person_email=VALUES(eu_responsible_person_email),manufacturer_outside_eu=VALUES(manufacturer_outside_eu),
+          safety_warnings_de=VALUES(safety_warnings_de),safety_warnings_fr=VALUES(safety_warnings_fr),safety_warnings_it=VALUES(safety_warnings_it),
+          instructions_languages=VALUES(instructions_languages),ce_required=VALUES(ce_required),ce_confirmed=VALUES(ce_confirmed),
+          electrical_equipment=VALUES(electrical_equipment),contains_battery=VALUES(contains_battery),
+          eee_registration_number=VALUES(eee_registration_number),battery_registration_number=VALUES(battery_registration_number),
+          delivery_min_days=VALUES(delivery_min_days),delivery_max_days=VALUES(delivery_max_days),
+          legal_guarantee_months=VALUES(legal_guarantee_months),withdrawal_exception_code=VALUES(withdrawal_exception_code),
+          economic_operator_role=VALUES(economic_operator_role),approval_status=VALUES(approval_status),
+          approved_at=VALUES(approved_at),approved_by=VALUES(approved_by),evidence_path=VALUES(evidence_path),evidence_sha256=VALUES(evidence_sha256)'
+    );
+    $statement->execute([
+        $article,$country,trim((string) ($input['supplier_code'] ?? '')) ?: null,
+        compliance_required($input,'product_identifier'),compliance_required($input,'manufacturer_name'),
+        compliance_required($input,'manufacturer_postal_address'),compliance_required($input,'manufacturer_email'),
+        trim((string) ($input['eu_responsible_person_name'] ?? '')) ?: null,
+        trim((string) ($input['eu_responsible_person_postal_address'] ?? '')) ?: null,
+        trim((string) ($input['eu_responsible_person_email'] ?? '')) ?: null,
+        compliance_bool($input['manufacturer_outside_eu'] ?? false),
+        trim((string) ($input['safety_warnings_de'] ?? '')) ?: null,
+        trim((string) ($input['safety_warnings_fr'] ?? '')) ?: null,
+        trim((string) ($input['safety_warnings_it'] ?? '')) ?: null,
+        trim((string) ($input['instructions_languages'] ?? '')) ?: null,
+        compliance_bool($input['ce_required'] ?? false),compliance_bool($input['ce_confirmed'] ?? false),
+        compliance_bool($input['electrical_equipment'] ?? false),compliance_bool($input['contains_battery'] ?? false),
+        trim((string) ($input['eee_registration_number'] ?? '')) ?: null,
+        trim((string) ($input['battery_registration_number'] ?? '')) ?: null,
+        isset($input['delivery_min_days']) ? (int) $input['delivery_min_days'] : null,
+        isset($input['delivery_max_days']) ? (int) $input['delivery_max_days'] : null,
+        isset($input['legal_guarantee_months']) ? (int) $input['legal_guarantee_months'] : null,
+        trim((string) ($input['withdrawal_exception_code'] ?? '')) ?: null,
+        trim((string) ($input['economic_operator_role'] ?? 'retailer')) ?: 'retailer',
+        $status,$status === 'approved' ? date('Y-m-d H:i:s') : null,$actor,$evidencePath,$evidenceHash,
+    ]);
+    $check = compliance_product_check($pdo, $article, $country);
+    if ($status === 'approved' && !$check['approved']) {
+        $pdo->prepare("UPDATE compliance_product_markets SET approval_status='review_required',approved_at=NULL,approved_by=NULL WHERE article_number=? AND country_code=?")
+            ->execute([$article,$country]);
+        throw new RuntimeException('Product approval rejected: ' . implode(', ', $check['missing']));
+    }
+    compliance_audit($pdo, 'product_market.set', 'product_market', "{$article}:{$country}", ['status'=>$status,'check'=>$check], 'administrator', $actor);
+    return $check;
+}
+
+function compliance_market_approve(PDO $pdo, string $country, string $actor): array
+{
+    $country = compliance_country($country);
+    $actor = trim($actor);
+    if ($actor === '') {
+        throw new InvalidArgumentException('A named approving actor is required');
+    }
+    $missingB2c = compliance_missing_legal($pdo, $country, 'consumer');
+    $missingB2b = compliance_missing_legal($pdo, $country, 'business');
+    $config = office_business_config();
+    $taxMode = office_tax_mode_for_country($config, $country);
+    $problems = [];
+    if ($missingB2c !== []) {
+        $problems[] = 'B2C legal documents: ' . implode(', ', $missingB2c);
+    }
+    if ($missingB2b !== []) {
+        $problems[] = 'B2B legal documents: ' . implode(', ', $missingB2b);
+    }
+    if ($taxMode === 'review_required') {
+        $problems[] = 'tax mode remains review_required';
+    }
+    $market = compliance_market($pdo, $country);
+    if ($country === 'CH' && strtoupper((string) ($market['settlement_currency'] ?? '')) !== 'CHF') {
+        $problems[] = 'Swiss consumer market requires CHF settlement/display profile';
+    }
+    if ($problems !== []) {
+        throw new RuntimeException('Market approval blocked: ' . implode('; ', $problems));
+    }
+    $statement = $pdo->prepare(
+        "UPDATE compliance_market_profiles
+            SET b2c_enabled=1,b2b_enabled=1,legal_review_status='approved',tax_review_status='approved',
+                product_review_status='per_product',approved_at=CURRENT_TIMESTAMP,approved_by=?,suspended_reason=NULL
+          WHERE country_code=?"
+    );
+    $statement->execute([$actor,$country]);
+    compliance_audit($pdo, 'market.approved', 'market', $country, ['tax_mode'=>$taxMode], 'administrator', $actor);
+    return compliance_market($pdo, $country);
+}
+
+function compliance_tax_decide(PDO $pdo, array $input): array
+{
+    $sourceSystem = trim((string) ($input['source_system'] ?? 'woocommerce')) ?: 'woocommerce';
+    $sourceOrder = compliance_required($input, 'source_order_id');
+    $destination = compliance_country(compliance_required($input, 'destination_country'));
+    $customerType = strtolower((string) ($input['customer_type'] ?? 'consumer'));
+    $sellerCountry = strtoupper((string) ($input['seller_establishment_country'] ?? 'AT'));
+    $config = office_business_config();
+    $scheme = office_tax_mode_for_country($config, $destination);
+    $status = 'approved';
+    $reasons = [];
+    $thresholds = compliance_threshold_status($pdo, (int) ($input['calendar_year'] ?? date('Y')));
+
+    if ($scheme === 'review_required') {
+        $status = 'blocked';
+        $reasons[] = 'country tax profile is review_required';
+    }
+    if ($scheme === 'at_small_business_exempt' && ($thresholds['AT_SMALL_BUSINESS']['tolerance_exceeded'] ?? false)) {
+        $status = 'blocked';
+        $reasons[] = 'Austrian small-business tolerance amount exceeded';
+    }
+    if ($destination === 'DE' && $customerType === 'consumer' && ($thresholds['EU_B2C_DISTANCE_SALES']['threshold_exceeded'] ?? false)
+        && !in_array($scheme, ['eu_oss','eu_small_business_exempt'], true)) {
+        $status = 'blocked';
+        $reasons[] = 'EU B2C distance-sales threshold exceeded without OSS/destination VAT or approved EU SME exemption';
+    }
+    if ($scheme === 'eu_small_business_exempt') {
+        if (($thresholds['EU_SME_CROSS_BORDER']['threshold_exceeded'] ?? false)) {
+            $status = 'blocked';
+            $reasons[] = 'EU cross-border SME turnover threshold exceeded';
+        }
+        if (!compliance_registration($pdo, $destination, 'seller', 'EU_SME_EXEMPTION')) {
+            $status = 'blocked';
+            $reasons[] = 'destination-country EU SME exemption registration is not verified';
+        }
+    }
+    if ($destination === 'CH' && $scheme !== 'export_third_country') {
+        $status = 'blocked';
+        $reasons[] = 'Swiss delivery requires reviewed third-country export treatment';
+    }
+
+    $structured = 'not_required';
+    if ($destination === 'DE' && $customerType === 'business' && $sellerCountry === 'DE') {
+        $structured = 'de_domestic_b2b_review';
+        if (!office_bool($config['STRUCTURED_EINVOICE_ENABLED'] ?? 'no')) {
+            $status = 'blocked';
+            $reasons[] = 'German domestic B2B structured e-invoice capability is not enabled';
+        }
+    }
+    if (($input['buyer_type'] ?? '') === 'public_body' && !office_bool($config['B2G_EINVOICE_ENABLED'] ?? 'no')) {
+        $status = 'blocked';
+        $structured = 'b2g_structured_required';
+        $reasons[] = 'public-sector structured e-invoice adapter is not enabled';
+    }
+    if ($reasons === []) {
+        $reasons[] = 'configured tax profile and threshold controls passed';
+    }
+
+    $id = office_uuid();
+    $statement = $pdo->prepare(
+        'INSERT INTO compliance_tax_decisions
+         (id,document_id,source_system,source_order_id,seller_establishment_country,destination_country,
+          customer_type,customer_vat_id,vat_id_validation_status,tax_scheme,tax_rate,
+          structured_invoice_requirement,decision_status,decision_reason,decided_at,decided_by)
+         VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+    );
+    $statement->execute([
+        $id,trim((string) ($input['document_id'] ?? '')) ?: null,$sourceSystem,$sourceOrder,$sellerCountry,$destination,
+        $customerType,trim((string) ($input['customer_vat_id'] ?? '')) ?: null,
+        trim((string) ($input['vat_id_validation_status'] ?? '')) ?: null,$scheme,
+        isset($input['tax_rate']) ? (float) $input['tax_rate'] : null,$structured,$status,
+        implode('; ', $reasons),$status === 'approved' ? date('Y-m-d H:i:s') : null,
+        trim((string) ($input['decided_by'] ?? 'shopos-rule-engine')),
+    ]);
+    compliance_audit($pdo, 'tax_decision.created', 'tax_decision', $id, ['status'=>$status,'scheme'=>$scheme,'reasons'=>$reasons], 'rule_engine', 'shopos');
+    return ['id'=>$id,'status'=>$status,'tax_scheme'=>$scheme,'structured_invoice_requirement'=>$structured,'reasons'=>$reasons];
+}
+
+function compliance_archive_document(PDO $pdo, string $documentReference, string $country): array
+{
+    $country = compliance_country($country);
+    $statement = $pdo->prepare("SELECT * FROM office_documents WHERE (id=? OR document_number=?) AND document_status='final'");
+    $statement->execute([$documentReference,$documentReference]);
+    $document = $statement->fetch();
+    if (!$document || !$document['pdf_sha256'] || !$document['document_number']) {
+        throw new RuntimeException('Final hashed document not found');
+    }
+    $market = compliance_market($pdo, $country);
+    $issue = new DateTimeImmutable((string) $document['issue_date']);
+    $retentionUntil = $issue->modify('+' . (int) $market['accounting_retention_years'] . ' years')->setDate(
+        (int) $issue->modify('+' . (int) $market['accounting_retention_years'] . ' years')->format('Y'), 12, 31
+    );
+    $insert = $pdo->prepare(
+        'INSERT IGNORE INTO compliance_document_archive
+         (document_id,jurisdiction_country,document_type,document_number,document_sha256,retention_until)
+         VALUES (?,?,?,?,?,?)'
+    );
+    $insert->execute([
+        $document['id'],$country,$document['document_type'],$document['document_number'],$document['pdf_sha256'],$retentionUntil->format('Y-m-d'),
+    ]);
+    compliance_audit($pdo, 'document.archived', 'office_document', (string) $document['id'], ['country'=>$country,'retention_until'=>$retentionUntil->format('Y-m-d')]);
+    return ['document_number'=>$document['document_number'],'jurisdiction'=>$country,'retention_until'=>$retentionUntil->format('Y-m-d')];
+}
+
+function compliance_record_sale(PDO $pdo, array $payload): array
+{
+    $country = compliance_country((string) ($payload['destination_country'] ?? 'AT'));
+    $customerType = strtolower((string) ($payload['customer_type'] ?? 'consumer'));
+    $currency = strtoupper((string) ($payload['currency'] ?? 'EUR'));
+    $amount = (float) ($payload['gross_total'] ?? 0);
+    $year = (int) ($payload['calendar_year'] ?? date('Y'));
+    $amountEur = $amount;
+    $rateSource = null;
+    $rateDate = null;
+    if ($currency !== 'EUR') {
+        $rate = (float) ($payload['exchange_rate_to_eur'] ?? 0);
+        $rateSource = trim((string) ($payload['exchange_rate_source'] ?? ''));
+        $rateDate = trim((string) ($payload['exchange_rate_date'] ?? ''));
+        if ($rate <= 0 || $rateSource === '' || $rateDate === '') {
+            throw new RuntimeException('Non-EUR sale requires stored exchange rate, source and date');
+        }
+        $amountEur = $amount * $rate;
+    }
+    $types = ['at_total_turnover'];
+    if ($country !== 'AT' && $customerType === 'consumer' && in_array($country, ['DE'], true)) {
+        $types[] = 'eu_b2c_distance_sales';
+    }
+    if ($country !== 'AT' && in_array($country, ['DE'], true)) {
+        $types[] = 'eu_sme_cross_border';
+    }
+    foreach ($types as $type) {
+        $statement = $pdo->prepare(
+            'INSERT INTO compliance_sales_counters
+             (calendar_year,counter_type,destination_country,currency,amount_original,amount_eur,item_count,exchange_rate_source,exchange_rate_date)
+             VALUES (?,?,?,?,?,?,?,?,?)
+             ON DUPLICATE KEY UPDATE amount_original=amount_original+VALUES(amount_original),
+               amount_eur=amount_eur+VALUES(amount_eur),item_count=item_count+VALUES(item_count),
+               exchange_rate_source=VALUES(exchange_rate_source),exchange_rate_date=VALUES(exchange_rate_date)'
+        );
+        $statement->execute([$year,$type,$type === 'at_total_turnover' ? '**' : $country,$currency,$amount,$amountEur,(int) ($payload['item_count'] ?? 0),$rateSource,$rateDate ?: null]);
+    }
+    compliance_audit($pdo, 'sale.counter_recorded', 'order', (string) ($payload['source_order_id'] ?? 'unknown'), ['country'=>$country,'amount_eur'=>$amountEur,'types'=>$types]);
+    return compliance_threshold_status($pdo, $year);
+}
+
+function compliance_process_event(PDO $pdo, array $event): array
+{
+    $type = (string) $event['event_type'];
+    $payload = office_decode_json($event['payload_json']);
+    if ($type === 'compliance.checkout.snapshot') {
+        $snapshot = office_decode_json($payload['snapshot'] ?? $payload);
+        $canonical = office_json($snapshot);
+        $id = office_uuid();
+        $statement = $pdo->prepare(
+            'INSERT IGNORE INTO compliance_checkout_snapshots
+             (id,source_order_id,country_code,customer_type,currency,gross_total,shipping_total,
+              button_label,payment_method,delivery_promise,legal_documents_json,
+              product_compliance_json,consent_json,snapshot_sha256,captured_at)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+        );
+        $statement->execute([
+            $id,compliance_required($snapshot,'source_order_id'),compliance_country(compliance_required($snapshot,'country_code')),
+            (string) ($snapshot['customer_type'] ?? 'consumer'),strtoupper((string) ($snapshot['currency'] ?? 'EUR')),
+            (float) ($snapshot['gross_total'] ?? 0),(float) ($snapshot['shipping_total'] ?? 0),
+            (string) ($snapshot['button_label'] ?? 'Zahlungspflichtig bestellen'),
+            trim((string) ($snapshot['payment_method'] ?? '')) ?: null,
+            trim((string) ($snapshot['delivery_promise'] ?? '')) ?: null,
+            office_json($snapshot['legal_documents'] ?? []),office_json($snapshot['products'] ?? []),
+            office_json($snapshot['consents'] ?? []),hash('sha256',$canonical),
+            (string) ($snapshot['captured_at'] ?? date('Y-m-d H:i:s')),
+        ]);
+        compliance_audit($pdo, 'checkout.snapshot_recorded', 'order', (string) $snapshot['source_order_id'], ['snapshot_sha256'=>hash('sha256',$canonical)]);
+        return ['snapshot_id'=>$id];
+    }
+    if ($type === 'compliance.withdrawal.requested') {
+        $request = office_decode_json($payload['withdrawal'] ?? $payload);
+        $canonical = office_json($request);
+        $hash = hash('sha256',$canonical);
+        $id = office_uuid();
+        $country = compliance_country((string) ($request['country_code'] ?? 'AT'));
+        $market = compliance_market($pdo,$country);
+        $refundDue = in_array($country,['AT','DE'],true)
+            ? (new DateTimeImmutable((string) ($request['requested_at'] ?? 'now')))->modify('+14 days')->format('Y-m-d H:i:s')
+            : null;
+        $statement = $pdo->prepare(
+            'INSERT IGNORE INTO compliance_withdrawals
+             (id,source_order_id,country_code,requester_name,requester_email,requested_items_json,
+              declaration_text,request_sha256,request_status,requested_at,confirmation_sent_at,refund_due_at)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?)'
+        );
+        $statement->execute([
+            $id,compliance_required($request,'source_order_id'),$country,compliance_required($request,'requester_name'),
+            compliance_required($request,'requester_email'),office_json($request['items'] ?? []),
+            compliance_required($request,'declaration_text'),$hash,'received',
+            (string) ($request['requested_at'] ?? date('Y-m-d H:i:s')),
+            !empty($request['confirmation_sent_at']) ? (string) $request['confirmation_sent_at'] : null,$refundDue,
+        ]);
+        compliance_audit($pdo, 'withdrawal.received', 'withdrawal', $id, ['country'=>$country,'order'=>$request['source_order_id'],'policy'=>$market['withdrawal_policy']]);
+        return ['withdrawal_id'=>$id,'refund_due_at'=>$refundDue];
+    }
+    if ($type === 'compliance.sale.completed') {
+        return compliance_record_sale($pdo, office_decode_json($payload['sale'] ?? $payload));
+    }
+    if ($type === 'compliance.product.updated') {
+        return compliance_product_set($pdo, office_decode_json($payload['product'] ?? $payload));
+    }
+    throw new RuntimeException("Unsupported compliance event: {$type}");
+}
+
+function compliance_worker_run(PDO $pdo, int $limit): array
+{
+    $select = $pdo->prepare(
+        "SELECT * FROM office_outbox
+          WHERE event_type LIKE 'compliance.%'
+            AND event_status IN ('pending','unhandled')
+            AND available_at <= CURRENT_TIMESTAMP
+          ORDER BY id LIMIT ?"
+    );
+    $select->bindValue(1,max(1,min(100,$limit)),PDO::PARAM_INT);
+    $select->execute();
+    $results=[];
+    foreach ($select->fetchAll() as $event) {
+        $pdo->prepare("UPDATE office_outbox SET event_status='processing',attempts=attempts+1 WHERE id=?")->execute([$event['id']]);
+        try {
+            $result=compliance_process_event($pdo,$event);
+            $pdo->prepare("UPDATE office_outbox SET event_status='processed',processed_at=CURRENT_TIMESTAMP,last_error=NULL WHERE id=?")->execute([$event['id']]);
+            $results[]=[$event['id'],'processed',$result];
+        } catch (Throwable $exception) {
+            $pdo->prepare("UPDATE office_outbox SET event_status=IF(attempts>=8,'failed','pending'),available_at=DATE_ADD(CURRENT_TIMESTAMP,INTERVAL 300 SECOND),last_error=? WHERE id=?")
+                ->execute([mb_substr($exception->getMessage(),0,1000),$event['id']]);
+            $results[]=[$event['id'],'failed',$exception->getMessage()];
+        }
+    }
+    return $results;
+}
+
+$args=$_SERVER['argv'];
+array_shift($args);
+$command=array_shift($args) ?? '';
+$envPath=getenv('OFFICE_ENV_PATH') ?: MSFIXIT_OFFICE_ADMIN_ENV;
+
+try {
+    $pdo=office_database($envPath);
+    switch ($command) {
+        case 'status':
+            compliance_output(compliance_status($pdo,$args[0] ?? null));
+            break;
+        case 'market-approve':
+            if (count($args)<2) compliance_usage();
+            compliance_output(compliance_market_approve($pdo,$args[0],$args[1]));
+            break;
+        case 'market-suspend':
+            if (count($args)<2) compliance_usage();
+            $country=compliance_country($args[0]);
+            $pdo->prepare("UPDATE compliance_market_profiles SET b2c_enabled=0,b2b_enabled=0,legal_review_status='suspended',tax_review_status='suspended',suspended_reason=? WHERE country_code=?")
+                ->execute([$args[1],$country]);
+            compliance_audit($pdo,'market.suspended','market',$country,['reason'=>$args[1]],'administrator',get_current_user());
+            compliance_output(compliance_market($pdo,$country));
+            break;
+        case 'legal-approve':
+            if (count($args)<1) compliance_usage();
+            compliance_output(compliance_legal_approve($pdo,compliance_json_file($args[0])));
+            break;
+        case 'registration-set':
+            if (count($args)<1) compliance_usage();
+            compliance_output(compliance_registration_set($pdo,compliance_json_file($args[0])));
+            break;
+        case 'supplier-set':
+            if (count($args)<1) compliance_usage();
+            compliance_output(compliance_supplier_set($pdo,compliance_json_file($args[0])));
+            break;
+        case 'supplier-market-set':
+            if (count($args)<1) compliance_usage();
+            compliance_output(compliance_supplier_market_set($pdo,compliance_json_file($args[0])));
+            break;
+        case 'product-set':
+            if (count($args)<1) compliance_usage();
+            compliance_output(compliance_product_set($pdo,compliance_json_file($args[0])));
+            break;
+        case 'product-check':
+            if (count($args)<2) compliance_usage();
+            compliance_output(compliance_product_check($pdo,$args[0],$args[1]));
+            break;
+        case 'tax-decide':
+            if (count($args)<1) compliance_usage();
+            compliance_output(compliance_tax_decide($pdo,compliance_json_file($args[0])));
+            break;
+        case 'threshold-status':
+            compliance_output(compliance_threshold_status($pdo,(int) ($args[0] ?? date('Y'))));
+            break;
+        case 'withdrawal-list':
+            $status=trim((string) ($args[0] ?? ''));
+            if ($status!=='') {
+                $stmt=$pdo->prepare('SELECT * FROM compliance_withdrawals WHERE request_status=? ORDER BY requested_at DESC');
+                $stmt->execute([$status]);
+                compliance_output($stmt->fetchAll());
+            } else {
+                compliance_output($pdo->query('SELECT * FROM compliance_withdrawals ORDER BY requested_at DESC LIMIT 200')->fetchAll());
+            }
+            break;
+        case 'withdrawal-status':
+            if (count($args)<2) compliance_usage();
+            if (!in_array($args[1],['received','reviewing','accepted','rejected','refunded','completed'],true)) {
+                throw new InvalidArgumentException('Invalid withdrawal status');
+            }
+            $pdo->prepare("UPDATE compliance_withdrawals SET request_status=?,last_status_note=?,completed_at=IF(? IN ('completed','rejected'),CURRENT_TIMESTAMP,completed_at) WHERE id=?")
+                ->execute([$args[1],$args[2] ?? null,$args[1],$args[0]]);
+            compliance_audit($pdo,'withdrawal.status_changed','withdrawal',$args[0],['status'=>$args[1],'note'=>$args[2] ?? null],'administrator',get_current_user());
+            compliance_output(['id'=>$args[0],'status'=>$args[1]]);
+            break;
+        case 'archive-document':
+            if (count($args)<2) compliance_usage();
+            compliance_output(compliance_archive_document($pdo,$args[0],$args[1]));
+            break;
+        case 'worker-run':
+            compliance_output(compliance_worker_run($pdo,(int) ($args[0] ?? 25)));
+            break;
+        default:
+            compliance_usage();
+    }
+} catch (Throwable $exception) {
+    compliance_fail('Compliance error: '.$exception->getMessage());
+}
