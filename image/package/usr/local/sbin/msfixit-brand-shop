@@ -112,6 +112,7 @@ export MSFIXIT_LOGO_ID="$logo_id"
 export MSFIXIT_HERO_ID="$hero_id"
 export MSFIXIT_ICON_ID="$icon_id"
 run_wp eval-file "$wordpress_assets/msfixit-provision.php"
+run_wp eval-file "$wordpress_assets/msfixit-commerce-provision.php"
 
 run_wp option delete msfixit_shopos_protected_page_ids >/dev/null 2>&1 || true
 for page_id in "${unmanaged_page_ids[@]}"; do
