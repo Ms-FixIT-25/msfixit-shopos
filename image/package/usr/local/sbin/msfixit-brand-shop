@@ -35,8 +35,12 @@ ensure_media() {
 
 run_wp core is-installed >/dev/null
 
-# Storefront provides a stable WooCommerce-compatible base. ShopOS branding is
-# applied through an MU plugin so the design survives normal theme updates.
+# The independent article master is the source of truth for Ms. FixIT article
+# numbers and external supplier, barcode, POS, marketplace and ERP mappings.
+/usr/local/sbin/msfixit-catalog-init
+
+# Storefront provides a stable WooCommerce-compatible base. ShopOS branding and
+# the article-master bridge are MU plugins so both survive normal theme updates.
 if ! run_wp plugin is-installed woocommerce >/dev/null 2>&1; then
     run_wp plugin install woocommerce >/dev/null
 fi
@@ -51,6 +55,9 @@ install -d -m 0755 "$wordpress_dir/wp-content/mu-plugins" "$generated_branding_d
 install -m 0644 \
     "$wordpress_assets/msfixit-branding.php" \
     "$wordpress_dir/wp-content/mu-plugins/msfixit-branding.php"
+install -m 0644 \
+    "$wordpress_assets/msfixit-catalog-bridge.php" \
+    "$wordpress_dir/wp-content/mu-plugins/msfixit-catalog-bridge.php"
 
 php "$wordpress_assets/msfixit-render-branding.php" \
     "$branding_dir/msfixit-brand-full.webp" \
@@ -114,4 +121,4 @@ done
 run_wp cache flush >/dev/null 2>&1 || true
 chown -R www-data:www-data "$wordpress_dir/wp-content"
 
-echo "Ms. FixIT WooCommerce branding and shop structure applied successfully."
+echo "Ms. FixIT WooCommerce branding, DACH shop structure and article master applied successfully."
