@@ -1,0 +1,22 @@
+[Unit]
+Description=Ms. FixIT Office event worker
+After=mariadb.service network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/msfixit-shopos/office-worker.env
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/msfixit-office-worker
+User=root
+Group=root
+Nice=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/data/office /var/lib/msfixit-shopos /run/msfixit-shopos
+ReadOnlyPaths=/srv/www/wordpress /etc/msfixit-shopos
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictRealtime=true
