@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+umask 077
+
+readonly config_dir=/etc/msfixit-shopos
+readonly admin_env="${config_dir}/catalog.env"
+readonly wordpress_env="${config_dir}/catalog-wordpress.env"
+readonly schema_file=/usr/share/msfixit-shopos/catalog/schema.sql
+readonly database_name=shopos_catalog
+readonly admin_user=shopos_catalog_admin
+readonly wordpress_user=shopos_catalog_wp
+
+if [ "$(id -u)" -ne 0 ]; then
+    echo "Run this command with sudo." >&2
+    exit 1
+fi
+
+random_secret() {
+    openssl rand -hex 24
+}
+
+read_value() {
+    local file="$1" key="$2"
+    [ -f "$file" ] || return 0
+    sed -n "s/^${key}=//p" "$file" | tail -n 1
+}
+
+[ -f "$schema_file" ] || {
+    echo "Catalog schema not found: $schema_file" >&2
+    exit 1
+}
+
+install -d -m 0750 "$config_dir"
+
+admin_password="$(read_value "$admin_env" CATALOG_DB_PASSWORD)"
+wordpress_password="$(read_value "$wordpress_env" CATALOG_DB_PASSWORD)"
+admin_password="${admin_password:-$(random_secret)}"
+wordpress_password="${wordpress_password:-$(random_secret)}"
+
+mariadb <<EOF_SQL
+CREATE DATABASE IF NOT EXISTS ${database_name}
+    CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+CREATE USER IF NOT EXISTS '${admin_user}'@'localhost' IDENTIFIED BY '${admin_password}';
+ALTER USER '${admin_user}'@'localhost' IDENTIFIED BY '${admin_password}';
+GRANT ALL PRIVILEGES ON ${database_name}.* TO '${admin_user}'@'localhost';
+
+CREATE USER IF NOT EXISTS '${wordpress_user}'@'localhost' IDENTIFIED BY '${wordpress_password}';
+ALTER USER '${wordpress_user}'@'localhost' IDENTIFIED BY '${wordpress_password}';
+GRANT SELECT, INSERT, UPDATE ON ${database_name}.* TO '${wordpress_user}'@'localhost';
+FLUSH PRIVILEGES;
+EOF_SQL
+
+mariadb "$database_name" < "$schema_file"
+
+cat > "$admin_env" <<EOF_ADMIN
+CATALOG_DB_HOST=127.0.0.1
+CATALOG_DB_PORT=3306
+CATALOG_DB_NAME=${database_name}
+CATALOG_DB_USER=${admin_user}
+CATALOG_DB_PASSWORD=${admin_password}
+EOF_ADMIN
+chmod 0600 "$admin_env"
+chown root:root "$admin_env"
+
+cat > "$wordpress_env" <<EOF_WORDPRESS
+CATALOG_DB_HOST=127.0.0.1
+CATALOG_DB_PORT=3306
+CATALOG_DB_NAME=${database_name}
+CATALOG_DB_USER=${wordpress_user}
+CATALOG_DB_PASSWORD=${wordpress_password}
+EOF_WORDPRESS
+chmod 0640 "$wordpress_env"
+chown root:www-data "$wordpress_env"
+
+echo "Ms. FixIT article master initialized successfully."
