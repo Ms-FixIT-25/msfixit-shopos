@@ -61,7 +61,7 @@ function msfixit_crop_resize(
 
 $source_width = imagesx($source_image);
 $source_height = imagesy($source_image);
-if ($source_width < 1000 || $source_height < 1000) {
+if ($source_width < 400 || $source_height < 400) {
     fwrite(STDERR, "Unexpected brand image dimensions.\n");
     exit(1);
 }
