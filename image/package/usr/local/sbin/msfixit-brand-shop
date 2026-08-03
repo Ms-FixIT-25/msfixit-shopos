@@ -76,9 +76,9 @@ icon_id="$(ensure_media \
     'Ms. FixIT Einhorn' \
     'Ms. FixIT Einhorn')"
 
-# Remember existing pages that are not owned by ShopOS. The PHP provisioner
-# leaves their content untouched; removing a mistakenly added management flag
-# afterwards also protects them on every future re-run.
+# Remember existing pages that are not owned by ShopOS. The MU plugin blocks
+# the ShopOS ownership marker for these IDs, so an interrupted or repeated run
+# can never take over their content.
 unmanaged_page_ids=()
 for slug in startseite reparatur-services kontakt impressum datenschutz agb widerruf-rueckgabe; do
     page_id="$(run_wp post list \
@@ -95,11 +95,18 @@ for slug in startseite reparatur-services kontakt impressum datenschutz agb wide
     fi
 done
 
+protected_ids=""
+if [ "${#unmanaged_page_ids[@]}" -gt 0 ]; then
+    protected_ids="$(IFS=,; printf '%s' "${unmanaged_page_ids[*]}")"
+fi
+run_wp eval "update_option('msfixit_shopos_protected_page_ids', [${protected_ids}]);"
+
 export MSFIXIT_LOGO_ID="$logo_id"
 export MSFIXIT_HERO_ID="$hero_id"
 export MSFIXIT_ICON_ID="$icon_id"
 run_wp eval-file "$wordpress_assets/msfixit-provision.php"
 
+run_wp option delete msfixit_shopos_protected_page_ids >/dev/null 2>&1 || true
 for page_id in "${unmanaged_page_ids[@]}"; do
     run_wp post meta delete "$page_id" _msfixit_shopos_managed >/dev/null 2>&1 || true
 done
