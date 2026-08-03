@@ -12,12 +12,17 @@ echo "Local URL: http://${ip_address}/"
 echo
 
 for service in nginx mariadb redis-server msfixit-cloudflared; do
-    printf '%-24s %s\n' "$service" "$(systemctl is-active "$service" 2>/dev/null || true)"
+    printf '%-30s %s\n' "$service" "$(systemctl is-active "$service" 2>/dev/null || true)"
+done
+for timer in msfixit-office-worker.timer msfixit-office-dunning.timer msfixit-office-print.timer; do
+    if systemctl list-unit-files "$timer" --no-legend 2>/dev/null | grep -q .; then
+        printf '%-30s %s\n' "$timer" "$(systemctl is-active "$timer" 2>/dev/null || true)"
+    fi
 done
 
 php_service="$(systemctl list-unit-files --type=service --no-legend 'php*-fpm.service' 2>/dev/null | awk 'NR==1 {print $1}')"
 if [ -n "$php_service" ]; then
-    printf '%-24s %s\n' "$php_service" "$(systemctl is-active "$php_service" 2>/dev/null || true)"
+    printf '%-30s %s\n' "$php_service" "$(systemctl is-active "$php_service" 2>/dev/null || true)"
 fi
 
 echo
@@ -41,6 +46,24 @@ if [ -f /etc/msfixit-shopos/catalog.env ]; then
     echo "Sales region:    AT, DE, CH"
 else
     echo "Article master: not initialized"
+fi
+
+echo
+if [ -f /etc/msfixit-shopos/office.env ]; then
+    echo "Office/Fulfillment: initialized"
+    printf '%-24s %s\n' "Draft documents:" "$(mariadb shopos_office -Nse "SELECT COUNT(*) FROM office_documents WHERE document_status='draft'" 2>/dev/null || echo unknown)"
+    printf '%-24s %s\n' "Open invoices:" "$(mariadb shopos_office -Nse "SELECT COUNT(*) FROM office_documents d WHERE d.document_type='invoice' AND d.document_status='final' AND d.gross_total > COALESCE((SELECT SUM(a.allocated_amount) FROM office_payment_allocations a WHERE a.document_id=d.id),0)" 2>/dev/null || echo unknown)"
+    printf '%-24s %s\n' "Reminders to approve:" "$(mariadb shopos_office -Nse "SELECT COUNT(*) FROM office_reminders WHERE reminder_status='pending_approval'" 2>/dev/null || echo unknown)"
+    printf '%-24s %s\n' "Shipments without label:" "$(mariadb shopos_office -Nse "SELECT COUNT(*) FROM office_shipments WHERE label_path IS NULL" 2>/dev/null || echo unknown)"
+    printf '%-24s %s\n' "Pending print jobs:" "$(mariadb shopos_office -Nse "SELECT COUNT(*) FROM office_print_jobs WHERE print_status IN ('pending','retry')" 2>/dev/null || echo unknown)"
+    printf '%-24s %s\n' "Failed Office events:" "$(mariadb shopos_office -Nse "SELECT COUNT(*) FROM office_outbox WHERE event_status='failed'" 2>/dev/null || echo unknown)"
+    if [ -f /etc/msfixit-shopos/business.env ]; then
+        approved="$(sed -n 's/^BUSINESS_CONFIG_APPROVED=//p' /etc/msfixit-shopos/business.env | tail -n1)"
+        echo "Business config: ${approved:-unknown}"
+    fi
+    echo "Detailed status: sudo msfixit-office status"
+else
+    echo "Office/Fulfillment: not initialized"
 fi
 
 echo
