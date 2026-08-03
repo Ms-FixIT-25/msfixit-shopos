@@ -35,14 +35,11 @@ ensure_media() {
 
 run_wp core is-installed >/dev/null
 
-# Separate application databases remain the source of truth for article identity
-# and for immutable commercial documents, payments, reminders and shipments.
+# Separate application databases remain the source of truth for article identity,
+# immutable commercial documents and the DACH legal/compliance approval state.
 /usr/local/sbin/msfixit-catalog-init
 /usr/local/sbin/msfixit-office-init
 
-# Storefront provides a stable WooCommerce-compatible base. ShopOS branding,
-# DACH restrictions, article mapping and Office event hooks are MU plugins so
-# they survive normal theme and plugin updates.
 if ! run_wp plugin is-installed woocommerce >/dev/null 2>&1; then
     run_wp plugin install woocommerce >/dev/null
 fi
@@ -58,7 +55,8 @@ for plugin in \
     msfixit-branding.php \
     msfixit-catalog-bridge.php \
     msfixit-commerce-region.php \
-    msfixit-office-bridge.php; do
+    msfixit-office-bridge.php \
+    msfixit-compliance.php; do
     install -m 0644 \
         "$wordpress_assets/$plugin" \
         "$wordpress_dir/wp-content/mu-plugins/$plugin"
@@ -88,11 +86,8 @@ icon_id="$(ensure_media \
     'Ms. FixIT Einhorn' \
     'Ms. FixIT Einhorn')"
 
-# Remember existing pages that are not owned by ShopOS. The MU plugin blocks
-# the ShopOS ownership marker for these IDs, so an interrupted or repeated run
-# can never take over their content.
 unmanaged_page_ids=()
-for slug in startseite reparatur-services kontakt impressum datenschutz agb widerruf-rueckgabe; do
+for slug in startseite reparatur-services kontakt impressum datenschutz agb widerruf-rueckgabe vertrag-widerrufen; do
     page_id="$(run_wp post list \
         --post_type=page \
         --name="$slug" \
@@ -127,4 +122,4 @@ done
 run_wp cache flush >/dev/null 2>&1 || true
 chown -R www-data:www-data "$wordpress_dir/wp-content"
 
-echo "Ms. FixIT WooCommerce branding, DACH shop, article master and Office/Fulfillment core applied successfully."
+echo "Ms. FixIT WooCommerce branding, DACH shop, article master, Office/Fulfillment and compliance core applied successfully."
