@@ -25,5 +25,6 @@ done
 
 systemctl enable nftables.service 2>/dev/null || true
 systemctl enable msfixit-firstboot.service 2>/dev/null || true
+systemctl enable msfixit-brand-shop.service 2>/dev/null || true
 
 exit 0
