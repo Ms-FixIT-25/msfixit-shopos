@@ -63,6 +63,7 @@ chmod 0755 \
     "$stage/usr/local/sbin/msfixit-office-print" \
     "$stage/usr/local/sbin/msfixit-compliance" \
     "$stage/usr/local/sbin/msfixit-compliance-worker" \
+    "$stage/usr/local/sbin/msfixit-tax-decision" \
     "$stage/usr/local/sbin/msfixit-apply-config" \
     "$stage/usr/local/sbin/msfixit-health" \
     "$stage/usr/local/sbin/msfixit-backup" \
@@ -85,6 +86,7 @@ install -d -m 0755 "$stage/usr/share/msfixit-shopos"
     sha256sum \
         "$stage/usr/local/bin/cloudflared" \
         "$stage/usr/local/bin/wp" \
+        "$stage/usr/local/sbin/msfixit-tax-decision" \
         "$brand_file" \
         "$stage/usr/share/msfixit-shopos/catalog/schema.sql" \
         "$stage/usr/share/msfixit-shopos/catalog/guards.sql" \
@@ -96,6 +98,8 @@ install -d -m 0755 "$stage/usr/share/msfixit-shopos"
         "$stage/usr/share/msfixit-shopos/compliance/guards.sql" \
         "$stage/usr/share/msfixit-shopos/compliance/strict-guards.sql" \
         "$stage/usr/share/msfixit-shopos/compliance/strict-migrations.sql" \
+        "$stage/usr/share/msfixit-shopos/compliance/tax-decision-migrations.sql" \
+        "$stage/usr/share/msfixit-shopos/compliance/renderer-guards.sql" \
         "$stage/usr/share/msfixit-shopos/wordpress/msfixit-compliance.php" \
         "$stage/usr/share/msfixit-shopos/wordpress/msfixit-compliance-runtime.php"
 } > "$stage/usr/share/msfixit-shopos/build-info.txt"
