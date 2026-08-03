@@ -29,7 +29,7 @@ image/packages/msfixit-shopos_arm64.deb.sha256
 
 The package bundles pinned and SHA-256-verified WP-CLI and ARM64 Cloudflare Tunnel binaries. Their exact versions, source URLs and checksums are written into `/usr/share/msfixit-shopos/build-info.txt` inside the image.
 
-The optimized Ms. FixIT WebP artwork is stored as a binary Git object and checked against its fixed SHA-256 value during every package build. PHP GD generates the header and site-icon variants during branded shop provisioning.
+The optimized Ms. FixIT WebP artwork is stored as compact repository-safe base64 source text. During package construction it is decoded, checked against its fixed SHA-256 value, and the base64 source is removed from the final package. PHP GD generates the header and site-icon variants during branded shop provisioning.
 
 ## Build a Raspberry Pi 4B image
 
