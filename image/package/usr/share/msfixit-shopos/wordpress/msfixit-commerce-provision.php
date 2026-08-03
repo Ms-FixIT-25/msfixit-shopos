@@ -36,10 +36,8 @@ if (class_exists('WC_Shipping_Zones') && class_exists('WC_Shipping_Zone')) {
     $zone->set_zone_order(0);
     $zone->save();
 
-    foreach ($zone->get_zone_locations() as $location) {
-        $zone->remove_location($location->code, $location->type);
-    }
-
+    // Refresh only locations. Existing shipping methods and their prices stay intact.
+    $zone->clear_locations();
     foreach ($allowedCountries as $countryCode) {
         $zone->add_location($countryCode, 'country');
     }
