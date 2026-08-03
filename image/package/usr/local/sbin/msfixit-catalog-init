@@ -6,6 +6,7 @@ readonly config_dir=/etc/msfixit-shopos
 readonly admin_env="${config_dir}/catalog.env"
 readonly wordpress_env="${config_dir}/catalog-wordpress.env"
 readonly schema_file=/usr/share/msfixit-shopos/catalog/schema.sql
+readonly guards_file=/usr/share/msfixit-shopos/catalog/guards.sql
 readonly database_name=shopos_catalog
 readonly admin_user=shopos_catalog_admin
 readonly wordpress_user=shopos_catalog_wp
@@ -25,10 +26,12 @@ read_value() {
     sed -n "s/^${key}=//p" "$file" | tail -n 1
 }
 
-[ -f "$schema_file" ] || {
-    echo "Catalog schema not found: $schema_file" >&2
-    exit 1
-}
+for required_file in "$schema_file" "$guards_file"; do
+    [ -f "$required_file" ] || {
+        echo "Catalog database source not found: $required_file" >&2
+        exit 1
+    }
+done
 
 install -d -m 0750 "$config_dir"
 
@@ -52,6 +55,7 @@ FLUSH PRIVILEGES;
 EOF_SQL
 
 mariadb "$database_name" < "$schema_file"
+mariadb "$database_name" < "$guards_file"
 
 cat > "$admin_env" <<EOF_ADMIN
 CATALOG_DB_HOST=127.0.0.1
