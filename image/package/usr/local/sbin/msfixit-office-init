@@ -3,11 +3,13 @@ set -Eeuo pipefail
 umask 077
 
 readonly config_dir=/etc/msfixit-shopos
+readonly carrier_config_dir="${config_dir}/carriers"
 readonly admin_env="${config_dir}/office.env"
 readonly wordpress_env="${config_dir}/office-wordpress.env"
 readonly worker_env="${config_dir}/office-worker.env"
 readonly business_env="${config_dir}/business.env"
 readonly schema_file=/usr/share/msfixit-shopos/office/schema.sql
+readonly operational_file=/usr/share/msfixit-shopos/office/operational.sql
 readonly business_example=/usr/share/msfixit-shopos/office/business.env.example
 readonly database_name=shopos_office
 readonly admin_user=shopos_office_admin
@@ -29,18 +31,21 @@ read_value() {
     sed -n "s/^${key}=//p" "$file" | tail -n 1
 }
 
-[ -f "$schema_file" ] || {
-    echo "Office schema not found: $schema_file" >&2
-    exit 1
-}
+for required_file in "$schema_file" "$operational_file" "$business_example"; do
+    [ -f "$required_file" ] || {
+        echo "Office source file not found: $required_file" >&2
+        exit 1
+    }
+done
 
-install -d -m 0750 "$config_dir"
+install -d -m 0750 "$config_dir" "$carrier_config_dir"
 install -d -m 0750 /data/office
 install -d -m 0750 /data/office/documents
 install -d -m 0750 /data/office/documents/invoices
 install -d -m 0750 /data/office/documents/credit-notes
 install -d -m 0750 /data/office/documents/delivery-notes
 install -d -m 0750 /data/office/documents/reminders
+install -d -m 0750 /data/office/documents/customs
 install -d -m 0750 /data/office/labels
 install -d -m 0750 /data/office/manifests
 install -d -m 0750 /data/office/exports
@@ -76,6 +81,7 @@ FLUSH PRIVILEGES;
 EOF_SQL
 
 mariadb "$database_name" < "$schema_file"
+mariadb "$database_name" < "$operational_file"
 
 cat > "$admin_env" <<EOF_ADMIN
 OFFICE_DB_HOST=127.0.0.1
