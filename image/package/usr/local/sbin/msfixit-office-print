@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+export OFFICE_ENV_PATH=/etc/msfixit-shopos/office-worker.env
+exec /usr/local/sbin/msfixit-office print-run "${1:-20}"
