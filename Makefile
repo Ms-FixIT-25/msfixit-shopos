@@ -54,6 +54,7 @@ check:
 	@test -s image/package/usr/share/msfixit-shopos/compliance/schema.sql
 	@test -s image/package/usr/share/msfixit-shopos/compliance/guards.sql
 	@test -s image/package/usr/share/msfixit-shopos/compliance/strict-guards.sql
+	@test -s image/package/usr/share/msfixit-shopos/compliance/strict-migrations.sql
 	@grep -q 'catalog_products' image/package/usr/share/msfixit-shopos/catalog/schema.sql
 	@grep -q 'no_reassign' image/package/usr/share/msfixit-shopos/catalog/guards.sql
 	@grep -q 'office_documents' image/package/usr/share/msfixit-shopos/office/schema.sql
@@ -63,6 +64,7 @@ check:
 	@grep -q 'compliance_market_profiles' image/package/usr/share/msfixit-shopos/compliance/schema.sql
 	@grep -q 'compliance_before_final' image/package/usr/share/msfixit-shopos/compliance/guards.sql
 	@grep -q 'Verified registration requires actor' image/package/usr/share/msfixit-shopos/compliance/strict-guards.sql
+	@grep -q 'old approved version may be deactivated' image/package/usr/share/msfixit-shopos/compliance/strict-migrations.sql
 	@if command -v php >/dev/null 2>&1; then \
 		php -l image/package/usr/local/sbin/msfixit-catalog; \
 		php -l image/package/usr/local/sbin/msfixit-office; \
