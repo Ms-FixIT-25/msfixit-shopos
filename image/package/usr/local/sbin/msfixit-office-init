@@ -10,6 +10,7 @@ readonly worker_env="${config_dir}/office-worker.env"
 readonly business_env="${config_dir}/business.env"
 readonly schema_file=/usr/share/msfixit-shopos/office/schema.sql
 readonly operational_file=/usr/share/msfixit-shopos/office/operational.sql
+readonly migrations_file=/usr/share/msfixit-shopos/office/migrations.sql
 readonly business_example=/usr/share/msfixit-shopos/office/business.env.example
 readonly database_name=shopos_office
 readonly admin_user=shopos_office_admin
@@ -31,7 +32,7 @@ read_value() {
     sed -n "s/^${key}=//p" "$file" | tail -n 1
 }
 
-for required_file in "$schema_file" "$operational_file" "$business_example"; do
+for required_file in "$schema_file" "$operational_file" "$migrations_file" "$business_example"; do
     [ -f "$required_file" ] || {
         echo "Office source file not found: $required_file" >&2
         exit 1
@@ -83,6 +84,7 @@ EOF_SQL
 
 mariadb "$database_name" < "$schema_file"
 mariadb "$database_name" < "$operational_file"
+mariadb "$database_name" < "$migrations_file"
 
 mariadb <<EOF_WORDPRESS_GRANT
 GRANT INSERT ON ${database_name}.office_outbox TO '${wordpress_user}'@'localhost';
