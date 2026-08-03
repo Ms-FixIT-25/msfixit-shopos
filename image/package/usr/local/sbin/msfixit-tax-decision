@@ -1,0 +1,397 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+require_once '/usr/share/msfixit-shopos/office/office-lib.php';
+
+function tax_fail(string $message, int $code = 1): never
+{
+    fwrite(STDERR, $message . PHP_EOL);
+    exit($code);
+}
+
+function tax_usage(): never
+{
+    fwrite(STDERR, <<<'TEXT'
+Ms. FixIT ShopOS DACH tax decision
+
+Commands:
+  msfixit-tax-decision decide JSON_FILE
+  msfixit-tax-decision show DOCUMENT_ID_OR_NUMBER
+  msfixit-tax-decision history DOCUMENT_ID_OR_NUMBER
+
+The JSON decision input supports:
+  document_id, destination_country, customer_type, transaction_type,
+  customer_vat_id, vat_id_validation_status, buyer_type, tax_rate,
+  tax_scheme (manual override only), reviewed_by, decision_reason.
+
+A decision is technical evidence and does not replace tax advice.
+TEXT);
+    exit(2);
+}
+
+function tax_json_file(string $path): array
+{
+    $raw = $path === '-' ? stream_get_contents(STDIN) : @file_get_contents($path);
+    if (!is_string($raw) || trim($raw) === '') {
+        throw new InvalidArgumentException("Tax-decision JSON is unavailable: {$path}");
+    }
+    $value = json_decode($raw, true, 512, JSON_THROW_ON_ERROR);
+    if (!is_array($value)) {
+        throw new InvalidArgumentException('Tax-decision JSON root must be an object');
+    }
+    return $value;
+}
+
+function tax_output(mixed $value): void
+{
+    echo json_encode($value, JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . PHP_EOL;
+}
+
+function tax_country(string $country): string
+{
+    $country = strtoupper(trim($country));
+    if (!in_array($country, ['AT','DE','CH'], true)) {
+        throw new InvalidArgumentException("Unsupported DACH destination: {$country}");
+    }
+    return $country;
+}
+
+function tax_config_mode(array $config, string $country, string $customerType): string
+{
+    $suffix = $customerType === 'business' ? 'B2B' : 'B2C';
+    return trim((string) (
+        $config["TAX_MODE_{$country}_{$suffix}"]
+        ?? $config["TAX_MODE_{$country}"]
+        ?? $config['DEFAULT_TAX_MODE']
+        ?? 'review_required'
+    ));
+}
+
+function tax_counter(PDO $pdo, int $year, string $counterType): float
+{
+    $statement = $pdo->prepare(
+        'SELECT COALESCE(SUM(amount_eur),0) FROM compliance_sales_counters
+          WHERE calendar_year=? AND counter_type=?'
+    );
+    $statement->execute([$year,$counterType]);
+    return (float) $statement->fetchColumn();
+}
+
+function tax_rule(PDO $pdo, string $ruleCode): array
+{
+    $statement = $pdo->prepare('SELECT * FROM compliance_threshold_rules WHERE rule_code=? AND enabled=1');
+    $statement->execute([$ruleCode]);
+    $rule = $statement->fetch();
+    if (!$rule) {
+        throw new RuntimeException("Required tax threshold rule is missing: {$ruleCode}");
+    }
+    return $rule;
+}
+
+function tax_verified_registration(PDO $pdo, string $country, string $type): bool
+{
+    $statement = $pdo->prepare(
+        "SELECT COUNT(*) FROM compliance_business_registrations
+          WHERE country_code=? AND legal_entity_code='seller' AND registration_type=?
+            AND registration_status='verified'
+            AND (valid_from IS NULL OR valid_from<=CURRENT_DATE)
+            AND (valid_until IS NULL OR valid_until>=CURRENT_DATE)
+            AND evidence_sha256 REGEXP '^[0-9a-f]{64}$'"
+    );
+    $statement->execute([$country,$type]);
+    return (int) $statement->fetchColumn() > 0;
+}
+
+function tax_capability(PDO $pdo, string $capability): bool
+{
+    $statement = $pdo->prepare('SELECT COUNT(*) FROM compliance_capabilities WHERE capability_code=? AND enabled=1');
+    $statement->execute([$capability]);
+    return (int) $statement->fetchColumn() > 0;
+}
+
+function tax_audit(PDO $pdo, string $event, string $reference, array $payload, string $actor): void
+{
+    $previous = $pdo->query('SELECT event_sha256 FROM compliance_audit_log ORDER BY id DESC LIMIT 1')->fetchColumn();
+    $uuid = office_uuid();
+    $createdAt = (new DateTimeImmutable())->format('Y-m-d H:i:s');
+    $canonical = office_json([
+        'event_uuid'=>$uuid,'event_type'=>$event,'reference'=>$reference,
+        'payload'=>$payload,'actor'=>$actor,'previous'=>$previous ?: null,'created_at'=>$createdAt,
+    ]);
+    $hash = hash('sha256',$canonical);
+    $statement = $pdo->prepare(
+        'INSERT INTO compliance_audit_log
+         (event_uuid,actor_type,actor_reference,event_type,object_type,object_reference,
+          event_payload_json,previous_event_sha256,event_sha256,created_at)
+         VALUES (?,\'tax_decision_engine\',?,?,?,?,?,?,?,?)'
+    );
+    $statement->execute([
+        $uuid,$actor,$event,'tax_decision',$reference,office_json($payload),$previous ?: null,$hash,$createdAt,
+    ]);
+}
+
+function tax_document(PDO $pdo, string $identifier): array
+{
+    $statement = $pdo->prepare('SELECT * FROM office_documents WHERE id=? OR document_number=?');
+    $statement->execute([$identifier,$identifier]);
+    $document = $statement->fetch();
+    if (!$document) {
+        throw new RuntimeException("Office document not found: {$identifier}");
+    }
+    return $document;
+}
+
+function tax_evaluate(PDO $pdo, array $config, array $input, array $document): array
+{
+    $destination = tax_country((string) ($input['destination_country'] ?? ''));
+    $sellerCountry = strtoupper(trim((string) ($input['seller_establishment_country'] ?? $config['SELLER_ESTABLISHMENT_COUNTRY'] ?? $config['BUSINESS_COUNTRY'] ?? 'AT')));
+    $customerType = strtolower(trim((string) ($input['customer_type'] ?? $document['customer_type'] ?? 'consumer')));
+    $customerType = $customerType === 'business' ? 'business' : 'consumer';
+    $transactionType = strtolower(trim((string) ($input['transaction_type'] ?? 'goods')));
+    if (!in_array($transactionType, ['goods','service','digital_service'], true)) {
+        throw new InvalidArgumentException('transaction_type must be goods, service or digital_service');
+    }
+    $configuredScheme = tax_config_mode($config,$destination,$customerType);
+    $manualScheme = trim((string) ($input['tax_scheme'] ?? ''));
+    $scheme = $manualScheme !== '' ? $manualScheme : $configuredScheme;
+    $reviewedBy = trim((string) ($input['reviewed_by'] ?? 'shopos-tax-rule-engine'));
+    $manualReason = trim((string) ($input['decision_reason'] ?? ''));
+    $reasons = [];
+    $status = 'approved';
+    $year = (int) ($input['calendar_year'] ?? date('Y'));
+    $vatId = strtoupper(trim((string) ($input['customer_vat_id'] ?? '')));
+    $vatStatus = strtolower(trim((string) ($input['vat_id_validation_status'] ?? 'not_checked')));
+    $taxRate = isset($input['tax_rate']) ? (float) $input['tax_rate'] : null;
+
+    if ($manualScheme !== '' && ($reviewedBy === '' || $manualReason === '')) {
+        $status='blocked';
+        $reasons[]='manual tax-scheme override requires named reviewer and written reason';
+    }
+    if ($scheme === '' || $scheme === 'review_required') {
+        $status='blocked';
+        $reasons[]='tax profile remains review_required';
+    }
+
+    if ($scheme === 'at_small_business_exempt') {
+        $rule = tax_rule($pdo,'AT_SMALL_BUSINESS');
+        $amount = tax_counter($pdo,$year,'at_total_turnover');
+        $tolerance = (float) ($rule['tolerance_amount'] ?? $rule['threshold_amount']);
+        if ($amount > $tolerance) {
+            $status='blocked';
+            $reasons[]='Austrian small-business tolerance value is exceeded';
+        }
+        if ($destination !== 'AT') {
+            $status='blocked';
+            $reasons[]='Austrian domestic small-business exemption is not a foreign-market exemption';
+        }
+        if ($taxRate !== null && abs($taxRate) > 0.0001) {
+            $status='blocked';
+            $reasons[]='small-business exemption cannot charge VAT';
+        }
+    }
+
+    if ($destination === 'AT') {
+        if (!in_array($scheme,['at_small_business_exempt','at_standard_vat'],true)) {
+            $status='blocked';
+            $reasons[]='Austrian domestic case uses an unsupported or special-review tax scheme';
+        }
+        if ($scheme==='at_standard_vat' && ($taxRate === null || $taxRate < 0)) {
+            $status='blocked';
+            $reasons[]='Austrian taxable case requires a reviewed tax rate';
+        }
+    }
+
+    if ($destination === 'DE' && $sellerCountry !== 'DE') {
+        if ($customerType === 'consumer') {
+            if (!in_array($scheme,['eu_oss','destination_vat_de','at_origin_b2c_below_threshold','eu_small_business_exempt'],true)) {
+                $status='blocked';
+                $reasons[]='German B2C cross-border case has no supported destination/origin tax scheme';
+            }
+            if ($scheme==='at_origin_b2c_below_threshold') {
+                $rule=tax_rule($pdo,'EU_B2C_DISTANCE_SALES');
+                if (tax_counter($pdo,$year,'eu_b2c_distance_sales') > (float) $rule['threshold_amount']) {
+                    $status='blocked';
+                    $reasons[]='EU B2C distance-sales threshold is exceeded';
+                }
+            }
+            if ($scheme==='eu_small_business_exempt') {
+                $rule=tax_rule($pdo,'EU_SME_CROSS_BORDER');
+                if (tax_counter($pdo,$year,'eu_sme_cross_border') > (float) $rule['threshold_amount']) {
+                    $status='blocked';
+                    $reasons[]='EU cross-border SME threshold is exceeded';
+                }
+                if (!tax_verified_registration($pdo,'DE','EU_SME_EXEMPTION')) {
+                    $status='blocked';
+                    $reasons[]='German EU SME exemption registration is not verified';
+                }
+            }
+            if (in_array($scheme,['eu_oss','destination_vat_de','at_origin_b2c_below_threshold'],true)
+                && ($taxRate === null || $taxRate < 0)) {
+                $status='blocked';
+                $reasons[]='taxable German B2C case requires a reviewed tax rate';
+            }
+        } else {
+            if ($transactionType==='goods') {
+                if ($scheme!=='intra_community_supply') {
+                    $status='blocked';
+                    $reasons[]='Cross-border EU B2B goods require reviewed intra-Community supply treatment';
+                }
+            } else {
+                if ($scheme!=='reverse_charge') {
+                    $status='blocked';
+                    $reasons[]='Cross-border EU B2B service requires reviewed reverse-charge treatment';
+                }
+            }
+            if ($vatId==='' || $vatStatus!=='valid') {
+                $status='blocked';
+                $reasons[]='cross-border EU B2B treatment requires a valid verified customer VAT ID';
+            }
+            if ($taxRate !== null && abs($taxRate) > 0.0001) {
+                $status='blocked';
+                $reasons[]='intra-Community/reverse-charge decision cannot charge seller VAT';
+            }
+        }
+    }
+
+    if ($destination === 'DE' && $sellerCountry === 'DE') {
+        if (!in_array($scheme,['de_standard_vat','de_small_business_exempt'],true)) {
+            $status='blocked';
+            $reasons[]='German domestic case has no reviewed domestic tax scheme';
+        }
+    }
+
+    if ($destination === 'CH') {
+        if ($scheme!=='export_third_country') {
+            $status='blocked';
+            $reasons[]='Swiss delivery requires reviewed third-country export treatment';
+        }
+        if (!office_bool($config['CH_INCOTERM_REVIEWED'] ?? 'no')) {
+            $status='blocked';
+            $reasons[]='Swiss Incoterm and importer-of-record treatment is not reviewed';
+        }
+        if (!office_bool($config['CH_CUSTOMS_PRICING_REVIEWED'] ?? 'no')) {
+            $status='blocked';
+            $reasons[]='Swiss customs and landed-cost price disclosure is not reviewed';
+        }
+        if ($taxRate !== null && abs($taxRate) > 0.0001) {
+            $status='blocked';
+            $reasons[]='third-country export decision cannot charge Austrian VAT';
+        }
+    }
+
+    $structured='not_required';
+    $buyerType=strtolower(trim((string) ($input['buyer_type'] ?? 'private')));
+    if ($buyerType==='public_body') {
+        $structured='b2g_structured_required';
+        if (!tax_capability($pdo,'structured_en16931_invoice_renderer')) {
+            $status='blocked';
+            $reasons[]='public-sector structured invoice renderer is not verified';
+        }
+    } elseif ($sellerCountry==='DE' && $destination==='DE' && $customerType==='business') {
+        $structured='de_domestic_b2b_review';
+        if (!tax_capability($pdo,'structured_en16931_invoice_renderer')) {
+            $status='blocked';
+            $reasons[]='German domestic B2B structured invoice capability is not verified';
+        }
+    }
+
+    if (in_array($scheme,['intra_community_supply','reverse_charge','eu_small_business_exempt','de_small_business_exempt'],true)
+        && !tax_capability($pdo,'advanced_b2b_tax_invoice_renderer')) {
+        $status='blocked';
+        $reasons[]='selected scheme requires the advanced DACH tax invoice renderer';
+    }
+
+    if ($manualReason !== '') {
+        $reasons[]='review note: '.$manualReason;
+    }
+    if ($reasons===[]) {
+        $reasons[]='configured DACH tax profile, thresholds and transaction checks passed';
+    }
+    return [
+        'status'=>$status,'scheme'=>$scheme,'destination'=>$destination,'seller_country'=>$sellerCountry,
+        'customer_type'=>$customerType,'transaction_type'=>$transactionType,'vat_id'=>$vatId ?: null,
+        'vat_status'=>$vatStatus,'tax_rate'=>$taxRate,'structured'=>$structured,'reasons'=>$reasons,
+        'reviewed_by'=>$reviewedBy ?: 'shopos-tax-rule-engine',
+    ];
+}
+
+function tax_store(PDO $pdo, array $document, array $evaluation): array
+{
+    $id=office_uuid();
+    $approved=$evaluation['status']==='approved';
+    $pdo->beginTransaction();
+    try {
+        if ($approved) {
+            $supersede=$pdo->prepare(
+                "UPDATE compliance_tax_decisions
+                    SET is_current=0,superseded_at=CURRENT_TIMESTAMP,superseded_by_id=?
+                  WHERE document_id=? AND decision_status='approved' AND is_current=1"
+            );
+            $supersede->execute([$id,$document['id']]);
+        }
+        $insert=$pdo->prepare(
+            'INSERT INTO compliance_tax_decisions
+             (id,document_id,source_system,source_order_id,seller_establishment_country,destination_country,
+              customer_type,customer_vat_id,vat_id_validation_status,tax_scheme,tax_rate,
+              structured_invoice_requirement,decision_status,is_current,decision_reason,decided_at,decided_by)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+        );
+        $insert->execute([
+            $id,$document['id'],$document['source_system'],$document['source_document_id'],
+            $evaluation['seller_country'],$evaluation['destination'],$evaluation['customer_type'],
+            $evaluation['vat_id'],$evaluation['vat_status'],$evaluation['scheme'],$evaluation['tax_rate'],
+            $evaluation['structured'],$evaluation['status'],$approved ? 1 : 0,
+            implode('; ',$evaluation['reasons']),$approved ? date('Y-m-d H:i:s') : null,$evaluation['reviewed_by'],
+        ]);
+        if ($approved) {
+            $update=$pdo->prepare(
+                "UPDATE office_documents SET tax_mode=?
+                  WHERE id=? AND document_status IN ('draft','render_error')"
+            );
+            $update->execute([$evaluation['scheme'],$document['id']]);
+        }
+        tax_audit($pdo,$approved ? 'tax_decision.approved' : 'tax_decision.blocked',$id,$evaluation,$evaluation['reviewed_by']);
+        $pdo->commit();
+    } catch (Throwable $exception) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        throw $exception;
+    }
+    $statement=$pdo->prepare('SELECT * FROM compliance_tax_decisions WHERE id=?');
+    $statement->execute([$id]);
+    return $statement->fetch();
+}
+
+$args=$_SERVER['argv'];
+array_shift($args);
+$command=array_shift($args) ?? '';
+
+try {
+    $pdo=office_database(getenv('OFFICE_ENV_PATH') ?: MSFIXIT_OFFICE_ADMIN_ENV);
+    if ($command==='decide') {
+        if (count($args)<1) tax_usage();
+        $input=tax_json_file($args[0]);
+        $document=tax_document($pdo,trim((string) ($input['document_id'] ?? '')));
+        if ($document['document_status']==='final') {
+            throw new RuntimeException('A final document cannot receive a replacement tax decision; create a correction document');
+        }
+        $evaluation=tax_evaluate($pdo,office_business_config(),$input,$document);
+        tax_output(tax_store($pdo,$document,$evaluation));
+    } elseif ($command==='show' || $command==='history') {
+        if (count($args)<1) tax_usage();
+        $document=tax_document($pdo,$args[0]);
+        $sql='SELECT * FROM compliance_tax_decisions WHERE document_id=?';
+        if ($command==='show') $sql.=" AND decision_status='approved' AND is_current=1";
+        $sql.=' ORDER BY created_at DESC';
+        $statement=$pdo->prepare($sql);
+        $statement->execute([$document['id']]);
+        tax_output($command==='show' ? ($statement->fetch() ?: null) : $statement->fetchAll());
+    } else {
+        tax_usage();
+    }
+} catch (Throwable $exception) {
+    tax_fail('Tax decision error: '.$exception->getMessage());
+}
