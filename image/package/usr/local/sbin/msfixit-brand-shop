@@ -68,7 +68,8 @@ for plugin in \
     msfixit-compliance.php \
     msfixit-compliance-runtime.php \
     msfixit-at-pilot.php \
-    msfixit-discovery.php; do
+    msfixit-discovery.php \
+    zz-msfixit-discovery-assets.php; do
     install -m 0644 \
         "$wordpress_assets/$plugin" \
         "$wordpress_dir/wp-content/mu-plugins/$plugin"
