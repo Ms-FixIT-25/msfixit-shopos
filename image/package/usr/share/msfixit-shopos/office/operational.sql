@@ -80,10 +80,10 @@ CREATE TRIGGER trg_office_documents_validate_final
 BEFORE UPDATE ON office_documents
 FOR EACH ROW
 BEGIN
-    DECLARE line_count INT DEFAULT 0;
-    DECLARE line_net DECIMAL(15,4) DEFAULT 0;
-    DECLARE line_tax DECIMAL(15,4) DEFAULT 0;
-    DECLARE line_gross DECIMAL(15,4) DEFAULT 0;
+    DECLARE final_line_count INT DEFAULT 0;
+    DECLARE final_line_net DECIMAL(15,4) DEFAULT 0;
+    DECLARE final_line_tax DECIMAL(15,4) DEFAULT 0;
+    DECLARE final_line_gross DECIMAL(15,4) DEFAULT 0;
 
     IF NEW.document_status = 'final' THEN
         IF NEW.document_number IS NULL OR NEW.document_number = '' OR NEW.issue_date IS NULL THEN
@@ -116,21 +116,21 @@ BEGIN
         END IF;
 
         SELECT COUNT(*),
-               COALESCE(SUM(line_net), 0),
-               COALESCE(SUM(line_tax), 0),
-               COALESCE(SUM(line_gross), 0)
-          INTO line_count, line_net, line_tax, line_gross
-          FROM office_document_lines
-         WHERE document_id = NEW.id;
+               COALESCE(SUM(odl.line_net), 0),
+               COALESCE(SUM(odl.line_tax), 0),
+               COALESCE(SUM(odl.line_gross), 0)
+          INTO final_line_count, final_line_net, final_line_tax, final_line_gross
+          FROM office_document_lines AS odl
+         WHERE odl.document_id = NEW.id;
 
-        IF line_count = 0 THEN
+        IF final_line_count = 0 THEN
             SIGNAL SQLSTATE '45000'
                 SET MESSAGE_TEXT = 'Final documents require at least one line';
         END IF;
 
-        IF ABS(line_net - NEW.net_total) > 0.0100 OR
-           ABS(line_tax - NEW.tax_total) > 0.0100 OR
-           ABS(line_gross - NEW.gross_total) > 0.0100
+        IF ABS(final_line_net - NEW.net_total) > 0.0100 OR
+           ABS(final_line_tax - NEW.tax_total) > 0.0100 OR
+           ABS(final_line_gross - NEW.gross_total) > 0.0100
         THEN
             SIGNAL SQLSTATE '45000'
                 SET MESSAGE_TEXT = 'Document totals do not match document lines';
@@ -207,10 +207,10 @@ BEGIN
             SET MESSAGE_TEXT = 'Payment and document currencies must match';
     END IF;
 
-    SELECT COALESCE(SUM(allocated_amount), 0)
+    SELECT COALESCE(SUM(opa.allocated_amount), 0)
       INTO allocated_total
-      FROM office_payment_allocations
-     WHERE payment_id = NEW.payment_id;
+      FROM office_payment_allocations AS opa
+     WHERE opa.payment_id = NEW.payment_id;
 
     IF allocated_total + NEW.allocated_amount > payment_amount + 0.0001 THEN
         SIGNAL SQLSTATE '45000'
