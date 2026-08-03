@@ -99,6 +99,12 @@ add_action('woocommerce_checkout_create_order', static function (WC_Order $order
     $order->update_meta_data('_msfixit_pilot_mode', 'at_popup');
     $order->update_meta_data('_msfixit_supplier_release_status', 'pending_manual_review');
     $order->update_meta_data('_msfixit_supplier_order_sent', 'no');
+}, 1000);
+
+add_action('woocommerce_checkout_order_created', static function (WC_Order $order): void {
+    if (!msfixit_pilot_enabled()) {
+        return;
+    }
     $order->add_order_note('AT-Pilot: Einkaufspreis und ALSO-Bestand vor der Lieferantenbestellung manuell prüfen.');
 }, 1000);
 
