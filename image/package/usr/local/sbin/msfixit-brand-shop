@@ -36,9 +36,10 @@ ensure_media() {
 run_wp core is-installed >/dev/null
 
 # Separate application databases remain the source of truth for article identity,
-# immutable commercial documents and the DACH legal/compliance approval state.
+# immutable commercial documents, DACH compliance and supplier staging.
 /usr/local/sbin/msfixit-catalog-init
 /usr/local/sbin/msfixit-office-init
+/usr/local/sbin/msfixit-also-init
 
 if ! run_wp plugin is-installed woocommerce >/dev/null 2>&1; then
     run_wp plugin install woocommerce >/dev/null
@@ -57,7 +58,8 @@ for plugin in \
     msfixit-commerce-region.php \
     msfixit-office-bridge.php \
     msfixit-compliance.php \
-    msfixit-compliance-runtime.php; do
+    msfixit-compliance-runtime.php \
+    msfixit-at-pilot.php; do
     install -m 0644 \
         "$wordpress_assets/$plugin" \
         "$wordpress_dir/wp-content/mu-plugins/$plugin"
@@ -123,4 +125,4 @@ done
 run_wp cache flush >/dev/null 2>&1 || true
 chown -R www-data:www-data "$wordpress_dir/wp-content"
 
-echo "Ms. FixIT WooCommerce branding, DACH shop, article master, Office/Fulfillment and compliance core applied successfully."
+echo "Ms. FixIT WooCommerce branding, AT pilot, ALSO staging, article master, Office/Fulfillment and compliance core applied successfully."

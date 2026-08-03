@@ -28,6 +28,20 @@ if [ -f /etc/msfixit-shopos/catalog.env ]; then
         state="degraded"
         failed+=("catalog")
     fi
+
+    if mariadb shopos_catalog -Nse "SELECT 1 FROM pilot_schema_versions LIMIT 1" >/dev/null 2>&1; then
+        if ! systemctl is-active --quiet msfixit-also-sync.timer; then
+            state="degraded"
+            failed+=("msfixit-also-sync.timer")
+        fi
+        failed_imports="$(mariadb shopos_catalog -Nse \
+            "SELECT COUNT(*) FROM supplier_import_runs WHERE run_status='failed' AND started_at >= CURRENT_TIMESTAMP - INTERVAL 2 DAY" \
+            2>/dev/null || echo 0)"
+        if [[ "$failed_imports" =~ ^[0-9]+$ ]] && [ "$failed_imports" -gt 0 ]; then
+            state="degraded"
+            failed+=("also-imports:${failed_imports}")
+        fi
+    fi
 fi
 
 if [ -f /etc/msfixit-shopos/office.env ]; then

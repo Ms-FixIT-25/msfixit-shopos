@@ -1,0 +1,902 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+const ALSO_CONFIG = '/etc/msfixit-shopos/also.env';
+const CATALOG_CONFIG = '/etc/msfixit-shopos/catalog.env';
+const ALSO_DATA = '/data/suppliers/also';
+const WORDPRESS_PATH = '/srv/www/wordpress';
+const ALSO_DRAFT_SCRIPT = '/usr/share/msfixit-shopos/wordpress/msfixit-also-draft.php';
+
+function also_fail(string $message, int $code = 1): never
+{
+    fwrite(STDERR, $message . PHP_EOL);
+    exit($code);
+}
+
+function also_usage(): never
+{
+    fwrite(STDERR, <<<'TEXT'
+Ms. FixIT ALSO Austria connector
+
+Commands:
+  msfixit-also status
+  msfixit-also test-connection
+  msfixit-also sync
+  msfixit-also import-file FILE [dry-run]
+  msfixit-also list [STATUS] [LIMIT]
+  msfixit-also show SUPPLIER_SKU
+  msfixit-also approve SUPPLIER_SKU SALE_PRICE [ACTOR]
+  msfixit-also reject SUPPLIER_SKU REASON [ACTOR]
+  msfixit-also create-draft SUPPLIER_SKU
+  msfixit-also export-review [OUTPUT_FILE]
+  msfixit-also release-order SOURCE_ORDER_ID PURCHASE_TOTAL [ACTOR]
+
+The connector never publishes products or sends supplier orders automatically.
+TEXT
+    );
+    exit(2);
+}
+
+function also_load_env(string $path): array
+{
+    if (!is_readable($path)) {
+        also_fail("Configuration is unavailable: {$path}");
+    }
+    $settings = [];
+    foreach (file($path, FILE_IGNORE_NEW_LINES) ?: [] as $line) {
+        $line = trim($line);
+        if ($line === '' || str_starts_with($line, '#') || !str_contains($line, '=')) {
+            continue;
+        }
+        [$key, $value] = explode('=', $line, 2);
+        $settings[trim($key)] = trim($value, " \t\n\r\0\x0B\"'");
+    }
+    return $settings;
+}
+
+function also_bool(mixed $value): bool
+{
+    return in_array(strtolower(trim((string) $value)), ['1', 'yes', 'true', 'on'], true);
+}
+
+function also_uuid(): string
+{
+    $bytes = random_bytes(16);
+    $bytes[6] = chr((ord($bytes[6]) & 0x0f) | 0x40);
+    $bytes[8] = chr((ord($bytes[8]) & 0x3f) | 0x80);
+    $hex = bin2hex($bytes);
+    return sprintf('%s-%s-%s-%s-%s',
+        substr($hex, 0, 8), substr($hex, 8, 4), substr($hex, 12, 4),
+        substr($hex, 16, 4), substr($hex, 20, 12)
+    );
+}
+
+function also_db(): PDO
+{
+    static $pdo = null;
+    if ($pdo instanceof PDO) {
+        return $pdo;
+    }
+    $env = also_load_env(CATALOG_CONFIG);
+    foreach (['CATALOG_DB_HOST', 'CATALOG_DB_PORT', 'CATALOG_DB_NAME', 'CATALOG_DB_USER', 'CATALOG_DB_PASSWORD'] as $key) {
+        if (empty($env[$key])) {
+            also_fail("Missing catalog database setting: {$key}");
+        }
+    }
+    $dsn = sprintf('mysql:host=%s;port=%s;dbname=%s;charset=utf8mb4',
+        $env['CATALOG_DB_HOST'], $env['CATALOG_DB_PORT'], $env['CATALOG_DB_NAME']);
+    $pdo = new PDO($dsn, $env['CATALOG_DB_USER'], $env['CATALOG_DB_PASSWORD'], [
+        PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+        PDO::ATTR_EMULATE_PREPARES => false,
+    ]);
+    return $pdo;
+}
+
+function also_json(mixed $value): string
+{
+    return json_encode($value, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+}
+
+function also_output(mixed $value): void
+{
+    echo json_encode($value, JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . PHP_EOL;
+}
+
+function also_decimal(mixed $value): ?float
+{
+    $raw = trim((string) $value);
+    if ($raw === '') {
+        return null;
+    }
+    $raw = preg_replace('/[^0-9,.-]/', '', $raw) ?? '';
+    if (str_contains($raw, ',') && str_contains($raw, '.')) {
+        if (strrpos($raw, ',') > strrpos($raw, '.')) {
+            $raw = str_replace('.', '', $raw);
+            $raw = str_replace(',', '.', $raw);
+        } else {
+            $raw = str_replace(',', '', $raw);
+        }
+    } elseif (str_contains($raw, ',')) {
+        $raw = str_replace(',', '.', $raw);
+    }
+    return is_numeric($raw) ? round((float) $raw, 4) : null;
+}
+
+function also_delimiter(string $setting, string $sample): string
+{
+    return match (strtolower($setting)) {
+        'semicolon', ';' => ';',
+        'comma', ',' => ',',
+        'tab', '\\t' => "\t",
+        'pipe', '|' => '|',
+        default => (function () use ($sample): string {
+            $candidates = ["\t", ';', ',', '|'];
+            usort($candidates, static fn(string $a, string $b): int => substr_count($sample, $b) <=> substr_count($sample, $a));
+            return $candidates[0];
+        })(),
+    };
+}
+
+function also_required_header(array $headers, array $config, string $configKey): int
+{
+    $name = trim((string) ($config[$configKey] ?? ''));
+    $index = array_search($name, $headers, true);
+    if ($name === '' || $index === false) {
+        throw new RuntimeException("Required feed header is missing: {$configKey}={$name}");
+    }
+    return (int) $index;
+}
+
+function also_row_value(array $row, array $headers, array $config, string $configKey): string
+{
+    $name = trim((string) ($config[$configKey] ?? ''));
+    if ($name === '') {
+        return '';
+    }
+    $index = array_search($name, $headers, true);
+    return $index === false ? '' : trim((string) ($row[(int) $index] ?? ''));
+}
+
+function also_normalize_stock(string $raw, ?float $quantity): string
+{
+    $value = mb_strtolower(trim($raw));
+    if ($quantity !== null) {
+        return $quantity > 0 ? 'available' : 'out_of_stock';
+    }
+    if (preg_match('/lager|available|verfügbar|sofort|stock/', $value)) {
+        return 'available';
+    }
+    if (preg_match('/kein|not available|nicht verfügbar|ausverkauft|out/', $value)) {
+        return 'out_of_stock';
+    }
+    if (preg_match('/bestell|backorder|ordered|zulauf/', $value)) {
+        return 'backorder';
+    }
+    return 'unknown';
+}
+
+function also_proposed_price(?float $purchase, array $config): ?float
+{
+    if ($purchase === null || $purchase <= 0 || !also_bool($config['AT_PILOT_PRICING_APPROVED'] ?? 'no')) {
+        return null;
+    }
+    $margin = also_decimal($config['AT_PILOT_TARGET_GROSS_MARGIN_PERCENT'] ?? '');
+    if ($margin === null || $margin <= 0 || $margin >= 90) {
+        return null;
+    }
+    return ceil(($purchase / (1 - ($margin / 100))) * 100) / 100;
+}
+
+function also_find_item(PDO $pdo, string $sku, string $supplier = 'also-at'): array
+{
+    $statement = $pdo->prepare('SELECT * FROM supplier_feed_items WHERE supplier_code=? AND supplier_sku=?');
+    $statement->execute([$supplier, trim($sku)]);
+    $item = $statement->fetch();
+    if (!$item) {
+        throw new RuntimeException("Unknown ALSO supplier SKU: {$sku}");
+    }
+    return $item;
+}
+
+function also_record_change(PDO $pdo, int $itemId, string $runId, string $field, mixed $old, mixed $new, bool $review): void
+{
+    $statement = $pdo->prepare(
+        'INSERT INTO supplier_feed_changes
+         (feed_item_id, import_run_id, field_name, old_value, new_value, requires_review)
+         VALUES (?, ?, ?, ?, ?, ?)'
+    );
+    $statement->execute([$itemId, $runId, $field, $old === null ? null : (string) $old,
+        $new === null ? null : (string) $new, $review ? 1 : 0]);
+}
+
+function also_import_file(string $path, bool $dryRun = false): array
+{
+    if (!is_file($path) || !is_readable($path)) {
+        throw new RuntimeException("Feed file is not readable: {$path}");
+    }
+    $config = also_load_env(ALSO_CONFIG);
+    $supplier = trim((string) ($config['ALSO_SUPPLIER_CODE'] ?? 'also-at')) ?: 'also-at';
+    $hash = hash_file('sha256', $path);
+    if ($hash === false) {
+        throw new RuntimeException('Unable to hash feed file');
+    }
+
+    $raw = file_get_contents($path);
+    if ($raw === false) {
+        throw new RuntimeException('Unable to read feed file');
+    }
+    $encoding = trim((string) ($config['ALSO_FEED_ENCODING'] ?? 'UTF-8')) ?: 'UTF-8';
+    if (strcasecmp($encoding, 'UTF-8') !== 0) {
+        $converted = iconv($encoding, 'UTF-8//TRANSLIT', $raw);
+        if ($converted === false) {
+            throw new RuntimeException("Unable to convert feed encoding {$encoding} to UTF-8");
+        }
+        $raw = $converted;
+    }
+    $raw = preg_replace('/^\xEF\xBB\xBF/', '', $raw) ?? $raw;
+    $lines = preg_split('/\R/', $raw) ?: [];
+    $first = array_shift($lines);
+    if ($first === null || trim($first) === '') {
+        throw new RuntimeException('Feed is empty');
+    }
+    $delimiter = also_delimiter((string) ($config['ALSO_FEED_DELIMITER'] ?? 'auto'), $first);
+    $headers = array_map(static fn(string $value): string => trim($value), str_getcsv($first, $delimiter));
+    also_required_header($headers, $config, 'ALSO_FIELD_SUPPLIER_SKU');
+    also_required_header($headers, $config, 'ALSO_FIELD_PRODUCT_NAME');
+    also_required_header($headers, $config, 'ALSO_FIELD_PURCHASE_PRICE');
+
+    $pdo = also_db();
+    $duplicate = $pdo->prepare(
+        "SELECT id, run_status FROM supplier_import_runs
+         WHERE supplier_code=? AND source_sha256=? LIMIT 1"
+    );
+    $duplicate->execute([$supplier, $hash]);
+    $prior = $duplicate->fetch();
+    if ($prior && $prior['run_status'] === 'completed') {
+        return ['status' => 'duplicate', 'run_id' => $prior['id'], 'sha256' => $hash];
+    }
+
+    $runId = also_uuid();
+    if (!$dryRun) {
+        $insertRun = $pdo->prepare(
+            'INSERT INTO supplier_import_runs
+             (id, supplier_code, source_type, source_name, source_sha256)
+             VALUES (?, ?, ?, ?, ?)'
+        );
+        $insertRun->execute([$runId, $supplier, 'csv', basename($path), $hash]);
+    }
+
+    $stats = ['total' => 0, 'accepted' => 0, 'quarantined' => 0, 'updated' => 0, 'new' => 0];
+    $maxRows = max(1, (int) ($config['ALSO_MAX_ROWS_PER_IMPORT'] ?? 100000));
+    $newLimit = max(1, (int) ($config['ALSO_MAX_NEW_ITEMS_PER_IMPORT'] ?? 5000));
+    $priceReviewPercent = max(0.0, (float) ($config['AT_PILOT_PRICE_CHANGE_REVIEW_PERCENT'] ?? 5));
+
+    try {
+        foreach ($lines as $line) {
+            if (trim($line) === '') {
+                continue;
+            }
+            $stats['total']++;
+            if ($stats['total'] > $maxRows) {
+                throw new RuntimeException("Feed exceeds configured row limit of {$maxRows}");
+            }
+            $row = str_getcsv($line, $delimiter);
+            $payload = array_combine($headers, array_pad(array_slice($row, 0, count($headers)), count($headers), ''));
+            if ($payload === false) {
+                $payload = ['raw' => $line];
+            }
+
+            $sku = also_row_value($row, $headers, $config, 'ALSO_FIELD_SUPPLIER_SKU');
+            $name = also_row_value($row, $headers, $config, 'ALSO_FIELD_PRODUCT_NAME');
+            $purchase = also_decimal(also_row_value($row, $headers, $config, 'ALSO_FIELD_PURCHASE_PRICE'));
+            $currency = strtoupper(also_row_value($row, $headers, $config, 'ALSO_FIELD_CURRENCY') ?: 'EUR');
+            $stock = also_decimal(also_row_value($row, $headers, $config, 'ALSO_FIELD_STOCK_QUANTITY'));
+            $stockStatus = also_normalize_stock(
+                also_row_value($row, $headers, $config, 'ALSO_FIELD_STOCK_STATUS'), $stock
+            );
+            $gtin = preg_replace('/\D/', '', also_row_value($row, $headers, $config, 'ALSO_FIELD_GTIN')) ?: null;
+            $manufacturer = also_row_value($row, $headers, $config, 'ALSO_FIELD_MANUFACTURER') ?: null;
+            $manufacturerSku = also_row_value($row, $headers, $config, 'ALSO_FIELD_MANUFACTURER_SKU') ?: null;
+            $reason = null;
+            if ($sku === '') {
+                $reason = 'missing_supplier_sku';
+            } elseif ($name === '') {
+                $reason = 'missing_product_name';
+            } elseif ($purchase === null || $purchase <= 0) {
+                $reason = 'invalid_purchase_price';
+            } elseif ($currency !== 'EUR') {
+                $reason = 'pilot_accepts_eur_only';
+            }
+            $status = $reason === null ? 'new' : 'quarantined';
+            $dataHash = hash('sha256', also_json($payload));
+            $proposed = also_proposed_price($purchase, $config);
+
+            if ($dryRun) {
+                $reason === null ? $stats['accepted']++ : $stats['quarantined']++;
+                continue;
+            }
+
+            $select = $pdo->prepare('SELECT * FROM supplier_feed_items WHERE supplier_code=? AND supplier_sku=? FOR UPDATE');
+            $pdo->beginTransaction();
+            $select->execute([$supplier, $sku]);
+            $existing = $select->fetch();
+            if (!$existing) {
+                if ($stats['new'] >= $newLimit) {
+                    $status = 'quarantined';
+                    $reason = 'new_item_limit_reached';
+                }
+                $insert = $pdo->prepare(
+                    'INSERT INTO supplier_feed_items
+                     (supplier_code, supplier_sku, manufacturer_name, manufacturer_sku, gtin,
+                      product_name, short_description, marketing_description, category_path,
+                      purchase_price, currency, stock_quantity, stock_status, lead_time_days,
+                      image_url, datasheet_url, content_license, source_payload_json,
+                      source_sha256, review_status, review_reason, proposed_sale_price,
+                      price_review_required, compliance_review_required)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)'
+                );
+                $insert->execute([
+                    $supplier, $sku, $manufacturer, $manufacturerSku, $gtin, $name,
+                    also_row_value($row, $headers, $config, 'ALSO_FIELD_SHORT_DESCRIPTION') ?: null,
+                    also_row_value($row, $headers, $config, 'ALSO_FIELD_MARKETING_DESCRIPTION') ?: null,
+                    also_row_value($row, $headers, $config, 'ALSO_FIELD_CATEGORY') ?: null,
+                    $purchase, $currency, $stock, $stockStatus,
+                    also_decimal(also_row_value($row, $headers, $config, 'ALSO_FIELD_LEAD_TIME_DAYS')),
+                    also_row_value($row, $headers, $config, 'ALSO_FIELD_IMAGE_URL') ?: null,
+                    also_row_value($row, $headers, $config, 'ALSO_FIELD_DATASHEET_URL') ?: null,
+                    strtolower((string) ($config['ALSO_CONTENT_LICENSE'] ?? 'none')),
+                    also_json($payload), $dataHash, $status, $reason, $proposed,
+                    $proposed === null ? 1 : 0,
+                ]);
+                $itemId = (int) $pdo->lastInsertId();
+                $stats['new']++;
+            } else {
+                $itemId = (int) $existing['id'];
+                $review = false;
+                $fields = [
+                    'product_name' => $name,
+                    'manufacturer_name' => $manufacturer,
+                    'manufacturer_sku' => $manufacturerSku,
+                    'gtin' => $gtin,
+                    'purchase_price' => $purchase,
+                    'stock_quantity' => $stock,
+                    'stock_status' => $stockStatus,
+                ];
+                foreach ($fields as $field => $newValue) {
+                    $oldValue = $existing[$field] ?? null;
+                    if ((string) $oldValue === (string) $newValue) {
+                        continue;
+                    }
+                    $requiresReview = false;
+                    if ($field === 'purchase_price' && (float) $oldValue > 0) {
+                        $changePercent = abs(((float) $newValue - (float) $oldValue) / (float) $oldValue) * 100;
+                        $requiresReview = $changePercent >= $priceReviewPercent;
+                    }
+                    if (in_array($field, ['product_name', 'manufacturer_name', 'manufacturer_sku', 'gtin'], true)) {
+                        $requiresReview = true;
+                    }
+                    $review = $review || $requiresReview;
+                    also_record_change($pdo, $itemId, $runId, $field, $oldValue, $newValue, $requiresReview);
+                }
+                $nextStatus = $existing['review_status'];
+                if ($reason !== null) {
+                    $nextStatus = 'quarantined';
+                } elseif ($review && in_array($nextStatus, ['approved', 'draft_created'], true)) {
+                    $nextStatus = 'review';
+                } elseif ($nextStatus === 'quarantined') {
+                    $nextStatus = 'new';
+                }
+                $update = $pdo->prepare(
+                    'UPDATE supplier_feed_items SET
+                     manufacturer_name=?, manufacturer_sku=?, gtin=?, product_name=?,
+                     short_description=?, marketing_description=?, category_path=?,
+                     purchase_price=?, currency=?, stock_quantity=?, stock_status=?,
+                     lead_time_days=?, image_url=?, datasheet_url=?, content_license=?,
+                     source_payload_json=?, source_sha256=?, review_status=?, review_reason=?,
+                     proposed_sale_price=?, price_review_required=?, last_seen_at=CURRENT_TIMESTAMP,
+                     active=1 WHERE id=?'
+                );
+                $update->execute([
+                    $manufacturer, $manufacturerSku, $gtin, $name,
+                    also_row_value($row, $headers, $config, 'ALSO_FIELD_SHORT_DESCRIPTION') ?: null,
+                    also_row_value($row, $headers, $config, 'ALSO_FIELD_MARKETING_DESCRIPTION') ?: null,
+                    also_row_value($row, $headers, $config, 'ALSO_FIELD_CATEGORY') ?: null,
+                    $purchase, $currency, $stock, $stockStatus,
+                    also_decimal(also_row_value($row, $headers, $config, 'ALSO_FIELD_LEAD_TIME_DAYS')),
+                    also_row_value($row, $headers, $config, 'ALSO_FIELD_IMAGE_URL') ?: null,
+                    also_row_value($row, $headers, $config, 'ALSO_FIELD_DATASHEET_URL') ?: null,
+                    strtolower((string) ($config['ALSO_CONTENT_LICENSE'] ?? 'none')),
+                    also_json($payload), $dataHash, $nextStatus, $reason, $proposed,
+                    ($proposed === null || $review) ? 1 : 0, $itemId,
+                ]);
+                $stats['updated']++;
+            }
+
+            if ($reason === null) {
+                $stats['accepted']++;
+            } else {
+                $stats['quarantined']++;
+            }
+
+            if ($existing && !empty($existing['linked_product_id']) && also_bool($config['ALSO_AUTO_UPDATE_EXISTING_OFFERS'] ?? 'yes')) {
+                $offer = $pdo->prepare(
+                    'INSERT INTO catalog_supplier_offers
+                     (product_id, supplier_code, supplier_sku, purchase_price, currency,
+                      stock_quantity, stock_status, lead_time_days, active, raw_payload_json, last_seen_at)
+                     SELECT linked_product_id, supplier_code, supplier_sku, purchase_price,
+                            currency, stock_quantity, stock_status, lead_time_days, active,
+                            source_payload_json, CURRENT_TIMESTAMP
+                     FROM supplier_feed_items WHERE id=?
+                     ON DUPLICATE KEY UPDATE
+                       purchase_price=VALUES(purchase_price), currency=VALUES(currency),
+                       stock_quantity=VALUES(stock_quantity), stock_status=VALUES(stock_status),
+                       lead_time_days=VALUES(lead_time_days), active=VALUES(active),
+                       raw_payload_json=VALUES(raw_payload_json), last_seen_at=CURRENT_TIMESTAMP'
+                );
+                $offer->execute([$itemId]);
+            }
+            $pdo->commit();
+        }
+
+        if (!$dryRun) {
+            $finish = $pdo->prepare(
+                "UPDATE supplier_import_runs SET run_status='completed', rows_total=?,
+                 rows_accepted=?, rows_quarantined=?, rows_updated=?, rows_new=?,
+                 finished_at=CURRENT_TIMESTAMP WHERE id=?"
+            );
+            $finish->execute([$stats['total'], $stats['accepted'], $stats['quarantined'],
+                $stats['updated'], $stats['new'], $runId]);
+            $archive = sprintf('%s/archive/%s-%s-%s', ALSO_DATA, date('Ymd-His'), substr($hash, 0, 12), basename($path));
+            copy($path, $archive);
+            chmod($archive, 0640);
+        }
+    } catch (Throwable $exception) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        if (!$dryRun) {
+            $failed = $pdo->prepare(
+                "UPDATE supplier_import_runs SET run_status='failed', error_json=?,
+                 rows_total=?, rows_accepted=?, rows_quarantined=?, rows_updated=?, rows_new=?,
+                 finished_at=CURRENT_TIMESTAMP WHERE id=?"
+            );
+            $failed->execute([also_json(['message' => $exception->getMessage()]), $stats['total'],
+                $stats['accepted'], $stats['quarantined'], $stats['updated'], $stats['new'], $runId]);
+        }
+        throw $exception;
+    }
+
+    return ['status' => $dryRun ? 'dry_run' : 'completed', 'run_id' => $runId,
+        'sha256' => $hash, 'delimiter' => $delimiter === "\t" ? 'tab' : $delimiter, 'stats' => $stats];
+}
+
+function also_sftp_download(array $config): string
+{
+    foreach (['ALSO_SFTP_HOST', 'ALSO_SFTP_USER', 'ALSO_SFTP_REMOTE_FILE'] as $key) {
+        if (trim((string) ($config[$key] ?? '')) === '') {
+            throw new RuntimeException("Missing SFTP setting: {$key}");
+        }
+    }
+    $host = trim((string) $config['ALSO_SFTP_HOST']);
+    $user = trim((string) $config['ALSO_SFTP_USER']);
+    $remote = trim((string) $config['ALSO_SFTP_REMOTE_FILE']);
+    if (preg_match('/[\r\n]/', $remote) || preg_match('/\s/', $remote)) {
+        throw new RuntimeException('ALSO_SFTP_REMOTE_FILE must not contain whitespace');
+    }
+    $knownHosts = trim((string) ($config['ALSO_SFTP_KNOWN_HOSTS'] ?? '/etc/msfixit-shopos/also/known_hosts'));
+    if (!is_file($knownHosts) || filesize($knownHosts) === 0) {
+        throw new RuntimeException('Pinned ALSO SFTP known_hosts file is missing or empty');
+    }
+    $port = max(1, (int) ($config['ALSO_SFTP_PORT'] ?? 22));
+    $local = sprintf('%s/incoming/also-%s-%s.csv', ALSO_DATA, date('Ymd-His'), bin2hex(random_bytes(4)));
+    $batch = tempnam('/run', 'also-sftp-');
+    if ($batch === false) {
+        throw new RuntimeException('Unable to create SFTP batch file');
+    }
+    file_put_contents($batch, "get {$remote} {$local}\n");
+    chmod($batch, 0600);
+
+    $options = [
+        'sftp', '-b', $batch, '-P', (string) $port,
+        '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes',
+        '-o', "UserKnownHostsFile={$knownHosts}",
+        '-o', 'ConnectTimeout=30',
+    ];
+    $auth = strtolower(trim((string) ($config['ALSO_SFTP_AUTH'] ?? 'key')));
+    if ($auth === 'key') {
+        $identity = trim((string) ($config['ALSO_SFTP_IDENTITY_FILE'] ?? ''));
+        if (!is_file($identity)) {
+            @unlink($batch);
+            throw new RuntimeException('ALSO SFTP identity file is missing');
+        }
+        $options[] = '-i';
+        $options[] = $identity;
+    }
+    $options[] = "{$user}@{$host}";
+
+    if ($auth === 'password') {
+        $passwordFile = trim((string) ($config['ALSO_SFTP_PASSWORD_FILE'] ?? ''));
+        if (!is_file($passwordFile)) {
+            @unlink($batch);
+            throw new RuntimeException('ALSO SFTP password file is missing');
+        }
+        array_unshift($options, 'sshpass', '-f', $passwordFile);
+        $batchModeIndex = array_search('BatchMode=yes', $options, true);
+        if ($batchModeIndex !== false) {
+            $options[$batchModeIndex] = 'BatchMode=no';
+        }
+    } elseif ($auth !== 'key') {
+        @unlink($batch);
+        throw new RuntimeException('ALSO_SFTP_AUTH must be key or password');
+    }
+
+    $command = implode(' ', array_map('escapeshellarg', $options));
+    exec($command . ' 2>&1', $output, $exitCode);
+    @unlink($batch);
+    if ($exitCode !== 0 || !is_file($local) || filesize($local) === 0) {
+        @unlink($local);
+        throw new RuntimeException('ALSO SFTP download failed: ' . implode("\n", $output));
+    }
+    chmod($local, 0640);
+    return $local;
+}
+
+function also_create_catalog_product(PDO $pdo, array $item, float $salePrice, string $actor): array
+{
+    $config = also_load_env(ALSO_CONFIG);
+    $maxProducts = max(1, (int) ($config['AT_PILOT_MAX_APPROVED_PRODUCTS'] ?? 30));
+    $count = (int) $pdo->query(
+        "SELECT COUNT(*) FROM pilot_product_approvals WHERE country_code='AT' AND approval_status='approved'"
+    )->fetchColumn();
+    if ($count >= $maxProducts && empty($item['linked_product_id'])) {
+        throw new RuntimeException("AT pilot product limit of {$maxProducts} has been reached");
+    }
+    if ((float) $item['purchase_price'] <= 0 || $salePrice <= (float) $item['purchase_price']) {
+        throw new RuntimeException('Approved sale price must be greater than the current purchase price');
+    }
+    if (also_bool($config['AT_PILOT_REQUIRE_POSITIVE_STOCK'] ?? 'yes')
+        && (($item['stock_quantity'] !== null && (float) $item['stock_quantity'] <= 0)
+            || $item['stock_status'] === 'out_of_stock')) {
+        throw new RuntimeException('Pilot approval requires positive supplier stock');
+    }
+    if ($item['review_status'] === 'quarantined' || !$item['active']) {
+        throw new RuntimeException('Quarantined or inactive feed item cannot be approved');
+    }
+
+    $pdo->beginTransaction();
+    try {
+        $productId = $item['linked_product_id'];
+        $article = null;
+        if ($productId) {
+            $statement = $pdo->prepare('SELECT article_number FROM catalog_products WHERE id=?');
+            $statement->execute([$productId]);
+            $article = $statement->fetchColumn();
+        } else {
+            $next = $pdo->query(
+                "SELECT next_value FROM catalog_sequences WHERE sequence_name='article_number' FOR UPDATE"
+            )->fetchColumn();
+            if ($next === false || (int) $next < 1 || (int) $next > 99999999) {
+                throw new RuntimeException('Article-number sequence is unavailable');
+            }
+            $article = sprintf('MF-%08d', (int) $next);
+            $productId = also_uuid();
+            $pdo->exec("UPDATE catalog_sequences SET next_value=next_value+1 WHERE sequence_name='article_number'");
+            $insert = $pdo->prepare(
+                "INSERT INTO catalog_products
+                 (id, article_number, product_type, product_name, status, source_of_truth)
+                 VALUES (?, ?, 'simple', ?, 'draft', 'shopos')"
+            );
+            $insert->execute([$productId, $article, $item['product_name']]);
+            $map = $pdo->prepare(
+                'INSERT INTO catalog_identifiers (product_id, namespace, external_id, is_primary)
+                 VALUES (?, ?, ?, ?)'
+            );
+            $map->execute([$productId, 'shopos:article', $article, 1]);
+            $map->execute([$productId, 'supplier:also-at', $item['supplier_sku'], 1]);
+            if (!empty($item['gtin'])) {
+                $map->execute([$productId, 'gtin:ean', $item['gtin'], 1]);
+            }
+            if (!empty($item['manufacturer_sku'])) {
+                $map->execute([$productId, 'manufacturer:sku', $item['manufacturer_sku'], 0]);
+            }
+        }
+
+        $offer = $pdo->prepare(
+            'INSERT INTO catalog_supplier_offers
+             (product_id, supplier_code, supplier_sku, purchase_price, currency,
+              stock_quantity, stock_status, lead_time_days, active, raw_payload_json, last_seen_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, CURRENT_TIMESTAMP)
+             ON DUPLICATE KEY UPDATE purchase_price=VALUES(purchase_price),
+               currency=VALUES(currency), stock_quantity=VALUES(stock_quantity),
+               stock_status=VALUES(stock_status), lead_time_days=VALUES(lead_time_days),
+               active=1, raw_payload_json=VALUES(raw_payload_json), last_seen_at=CURRENT_TIMESTAMP'
+        );
+        $offer->execute([$productId, $item['supplier_code'], $item['supplier_sku'],
+            $item['purchase_price'], $item['currency'], $item['stock_quantity'],
+            $item['stock_status'], $item['lead_time_days'], $item['source_payload_json']]);
+
+        $approval = $pdo->prepare(
+            "INSERT INTO pilot_product_approvals
+             (feed_item_id, country_code, approval_status, approved_sale_price, approved_by, approved_at)
+             VALUES (?, 'AT', 'approved', ?, ?, CURRENT_TIMESTAMP)
+             ON DUPLICATE KEY UPDATE approval_status='approved',
+               approved_sale_price=VALUES(approved_sale_price), approved_by=VALUES(approved_by),
+               approved_at=CURRENT_TIMESTAMP"
+        );
+        $approval->execute([$item['id'], $salePrice, $actor]);
+        $update = $pdo->prepare(
+            "UPDATE supplier_feed_items SET linked_product_id=?, review_status='approved',
+             reviewed_at=CURRENT_TIMESTAMP, reviewed_by=?, price_review_required=0 WHERE id=?"
+        );
+        $update->execute([$productId, $actor, $item['id']]);
+        $pdo->commit();
+        return ['product_id' => $productId, 'article_number' => $article, 'sale_price' => $salePrice];
+    } catch (Throwable $exception) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        throw $exception;
+    }
+}
+
+function also_create_wc_draft(PDO $pdo, array $item): int
+{
+    if (empty($item['linked_product_id'])) {
+        throw new RuntimeException('Feed item has no linked Ms. FixIT article');
+    }
+    $articleStatement = $pdo->prepare('SELECT article_number FROM catalog_products WHERE id=?');
+    $articleStatement->execute([$item['linked_product_id']]);
+    $article = $articleStatement->fetchColumn();
+    if (!$article) {
+        throw new RuntimeException('Linked article does not exist');
+    }
+    $approval = $pdo->prepare(
+        "SELECT approved_sale_price FROM pilot_product_approvals
+         WHERE feed_item_id=? AND country_code='AT' AND approval_status='approved'"
+    );
+    $approval->execute([$item['id']]);
+    $salePrice = $approval->fetchColumn();
+    if ($salePrice === false) {
+        throw new RuntimeException('AT pilot approval is missing');
+    }
+    $config = also_load_env(ALSO_CONFIG);
+    $license = strtolower((string) ($item['content_license'] ?? 'none'));
+    $allowText = also_bool($config['ALSO_ALLOW_MARKETING_TEXT'] ?? 'no') && $license !== 'none';
+    $safety = max(0, (int) ($config['AT_PILOT_STOCK_SAFETY_QUANTITY'] ?? 2));
+    $supplierStock = $item['stock_quantity'] === null ? null : max(0, (int) floor((float) $item['stock_quantity']));
+    $shopStock = $supplierStock === null ? null : max(0, $supplierStock - $safety);
+    $payload = [
+        'article_number' => $article,
+        'name' => $item['product_name'],
+        'regular_price' => number_format((float) $salePrice, 2, '.', ''),
+        'stock_quantity' => $shopStock,
+        'supplier_code' => $item['supplier_code'],
+        'supplier_sku' => $item['supplier_sku'],
+        'manufacturer_name' => $item['manufacturer_name'],
+        'manufacturer_sku' => $item['manufacturer_sku'],
+        'gtin' => $item['gtin'],
+        'short_description' => $allowText ? ($item['short_description'] ?? '') : '',
+        'description' => $allowText ? ($item['marketing_description'] ?? '') : '',
+        'image_url' => $item['image_url'],
+        'datasheet_url' => $item['datasheet_url'],
+        'content_license' => $license,
+        'allow_local_image_cache' => false,
+    ];
+    $runtimeDir = '/run/msfixit-shopos';
+    if (!is_dir($runtimeDir)) {
+        mkdir($runtimeDir, 0755, true);
+    }
+    $file = $runtimeDir . '/also-draft-' . bin2hex(random_bytes(8)) . '.json';
+    file_put_contents($file, also_json($payload));
+    chmod($file, 0640);
+    chgrp($file, 'www-data');
+    $command = sprintf(
+        'runuser -u www-data -- env HOME=/tmp MSFIXIT_ALSO_PAYLOAD_FILE=%s /usr/local/bin/wp --path=%s eval-file %s 2>&1',
+        escapeshellarg($file), escapeshellarg(WORDPRESS_PATH), escapeshellarg(ALSO_DRAFT_SCRIPT)
+    );
+    exec($command, $output, $exitCode);
+    @unlink($file);
+    if ($exitCode !== 0) {
+        throw new RuntimeException('WooCommerce draft creation failed: ' . implode("\n", $output));
+    }
+    $productId = (int) trim((string) end($output));
+    if ($productId < 1) {
+        throw new RuntimeException('WooCommerce draft command returned no product ID');
+    }
+    $update = $pdo->prepare(
+        "UPDATE supplier_feed_items SET woocommerce_product_id=?, review_status='draft_created' WHERE id=?"
+    );
+    $update->execute([$productId, $item['id']]);
+    return $productId;
+}
+
+function also_status(PDO $pdo, array $config): array
+{
+    $counts = [];
+    foreach ($pdo->query('SELECT review_status, COUNT(*) AS total FROM supplier_feed_items GROUP BY review_status') as $row) {
+        $counts[$row['review_status']] = (int) $row['total'];
+    }
+    return [
+        'pilot_enabled' => also_bool($config['AT_PILOT_ENABLED'] ?? 'yes'),
+        'pilot_country' => $config['AT_PILOT_COUNTRY'] ?? 'AT',
+        'pilot_max_products' => (int) ($config['AT_PILOT_MAX_APPROVED_PRODUCTS'] ?? 30),
+        'supplier' => $config['ALSO_SUPPLIER_CODE'] ?? 'also-at',
+        'also_enabled' => also_bool($config['ALSO_ENABLED'] ?? 'no'),
+        'source_mode' => $config['ALSO_SOURCE_MODE'] ?? 'sftp_csv',
+        'content_license' => $config['ALSO_CONTENT_LICENSE'] ?? 'none',
+        'auto_publish' => also_bool($config['AT_PILOT_AUTO_PUBLISH'] ?? 'no'),
+        'auto_supplier_order' => also_bool($config['AT_PILOT_AUTO_SUPPLIER_ORDER'] ?? 'no'),
+        'items' => $counts,
+        'last_import' => $pdo->query(
+            'SELECT id, run_status, rows_total, rows_accepted, rows_quarantined,
+                    rows_updated, rows_new, started_at, finished_at
+             FROM supplier_import_runs ORDER BY started_at DESC LIMIT 1'
+        )->fetch() ?: null,
+    ];
+}
+
+$arguments = $_SERVER['argv'];
+array_shift($arguments);
+$command = array_shift($arguments) ?? '';
+$config = also_load_env(ALSO_CONFIG);
+$pdo = also_db();
+$supplier = trim((string) ($config['ALSO_SUPPLIER_CODE'] ?? 'also-at')) ?: 'also-at';
+
+try {
+    switch ($command) {
+        case 'status':
+            also_output(also_status($pdo, $config));
+            break;
+
+        case 'test-connection':
+            $file = also_sftp_download($config);
+            $size = filesize($file);
+            @unlink($file);
+            also_output(['status' => 'ok', 'downloaded_bytes' => $size]);
+            break;
+
+        case 'sync':
+            if (!also_bool($config['ALSO_ENABLED'] ?? 'no')) {
+                also_output(['status' => 'disabled']);
+                break;
+            }
+            if (($config['ALSO_SOURCE_MODE'] ?? 'sftp_csv') !== 'sftp_csv') {
+                throw new RuntimeException('Only sftp_csv is enabled in the AT pilot connector');
+            }
+            $file = also_sftp_download($config);
+            try {
+                also_output(also_import_file($file, false));
+            } finally {
+                @unlink($file);
+            }
+            break;
+
+        case 'import-file':
+            $path = $arguments[0] ?? '';
+            $dryRun = strtolower($arguments[1] ?? '') === 'dry-run';
+            also_output(also_import_file($path, $dryRun));
+            break;
+
+        case 'list':
+            $status = trim($arguments[0] ?? '');
+            $limit = max(1, min(1000, (int) ($arguments[1] ?? 100)));
+            $sql = 'SELECT supplier_sku, product_name, manufacturer_name, gtin,
+                           purchase_price, currency, stock_quantity, stock_status,
+                           review_status, proposed_sale_price, linked_product_id,
+                           woocommerce_product_id, last_seen_at
+                    FROM supplier_feed_items WHERE supplier_code=?';
+            $params = [$supplier];
+            if ($status !== '') {
+                $sql .= ' AND review_status=?';
+                $params[] = $status;
+            }
+            $sql .= ' ORDER BY last_seen_at DESC LIMIT ' . $limit;
+            $statement = $pdo->prepare($sql);
+            $statement->execute($params);
+            also_output($statement->fetchAll());
+            break;
+
+        case 'show':
+            also_output(also_find_item($pdo, $arguments[0] ?? '', $supplier));
+            break;
+
+        case 'approve':
+            if (count($arguments) < 2) {
+                also_usage();
+            }
+            $item = also_find_item($pdo, $arguments[0], $supplier);
+            $price = also_decimal($arguments[1]);
+            if ($price === null) {
+                throw new RuntimeException('Sale price is invalid');
+            }
+            $actor = trim($arguments[2] ?? 'shopadmin') ?: 'shopadmin';
+            $result = also_create_catalog_product($pdo, $item, $price, $actor);
+            $item = also_find_item($pdo, $arguments[0], $supplier);
+            $result['woocommerce_product_id'] = also_create_wc_draft($pdo, $item);
+            $result['status'] = 'draft_created';
+            also_output($result);
+            break;
+
+        case 'create-draft':
+            $item = also_find_item($pdo, $arguments[0] ?? '', $supplier);
+            also_output(['woocommerce_product_id' => also_create_wc_draft($pdo, $item)]);
+            break;
+
+        case 'reject':
+            if (count($arguments) < 2) {
+                also_usage();
+            }
+            $item = also_find_item($pdo, $arguments[0], $supplier);
+            $actor = trim($arguments[2] ?? 'shopadmin') ?: 'shopadmin';
+            $statement = $pdo->prepare(
+                "UPDATE supplier_feed_items SET review_status='rejected', review_reason=?,
+                 reviewed_at=CURRENT_TIMESTAMP, reviewed_by=? WHERE id=?"
+            );
+            $statement->execute([$arguments[1], $actor, $item['id']]);
+            also_output(['status' => 'rejected', 'supplier_sku' => $item['supplier_sku']]);
+            break;
+
+        case 'export-review':
+            $path = $arguments[0] ?? ALSO_DATA . '/reports/also-review-' . date('Ymd-His') . '.csv';
+            $stream = fopen($path, 'wb');
+            if (!$stream) {
+                throw new RuntimeException("Unable to create report: {$path}");
+            }
+            fputcsv($stream, ['supplier_sku', 'product_name', 'manufacturer', 'gtin',
+                'purchase_price', 'currency', 'stock', 'stock_status', 'review_status',
+                'proposed_sale_price', 'last_seen_at'], ';');
+            $statement = $pdo->prepare(
+                'SELECT supplier_sku, product_name, manufacturer_name, gtin, purchase_price,
+                        currency, stock_quantity, stock_status, review_status,
+                        proposed_sale_price, last_seen_at
+                 FROM supplier_feed_items WHERE supplier_code=? ORDER BY review_status, product_name'
+            );
+            $statement->execute([$supplier]);
+            foreach ($statement as $row) {
+                fputcsv($stream, array_values($row), ';');
+            }
+            fclose($stream);
+            chmod($path, 0640);
+            also_output(['status' => 'written', 'path' => $path]);
+            break;
+
+        case 'release-order':
+            if (count($arguments) < 2) {
+                also_usage();
+            }
+            $orderId = trim($arguments[0]);
+            $total = also_decimal($arguments[1]);
+            if ($orderId === '' || $total === null || $total < 0) {
+                throw new RuntimeException('Order ID or purchase total is invalid');
+            }
+            $actor = trim($arguments[2] ?? 'shopadmin') ?: 'shopadmin';
+            $id = also_uuid();
+            $statement = $pdo->prepare(
+                "INSERT INTO pilot_order_releases
+                 (id, source_system, source_order_id, release_status, supplier_code,
+                  purchase_total, currency, checked_price_at, checked_stock_at,
+                  released_by, released_at)
+                 VALUES (?, 'woocommerce', ?, 'released', ?, ?, 'EUR',
+                         CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, ?, CURRENT_TIMESTAMP)
+                 ON DUPLICATE KEY UPDATE release_status='released', purchase_total=VALUES(purchase_total),
+                    checked_price_at=CURRENT_TIMESTAMP, checked_stock_at=CURRENT_TIMESTAMP,
+                    released_by=VALUES(released_by), released_at=CURRENT_TIMESTAMP"
+            );
+            $statement->execute([$id, $orderId, $supplier, $total, $actor]);
+            also_output([
+                'status' => 'released_for_manual_purchase',
+                'source_order_id' => $orderId,
+                'supplier_order_sent' => false,
+                'reason' => 'ALSO XML ordering remains disabled until account-specific interface testing',
+            ]);
+            break;
+
+        default:
+            also_usage();
+    }
+} catch (Throwable $exception) {
+    also_fail('ALSO connector error: ' . $exception->getMessage());
+}
