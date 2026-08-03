@@ -112,7 +112,7 @@ The branded shop stage automatically:
 - creates the homepage, repair/services and contact pages
 - creates the WooCommerce pages and main navigation
 - restricts sales and delivery addresses to Austria, Germany and Switzerland
-- creates a DACH shipping zone without inventing shipping prices
+- creates separate shipping zones for Austria, Germany and Switzerland without inventing shipping prices
 - initializes the `shopos_catalog` article-master database
 - installs the WooCommerce bridge for immutable `MF-00000001` article numbers
 - preserves supplier, old SKU, barcode, POS, marketplace and future ERP/SAP numbers as mappings
