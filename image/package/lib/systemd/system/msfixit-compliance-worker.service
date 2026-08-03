@@ -1,0 +1,23 @@
+[Unit]
+Description=Ms. FixIT ShopOS DACH compliance event worker
+After=mariadb.service
+Requires=mariadb.service
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/usr/local/sbin/msfixit-compliance-worker 50
+Nice=10
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/data/office /var/log /run
+ReadOnlyPaths=/etc/msfixit-shopos /usr/share/msfixit-shopos /srv/www/wordpress
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LockPersonality=true
+MemoryDenyWriteExecute=true
+
+[Install]
+WantedBy=multi-user.target
