@@ -77,7 +77,7 @@ install -d -m 0755 "$stage/usr/share/msfixit-shopos"
     printf 'WP_CLI_SHA256=%s\n' "$wp_cli_sha256"
     printf 'MSFIXIT_BRAND_SHA256=%s\n' "$brand_sha256"
     printf 'CATALOG_SCHEMA_VERSION=1\n'
-    printf 'OFFICE_SCHEMA_VERSION=1\n'
+    printf 'OFFICE_SCHEMA_VERSION=2\n'
     printf 'BUILD_UTC=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     sha256sum \
         "$stage/usr/local/bin/cloudflared" \
@@ -87,6 +87,7 @@ install -d -m 0755 "$stage/usr/share/msfixit-shopos"
         "$stage/usr/share/msfixit-shopos/catalog/guards.sql" \
         "$stage/usr/share/msfixit-shopos/office/schema.sql" \
         "$stage/usr/share/msfixit-shopos/office/operational.sql" \
+        "$stage/usr/share/msfixit-shopos/office/migrations.sql" \
         "$stage/usr/share/msfixit-shopos/office/office-lib.php"
 } > "$stage/usr/share/msfixit-shopos/build-info.txt"
 
