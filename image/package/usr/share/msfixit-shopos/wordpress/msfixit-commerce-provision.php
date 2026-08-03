@@ -1,7 +1,8 @@
 <?php
 /**
- * Idempotent commercial-region provisioning for the initial DACH launch.
- * Payment, shipping rates, taxes and legal content remain explicit go-live tasks.
+ * Idempotent commercial-region provisioning.
+ * The default pop-up pilot is Austria-only; DACH structures remain available
+ * for a later deliberate expansion.
  */
 
 declare(strict_types=1);
@@ -10,9 +11,23 @@ if (!defined('ABSPATH')) {
     exit(1);
 }
 
-$allowedCountries = ['AT', 'DE', 'CH'];
+$pilotEnabled = true;
+$pilotConfig = '/etc/msfixit-shopos/also.env';
+if (is_readable($pilotConfig)) {
+    foreach (file($pilotConfig, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [] as $line) {
+        $line = trim($line);
+        if (!str_starts_with($line, 'AT_PILOT_ENABLED=')) {
+            continue;
+        }
+        $value = strtolower(trim(substr($line, strlen('AT_PILOT_ENABLED=')), " \t\n\r\0\x0B\"'"));
+        $pilotEnabled = in_array($value, ['1', 'yes', 'true', 'on'], true);
+        break;
+    }
+}
+
+$allowedCountries = $pilotEnabled ? ['AT'] : ['AT', 'DE', 'CH'];
 $countryZones = [
-    'AT' => ['name' => 'DACH – Österreich', 'order' => 10],
+    'AT' => ['name' => $pilotEnabled ? 'AT-Pilot – Österreich' : 'DACH – Österreich', 'order' => 10],
     'DE' => ['name' => 'DACH – Deutschland', 'order' => 20],
     'CH' => ['name' => 'DACH – Schweiz', 'order' => 30],
 ];
@@ -22,16 +37,22 @@ update_option('woocommerce_specific_allowed_countries', $allowedCountries);
 update_option('woocommerce_ship_to_countries', 'specific');
 update_option('woocommerce_specific_ship_to_countries', $allowedCountries);
 update_option('woocommerce_default_customer_address', 'base');
-update_option('msfixit_shopos_sales_region', 'DACH');
+update_option('msfixit_shopos_sales_region', $pilotEnabled ? 'AT_PILOT' : 'DACH');
 update_option('msfixit_shopos_sales_countries', $allowedCountries);
+update_option('msfixit_shopos_pilot_enabled', $pilotEnabled ? 'yes' : 'no');
 
 if (class_exists('WC_Shipping_Zones') && class_exists('WC_Shipping_Zone')) {
     $existingZones = WC_Shipping_Zones::get_zones();
 
     foreach ($countryZones as $countryCode => $definition) {
         $zoneId = 0;
+        $knownNames = array_unique([
+            $definition['name'],
+            $countryCode === 'AT' ? 'DACH – Österreich' : $definition['name'],
+            $countryCode === 'AT' ? 'AT-Pilot – Österreich' : $definition['name'],
+        ]);
         foreach ($existingZones as $zoneData) {
-            if (($zoneData['zone_name'] ?? '') === $definition['name']) {
+            if (in_array(($zoneData['zone_name'] ?? ''), $knownNames, true)) {
                 $zoneId = (int) ($zoneData['zone_id'] ?? 0);
                 break;
             }
@@ -42,7 +63,9 @@ if (class_exists('WC_Shipping_Zones') && class_exists('WC_Shipping_Zone')) {
         $zone->set_zone_order($definition['order']);
         $zone->save();
         $zone->clear_locations();
-        $zone->add_location($countryCode, 'country');
+        if (!$pilotEnabled || $countryCode === 'AT') {
+            $zone->add_location($countryCode, 'country');
+        }
         $zone->save();
     }
 }
@@ -74,4 +97,6 @@ if (!$withdrawalPage instanceof WP_Post) {
     ]);
 }
 
-WP_CLI::success('Sales restricted to AT, DE and CH with separate zones and electronic withdrawal function page.');
+WP_CLI::success($pilotEnabled
+    ? 'AT pop-up pilot enabled: sales and shipping restricted to Austria.'
+    : 'DACH sales enabled with separate AT, DE and CH zones.');
