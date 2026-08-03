@@ -13,6 +13,7 @@ readonly operational_file=/usr/share/msfixit-shopos/office/operational.sql
 readonly migrations_file=/usr/share/msfixit-shopos/office/migrations.sql
 readonly compliance_schema_file=/usr/share/msfixit-shopos/compliance/schema.sql
 readonly compliance_guards_file=/usr/share/msfixit-shopos/compliance/guards.sql
+readonly compliance_strict_guards_file=/usr/share/msfixit-shopos/compliance/strict-guards.sql
 readonly business_example=/usr/share/msfixit-shopos/office/business.env.example
 readonly database_name=shopos_office
 readonly admin_user=shopos_office_admin
@@ -36,7 +37,8 @@ read_value() {
 
 for required_file in \
     "$schema_file" "$operational_file" "$migrations_file" \
-    "$compliance_schema_file" "$compliance_guards_file" "$business_example"; do
+    "$compliance_schema_file" "$compliance_guards_file" \
+    "$compliance_strict_guards_file" "$business_example"; do
     [ -f "$required_file" ] || {
         echo "Office source file not found: $required_file" >&2
         exit 1
@@ -94,6 +96,7 @@ mariadb "$database_name" < "$operational_file"
 mariadb "$database_name" < "$migrations_file"
 mariadb "$database_name" < "$compliance_schema_file"
 mariadb "$database_name" < "$compliance_guards_file"
+mariadb "$database_name" < "$compliance_strict_guards_file"
 
 mariadb <<EOF_WORDPRESS_GRANT
 GRANT INSERT ON ${database_name}.office_outbox TO '${wordpress_user}'@'localhost';
