@@ -28,6 +28,7 @@ check:
 	bash -n scripts/build-image.sh
 	bash -n tests/test-catalog.sh
 	bash -n tests/test-office.sh
+	bash -n tests/test-office-migrations.sh
 	bash -n tests/test-office-guards.sh
 	bash -n image/package/DEBIAN/postinst
 	bash -n image/package/usr/local/sbin/msfixit-firstboot
@@ -45,11 +46,13 @@ check:
 	@test -s image/package/usr/share/msfixit-shopos/catalog/guards.sql
 	@test -s image/package/usr/share/msfixit-shopos/office/schema.sql
 	@test -s image/package/usr/share/msfixit-shopos/office/operational.sql
+	@test -s image/package/usr/share/msfixit-shopos/office/migrations.sql
 	@grep -q 'catalog_products' image/package/usr/share/msfixit-shopos/catalog/schema.sql
 	@grep -q 'no_reassign' image/package/usr/share/msfixit-shopos/catalog/guards.sql
 	@grep -q 'office_documents' image/package/usr/share/msfixit-shopos/office/schema.sql
 	@grep -q 'office_document_holds' image/package/usr/share/msfixit-shopos/office/operational.sql
 	@grep -q 'allocations_immutable' image/package/usr/share/msfixit-shopos/office/operational.sql
+	@grep -q 'office_v2_applied' image/package/usr/share/msfixit-shopos/office/migrations.sql
 	@if command -v php >/dev/null 2>&1; then \
 		php -l image/package/usr/local/sbin/msfixit-catalog; \
 		php -l image/package/usr/local/sbin/msfixit-office; \
