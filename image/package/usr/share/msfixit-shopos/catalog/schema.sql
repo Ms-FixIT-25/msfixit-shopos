@@ -107,3 +107,39 @@ CREATE TABLE IF NOT EXISTS catalog_sync_outbox (
     KEY ix_catalog_sync_outbox_status_available (event_status, available_at),
     KEY ix_catalog_sync_outbox_aggregate (aggregate_type, aggregate_id)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+DROP TRIGGER IF EXISTS trg_catalog_products_article_immutable;
+DROP TRIGGER IF EXISTS trg_catalog_products_no_delete;
+DROP TRIGGER IF EXISTS trg_catalog_identifiers_no_reassign;
+
+DELIMITER //
+
+CREATE TRIGGER trg_catalog_products_article_immutable
+BEFORE UPDATE ON catalog_products
+FOR EACH ROW
+BEGIN
+    IF OLD.article_number <> NEW.article_number THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Ms. FixIT article numbers are immutable';
+    END IF;
+END//
+
+CREATE TRIGGER trg_catalog_products_no_delete
+BEFORE DELETE ON catalog_products
+FOR EACH ROW
+BEGIN
+    SIGNAL SQLSTATE '45000'
+        SET MESSAGE_TEXT = 'Catalog products must be archived, not deleted';
+END//
+
+CREATE TRIGGER trg_catalog_identifiers_no_reassign
+BEFORE UPDATE ON catalog_identifiers
+FOR EACH ROW
+BEGIN
+    IF OLD.product_id <> NEW.product_id THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'External identifiers cannot be reassigned to another article';
+    END IF;
+END//
+
+DELIMITER ;
