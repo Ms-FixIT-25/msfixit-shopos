@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS office_dispatch_log (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 DROP TRIGGER IF EXISTS trg_office_documents_immutable_final;
+DROP TRIGGER IF EXISTS trg_office_documents_validate_final;
 DROP TRIGGER IF EXISTS trg_office_document_lines_no_insert_final;
 DROP TRIGGER IF EXISTS trg_office_payments_immutable;
 DROP TRIGGER IF EXISTS trg_office_payments_no_delete;
@@ -72,6 +73,68 @@ BEGIN
     ) THEN
         SIGNAL SQLSTATE '45000'
             SET MESSAGE_TEXT = 'Final office documents are immutable; create a correction document';
+    END IF;
+END//
+
+CREATE TRIGGER trg_office_documents_validate_final
+BEFORE UPDATE ON office_documents
+FOR EACH ROW
+BEGIN
+    DECLARE line_count INT DEFAULT 0;
+    DECLARE line_net DECIMAL(15,4) DEFAULT 0;
+    DECLARE line_tax DECIMAL(15,4) DEFAULT 0;
+    DECLARE line_gross DECIMAL(15,4) DEFAULT 0;
+
+    IF NEW.document_status = 'final' THEN
+        IF NEW.document_number IS NULL OR NEW.document_number = '' OR NEW.issue_date IS NULL THEN
+            SIGNAL SQLSTATE '45000'
+                SET MESSAGE_TEXT = 'Final documents require a number and issue date';
+        END IF;
+
+        IF NEW.pdf_path IS NULL OR NEW.pdf_path = '' OR
+           NEW.pdf_sha256 IS NULL OR NEW.pdf_sha256 NOT REGEXP '^[0-9a-fA-F]{64}$'
+        THEN
+            SIGNAL SQLSTATE '45000'
+                SET MESSAGE_TEXT = 'Final documents require an archived PDF and valid SHA-256';
+        END IF;
+
+        IF ABS(NEW.gross_total - (NEW.net_total + NEW.tax_total)) > 0.0100 THEN
+            SIGNAL SQLSTATE '45000'
+                SET MESSAGE_TEXT = 'Document totals are inconsistent';
+        END IF;
+
+        IF NEW.tax_mode IN ('at_small_business_exempt', 'eu_small_business_exempt', 'export_third_country')
+           AND ABS(NEW.tax_total) > 0.0100
+        THEN
+            SIGNAL SQLSTATE '45000'
+                SET MESSAGE_TEXT = 'Selected tax-exempt profile cannot contain charged tax';
+        END IF;
+
+        IF NEW.document_type = 'invoice' AND NEW.due_date IS NULL THEN
+            SIGNAL SQLSTATE '45000'
+                SET MESSAGE_TEXT = 'Final invoices require a due date';
+        END IF;
+
+        SELECT COUNT(*),
+               COALESCE(SUM(line_net), 0),
+               COALESCE(SUM(line_tax), 0),
+               COALESCE(SUM(line_gross), 0)
+          INTO line_count, line_net, line_tax, line_gross
+          FROM office_document_lines
+         WHERE document_id = NEW.id;
+
+        IF line_count = 0 THEN
+            SIGNAL SQLSTATE '45000'
+                SET MESSAGE_TEXT = 'Final documents require at least one line';
+        END IF;
+
+        IF ABS(line_net - NEW.net_total) > 0.0100 OR
+           ABS(line_tax - NEW.tax_total) > 0.0100 OR
+           ABS(line_gross - NEW.gross_total) > 0.0100
+        THEN
+            SIGNAL SQLSTATE '45000'
+                SET MESSAGE_TEXT = 'Document totals do not match document lines';
+        END IF;
     END IF;
 END//
 
