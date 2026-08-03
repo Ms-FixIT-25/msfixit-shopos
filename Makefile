@@ -30,6 +30,7 @@ check:
 	bash -n tests/test-office.sh
 	bash -n tests/test-office-migrations.sh
 	bash -n tests/test-office-guards.sh
+	bash -n tests/test-office-privileges.sh
 	bash -n image/package/DEBIAN/postinst
 	bash -n image/package/usr/local/sbin/msfixit-firstboot
 	bash -n image/package/usr/local/sbin/msfixit-brand-shop
