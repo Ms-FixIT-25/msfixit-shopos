@@ -21,6 +21,29 @@ if [ -n "$php_service" ]; then
 fi
 
 echo
+if [ -f /etc/msfixit-shopos/catalog.env ]; then
+    article_count="$(mariadb shopos_catalog --batch --skip-column-names \
+        -e 'SELECT COUNT(*) FROM catalog_products' 2>/dev/null || echo unknown)"
+    next_value="$(mariadb shopos_catalog --batch --skip-column-names \
+        -e "SELECT next_value FROM catalog_sequences WHERE sequence_name='article_number'" \
+        2>/dev/null || echo unknown)"
+    pending_events="$(mariadb shopos_catalog --batch --skip-column-names \
+        -e "SELECT COUNT(*) FROM catalog_sync_outbox WHERE event_status='pending'" \
+        2>/dev/null || echo unknown)"
+    echo "Article master: initialized"
+    echo "Articles:       $article_count"
+    if [[ "$next_value" =~ ^[0-9]+$ ]]; then
+        printf 'Next article:    MF-%08d\n' "$next_value"
+    else
+        echo "Next article:    $next_value"
+    fi
+    echo "Pending events:  $pending_events"
+    echo "Sales region:    AT, DE, CH"
+else
+    echo "Article master: not initialized"
+fi
+
+echo
 if [ -f /var/lib/msfixit-shopos/health.json ]; then
     jq . /var/lib/msfixit-shopos/health.json
 else
