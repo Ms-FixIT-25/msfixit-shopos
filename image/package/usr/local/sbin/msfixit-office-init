@@ -72,7 +72,8 @@ GRANT ALL PRIVILEGES ON ${database_name}.* TO '${admin_user}'@'localhost';
 
 CREATE USER IF NOT EXISTS '${wordpress_user}'@'localhost' IDENTIFIED BY '${wordpress_password}';
 ALTER USER '${wordpress_user}'@'localhost' IDENTIFIED BY '${wordpress_password}';
-GRANT SELECT, INSERT, UPDATE ON ${database_name}.* TO '${wordpress_user}'@'localhost';
+REVOKE ALL PRIVILEGES, GRANT OPTION FROM '${wordpress_user}'@'localhost';
+GRANT SELECT ON ${database_name}.* TO '${wordpress_user}'@'localhost';
 
 CREATE USER IF NOT EXISTS '${worker_user}'@'localhost' IDENTIFIED BY '${worker_password}';
 ALTER USER '${worker_user}'@'localhost' IDENTIFIED BY '${worker_password}';
@@ -82,6 +83,11 @@ EOF_SQL
 
 mariadb "$database_name" < "$schema_file"
 mariadb "$database_name" < "$operational_file"
+
+mariadb <<EOF_WORDPRESS_GRANT
+GRANT INSERT ON ${database_name}.office_outbox TO '${wordpress_user}'@'localhost';
+FLUSH PRIVILEGES;
+EOF_WORDPRESS_GRANT
 
 cat > "$admin_env" <<EOF_ADMIN
 OFFICE_DB_HOST=127.0.0.1
