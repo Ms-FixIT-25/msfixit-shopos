@@ -80,6 +80,11 @@ jobs:
           MYSQL_PWD: shopos-ci-root
         run: sudo env MYSQL_PWD="$MYSQL_PWD" GITHUB_WORKSPACE="$GITHUB_WORKSPACE" bash tests/test-office.sh
 
+      - name: Test versioned Office migrations
+        env:
+          MYSQL_PWD: shopos-ci-root
+        run: sudo env MYSQL_PWD="$MYSQL_PWD" bash tests/test-office-migrations.sh
+
       - name: Test immutable document and payment guards
         env:
           MYSQL_PWD: shopos-ci-root
