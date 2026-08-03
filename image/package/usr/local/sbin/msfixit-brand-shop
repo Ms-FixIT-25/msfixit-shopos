@@ -4,6 +4,7 @@ umask 022
 
 readonly wordpress_dir=/srv/www/wordpress
 readonly branding_dir=/usr/share/msfixit-shopos/branding
+readonly generated_branding_dir=/var/lib/msfixit-shopos/branding
 readonly wordpress_assets=/usr/share/msfixit-shopos/wordpress
 
 if [ "$(id -u)" -ne 0 ]; then
@@ -39,15 +40,20 @@ run_wp core is-installed >/dev/null
 run_wp plugin install woocommerce --activate >/dev/null
 run_wp theme install storefront --activate >/dev/null
 
-install -d -m 0755 "$wordpress_dir/wp-content/mu-plugins"
+install -d -m 0755 "$wordpress_dir/wp-content/mu-plugins" "$generated_branding_dir"
 install -m 0644 \
     "$wordpress_assets/msfixit-branding.php" \
     "$wordpress_dir/wp-content/mu-plugins/msfixit-branding.php"
-chown -R www-data:www-data "$wordpress_dir/wp-content/mu-plugins"
+
+php "$wordpress_assets/msfixit-render-branding.php" \
+    "$branding_dir/msfixit-brand-full.webp" \
+    "$generated_branding_dir"
+
+chown -R www-data:www-data "$wordpress_dir/wp-content/mu-plugins" "$generated_branding_dir"
 
 logo_id="$(ensure_media \
     msfixit_brand_logo_id \
-    "$branding_dir/msfixit-brand-header.webp" \
+    "$generated_branding_dir/msfixit-brand-header.webp" \
     'Ms. FixIT Logo' \
     'Ms. FixIT – IT-Support und Services')"
 
@@ -59,7 +65,7 @@ hero_id="$(ensure_media \
 
 icon_id="$(ensure_media \
     msfixit_brand_icon_id \
-    "$branding_dir/msfixit-site-icon.png" \
+    "$generated_branding_dir/msfixit-site-icon.jpg" \
     'Ms. FixIT Einhorn' \
     'Ms. FixIT Einhorn')"
 
