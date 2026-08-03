@@ -41,6 +41,7 @@ check:
 		php -l image/package/usr/share/msfixit-shopos/wordpress/msfixit-branding.php; \
 		php -l image/package/usr/share/msfixit-shopos/wordpress/msfixit-catalog-bridge.php; \
 		php -l image/package/usr/share/msfixit-shopos/wordpress/msfixit-commerce-provision.php; \
+		php -l image/package/usr/share/msfixit-shopos/wordpress/msfixit-commerce-region.php; \
 		php -l image/package/usr/share/msfixit-shopos/wordpress/msfixit-provision.php; \
 		php -l image/package/usr/share/msfixit-shopos/wordpress/msfixit-render-branding.php; \
 	fi
