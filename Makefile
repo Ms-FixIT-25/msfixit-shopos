@@ -34,6 +34,7 @@ check:
 	bash -n tests/test-compliance.sh
 	bash -n tests/test-compliance-strict.sh
 	bash -n tests/test-compliance-numbering.sh
+	bash -n tests/test-tax-renderer-boundary.sh
 	bash -n image/package/DEBIAN/postinst
 	bash -n image/package/usr/local/sbin/msfixit-firstboot
 	bash -n image/package/usr/local/sbin/msfixit-brand-shop
@@ -56,6 +57,8 @@ check:
 	@test -s image/package/usr/share/msfixit-shopos/compliance/guards.sql
 	@test -s image/package/usr/share/msfixit-shopos/compliance/strict-guards.sql
 	@test -s image/package/usr/share/msfixit-shopos/compliance/strict-migrations.sql
+	@test -s image/package/usr/share/msfixit-shopos/compliance/tax-decision-migrations.sql
+	@test -s image/package/usr/share/msfixit-shopos/compliance/renderer-guards.sql
 	@grep -q 'catalog_products' image/package/usr/share/msfixit-shopos/catalog/schema.sql
 	@grep -q 'no_reassign' image/package/usr/share/msfixit-shopos/catalog/guards.sql
 	@grep -q 'office_documents' image/package/usr/share/msfixit-shopos/office/schema.sql
@@ -66,10 +69,13 @@ check:
 	@grep -q 'compliance_before_final' image/package/usr/share/msfixit-shopos/compliance/guards.sql
 	@grep -q 'Verified registration requires actor' image/package/usr/share/msfixit-shopos/compliance/strict-guards.sql
 	@grep -q 'before number allocation' image/package/usr/share/msfixit-shopos/compliance/strict-migrations.sql
+	@grep -q 'superseding decision' image/package/usr/share/msfixit-shopos/compliance/tax-decision-migrations.sql
+	@grep -q 'advanced DACH tax invoice renderer' image/package/usr/share/msfixit-shopos/compliance/renderer-guards.sql
 	@if command -v php >/dev/null 2>&1; then \
 		php -l image/package/usr/local/sbin/msfixit-catalog; \
 		php -l image/package/usr/local/sbin/msfixit-office; \
 		php -l image/package/usr/local/sbin/msfixit-compliance; \
+		php -l image/package/usr/local/sbin/msfixit-tax-decision; \
 		php -l image/package/usr/share/msfixit-shopos/office/office-lib.php; \
 		php -l image/package/usr/share/msfixit-shopos/wordpress/msfixit-branding.php; \
 		php -l image/package/usr/share/msfixit-shopos/wordpress/msfixit-catalog-bridge.php; \
