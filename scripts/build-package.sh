@@ -11,17 +11,26 @@ cloudflared_version="${CLOUDFLARED_VERSION:-2026.7.2}"
 cloudflared_sha256="${CLOUDFLARED_SHA256:-405df476437e027fc6d18729a5a77155c0a33a6082aeee60a799a688f3052e66}"
 wp_cli_version="${WP_CLI_VERSION:-2.12.0}"
 wp_cli_sha256="${WP_CLI_SHA256:-ce34ddd838f7351d6759068d09793f26755463b4a4610a5a5c0a97b68220d85c}"
+brand_sha256="${MSFIXIT_BRAND_SHA256:-1fe40860f16b1476a1539d1db0a9424b7cb40c5e81898eebae3f07fc62f6340b}"
 source_dir="${root}/image/package"
 output_dir="${root}/image/packages"
 stage="$(mktemp -d)"
 trap 'rm -rf "$stage"' EXIT
 
+command -v base64 >/dev/null
 command -v curl >/dev/null
 command -v dpkg-deb >/dev/null
 command -v sha256sum >/dev/null
 
 cp -a "${source_dir}/." "$stage/"
 sed -i "s/@VERSION@/${version}/g" "$stage/DEBIAN/control"
+
+brand_b64="$stage/usr/share/msfixit-shopos/branding/msfixit-brand-full.webp.b64"
+brand_file="$stage/usr/share/msfixit-shopos/branding/msfixit-brand-full.webp"
+base64 --decode "$brand_b64" > "$brand_file"
+rm -f "$brand_b64"
+printf '%s  %s\n' "$brand_sha256" "$brand_file" | sha256sum --check --strict
+chmod 0644 "$brand_file"
 
 install -d -m 0755 "$stage/usr/local/bin"
 
@@ -44,6 +53,7 @@ chmod 0755 \
     "$stage/usr/local/bin/cloudflared" \
     "$stage/usr/local/bin/wp" \
     "$stage/usr/local/sbin/msfixit-firstboot" \
+    "$stage/usr/local/sbin/msfixit-brand-shop" \
     "$stage/usr/local/sbin/msfixit-apply-config" \
     "$stage/usr/local/sbin/msfixit-health" \
     "$stage/usr/local/sbin/msfixit-backup" \
@@ -58,8 +68,12 @@ install -d -m 0755 "$stage/usr/share/msfixit-shopos"
     printf 'WP_CLI_VERSION=%s\n' "$wp_cli_version"
     printf 'WP_CLI_SOURCE=%s\n' "$wp_cli_url"
     printf 'WP_CLI_SHA256=%s\n' "$wp_cli_sha256"
+    printf 'MSFIXIT_BRAND_SHA256=%s\n' "$brand_sha256"
     printf 'BUILD_UTC=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    sha256sum "$stage/usr/local/bin/cloudflared" "$stage/usr/local/bin/wp"
+    sha256sum \
+        "$stage/usr/local/bin/cloudflared" \
+        "$stage/usr/local/bin/wp" \
+        "$brand_file"
 } > "$stage/usr/share/msfixit-shopos/build-info.txt"
 
 rm -rf "$output_dir"
