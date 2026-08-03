@@ -30,6 +30,27 @@ if [ -f /etc/msfixit-shopos/catalog.env ]; then
     fi
 fi
 
+if [ -f /etc/msfixit-shopos/office.env ]; then
+    if ! mariadb shopos_office --batch --skip-column-names \
+        -e "SELECT version_number FROM office_schema_versions ORDER BY version_number DESC LIMIT 1" \
+        >/dev/null 2>&1; then
+        state="degraded"
+        failed+=("office")
+    fi
+    for timer in msfixit-office-worker.timer msfixit-office-dunning.timer msfixit-office-print.timer; do
+        if ! systemctl is-active --quiet "$timer"; then
+            state="degraded"
+            failed+=("$timer")
+        fi
+    done
+    failed_events="$(mariadb shopos_office --batch --skip-column-names \
+        -e "SELECT COUNT(*) FROM office_outbox WHERE event_status='failed'" 2>/dev/null || echo 0)"
+    if [[ "$failed_events" =~ ^[0-9]+$ ]] && [ "$failed_events" -gt 0 ]; then
+        state="degraded"
+        failed+=("office-outbox:${failed_events}")
+    fi
+fi
+
 root_used="$(df -P / | awk 'NR==2 {gsub(/%/, "", $5); print $5}')"
 data_used="$(df -P /data 2>/dev/null | awk 'NR==2 {gsub(/%/, "", $5); print $5}')"
 [ -n "$root_used" ] || root_used=0
