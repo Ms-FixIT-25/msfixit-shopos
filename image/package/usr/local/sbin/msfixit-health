@@ -21,6 +21,15 @@ if ! curl --silent --show-error --fail --max-time 10 http://127.0.0.1/ >/dev/nul
     failed+=("http")
 fi
 
+if [ -f /etc/msfixit-shopos/catalog.env ]; then
+    if ! mariadb shopos_catalog --batch --skip-column-names \
+        -e "SELECT next_value FROM catalog_sequences WHERE sequence_name='article_number'" \
+        >/dev/null 2>&1; then
+        state="degraded"
+        failed+=("catalog")
+    fi
+fi
+
 root_used="$(df -P / | awk 'NR==2 {gsub(/%/, "", $5); print $5}')"
 data_used="$(df -P /data 2>/dev/null | awk 'NR==2 {gsub(/%/, "", $5); print $5}')"
 [ -n "$root_used" ] || root_used=0
