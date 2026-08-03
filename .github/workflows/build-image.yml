@@ -75,10 +75,10 @@ jobs:
           MYSQL_PWD: shopos-ci-root
         run: bash tests/test-catalog.sh
 
-      - name: Test Office and fulfillment
+      - name: Test protected Office and fulfillment data
         env:
           MYSQL_PWD: shopos-ci-root
-        run: bash tests/test-office.sh
+        run: sudo env MYSQL_PWD="$MYSQL_PWD" GITHUB_WORKSPACE="$GITHUB_WORKSPACE" bash tests/test-office.sh
 
   build:
     name: Build ShopOS image
