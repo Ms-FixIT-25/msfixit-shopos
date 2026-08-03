@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily Ms. FixIT overdue invoice check
+
+[Timer]
+OnCalendar=*-*-* 09:17:00
+RandomizedDelaySec=3min
+Persistent=true
+Unit=msfixit-office-dunning.service
+
+[Install]
+WantedBy=timers.target
