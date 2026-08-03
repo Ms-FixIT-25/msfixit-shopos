@@ -17,7 +17,6 @@ output_dir="${root}/image/packages"
 stage="$(mktemp -d)"
 trap 'rm -rf "$stage"' EXIT
 
-command -v base64 >/dev/null
 command -v curl >/dev/null
 command -v dpkg-deb >/dev/null
 command -v sha256sum >/dev/null
@@ -25,10 +24,7 @@ command -v sha256sum >/dev/null
 cp -a "${source_dir}/." "$stage/"
 sed -i "s/@VERSION@/${version}/g" "$stage/DEBIAN/control"
 
-brand_b64="$stage/usr/share/msfixit-shopos/branding/msfixit-brand-full.webp.b64"
 brand_file="$stage/usr/share/msfixit-shopos/branding/msfixit-brand-full.webp"
-base64 --decode "$brand_b64" > "$brand_file"
-rm -f "$brand_b64"
 printf '%s  %s\n' "$brand_sha256" "$brand_file" | sha256sum --check --strict
 chmod 0644 "$brand_file"
 
