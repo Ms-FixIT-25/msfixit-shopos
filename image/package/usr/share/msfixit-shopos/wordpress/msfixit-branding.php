@@ -20,6 +20,27 @@ function msfixit_shopos_brand_image_url(string $option_name, string $size = 'ful
     return is_string($url) ? $url : '';
 }
 
+// Existing user-created pages are listed here only while ShopOS provisions
+// its own pages. Blocking the ownership marker guarantees that a later re-run
+// cannot take over or overwrite those pages, even after an interrupted setup.
+add_filter(
+    'update_post_metadata',
+    static function ($check, int $object_id, string $meta_key) {
+        if ($meta_key !== '_msfixit_shopos_managed') {
+            return $check;
+        }
+
+        $protected_ids = array_map(
+            'intval',
+            (array) get_option('msfixit_shopos_protected_page_ids', [])
+        );
+
+        return in_array($object_id, $protected_ids, true) ? true : $check;
+    },
+    10,
+    3
+);
+
 add_filter('body_class', static function (array $classes): array {
     $classes[] = 'msfixit-shopos';
     return $classes;
