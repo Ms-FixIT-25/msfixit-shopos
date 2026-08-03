@@ -1,0 +1,11 @@
+[Unit]
+Description=Run Ms. FixIT ALSO Austria catalogue synchronization every six hours
+
+[Timer]
+OnCalendar=*-*-* 02,08,14,20:17:00
+RandomizedDelaySec=15m
+Persistent=true
+Unit=msfixit-also-sync.service
+
+[Install]
+WantedBy=timers.target
