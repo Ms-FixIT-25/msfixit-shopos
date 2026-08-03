@@ -35,7 +35,9 @@ check:
 	bash -n image/package/usr/local/sbin/msfixit-backup
 	bash -n image/package/usr/local/sbin/msfixit-status
 	@test -s image/package/usr/share/msfixit-shopos/catalog/schema.sql
+	@test -s image/package/usr/share/msfixit-shopos/catalog/guards.sql
 	@grep -q 'catalog_products' image/package/usr/share/msfixit-shopos/catalog/schema.sql
+	@grep -q 'no_reassign' image/package/usr/share/msfixit-shopos/catalog/guards.sql
 	@if command -v php >/dev/null 2>&1; then \
 		php -l image/package/usr/local/sbin/msfixit-catalog; \
 		php -l image/package/usr/share/msfixit-shopos/wordpress/msfixit-branding.php; \
