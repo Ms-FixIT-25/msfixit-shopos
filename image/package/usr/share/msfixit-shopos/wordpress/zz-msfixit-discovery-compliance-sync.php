@@ -20,6 +20,15 @@ function msfixit_discovery_sync_compliance(int $productId): void
     if (!$product instanceof WC_Product) {
         return;
     }
+
+    $manufacturer = trim((string) get_post_meta($productId, '_msfixit_manufacturer_name', true));
+    if ($manufacturer !== '' && taxonomy_exists('pa_marke')) {
+        $brands = wp_get_post_terms($productId, 'pa_marke', ['fields' => 'names']);
+        if (!is_wp_error($brands) && $brands === []) {
+            wp_set_object_terms($productId, $manufacturer, 'pa_marke', false);
+        }
+    }
+
     $sku = trim((string) $product->get_sku());
     if ($sku === '') {
         update_post_meta($productId, '_msfixit_compliance_status', 'pending');
