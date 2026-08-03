@@ -43,7 +43,7 @@ concurrency:
 
 jobs:
   validate:
-    name: Validate article, Office, fulfillment and DACH compliance cores
+    name: Validate AT pilot, ALSO, Office and compliance cores
     runs-on: ubuntu-24.04
     services:
       mariadb:
@@ -65,16 +65,21 @@ jobs:
       - name: Check source syntax
         run: make check
 
-      - name: Install database, PDF and ZIP test clients
+      - name: Install database, PDF, SFTP and ZIP test clients
         run: |
           sudo rm -f /etc/apt/sources.list.d/azure-cli.list
           sudo apt-get -o Acquire::Retries=3 update
-          sudo apt-get -o Acquire::Retries=3 install --yes mariadb-client php-mysql php-zip php-tcpdf jq unzip
+          sudo apt-get -o Acquire::Retries=3 install --yes mariadb-client php-mysql php-mbstring php-zip php-tcpdf jq unzip openssh-client sshpass
 
       - name: Test article master
         env:
           MYSQL_PWD: shopos-ci-root
         run: bash tests/test-catalog.sh
+
+      - name: Test AT pilot and ALSO feed staging
+        env:
+          MYSQL_PWD: shopos-ci-root
+        run: sudo env MYSQL_PWD="$MYSQL_PWD" bash tests/test-also.sh
 
       - name: Test protected Office and fulfillment data
         env:
@@ -172,9 +177,9 @@ jobs:
           - compressed Raspberry Pi 4B ShopOS image
           - portable SHA-256 checksum
 
-          This build includes DACH WooCommerce, the permanent Ms. FixIT article master, immutable invoicing, guarded reminders, ProSaldo handoffs, fulfillment, print queues and a fail-closed Austrian/DACH compliance kernel for market, legal-text, tax, product-safety, EPR, withdrawal, threshold, renderer and retention decisions.
+          This build defaults to a small Austria-only pop-up pilot. It includes guarded ALSO Austria SFTP catalogue staging, manual product and supplier-order approval, a 30-product pilot limit, permanent Ms. FixIT article numbers, immutable invoicing, ProSaldo handoffs, fulfillment and fail-closed Austrian/DACH compliance controls.
 
-          Advanced intra-Community, reverse-charge, cross-border exemption and structured e-invoice renderers remain disabled until their required buyer VAT-ID, legal notice and structured-data outputs are implemented and verified. Technical controls do not replace final review by qualified Austrian/DACH legal and tax professionals.
+          ALSO XML live queries, order submission and dropshipping remain disabled until the reseller account receives its official account-specific guideline, endpoint, credentials and test approval. Supplier content is not scraped, products are never auto-published, and supplier orders are never sent automatically in pilot mode.
           EOF
 
           if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
