@@ -1,18 +1,21 @@
 # Ms. FixIT ShopOS
 
-A minimal, reproducible Raspberry Pi 5 appliance operating system for the Ms. FixIT WooCommerce shop.
+A minimal, reproducible Raspberry Pi appliance operating system for the Ms. FixIT WooCommerce shop.
 
 ## Current status
 
-ShopOS is now structured as a **flash-image prototype**. The repository contains:
+ShopOS is structured as a **flash-image prototype**. The repository contains:
 
-- Raspberry Pi 5 image targets for USB SSD, microSD and NVMe
+- Raspberry Pi 4 Model B targets for USB SSD and microSD
+- Raspberry Pi 5 targets for USB SSD, microSD and native NVMe
 - a native Nginx, PHP-FPM, MariaDB and Redis web stack
 - automated WordPress and WooCommerce first-boot provisioning
 - optional token-based Cloudflare Tunnel startup
 - LAN-restricted SSH and HTTP firewall rules
 - automatic health checks and daily local backups
-- GitHub Actions image building with downloadable checksums
+- GitHub Actions image building with downloadable checksums and releases
+
+The default and release target is currently the **Raspberry Pi 4 Model B with USB SSD**. Every generated filename contains the hardware target so Pi 4 and Pi 5 images cannot be confused.
 
 The first image still needs validation on the intended Raspberry Pi and storage hardware before production use.
 
@@ -28,16 +31,27 @@ The first image still needs validation on the intended Raspberry Pi and storage 
 
 ## Quick start
 
-Build locally:
+Build the Raspberry Pi 4B USB-SSD image locally:
 
 ```bash
 make check
-make image-usb
+make image-rpi4-usb
 ```
 
-Or download the image produced by the **Build ShopOS image** workflow in GitHub Actions.
+Other targets:
+
+```bash
+make image-rpi4-sd
+make image-rpi5-usb
+make image-rpi5-sd
+make image-rpi5-nvme
+```
+
+Or download the correctly named image from GitHub Releases.
 
 Before the first boot, an optional `shopos.env` file can be placed on the boot partition to provide the shop URL, administrator passwords and Cloudflare Tunnel token. Without it, ShopOS generates credentials and remains available only in the local network.
+
+For Raspberry Pi 4B USB boot, the bootloader EEPROM must support and permit USB mass-storage boot. An NVMe drive connected through a USB enclosure uses the `rpi4-usb` image, not the Pi 5 NVMe image.
 
 See:
 
