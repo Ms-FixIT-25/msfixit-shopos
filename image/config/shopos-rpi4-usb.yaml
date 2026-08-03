@@ -1,0 +1,11 @@
+include:
+  file: common.yaml
+
+# Raspberry Pi 4 Model B booting from an SSD through a USB 3 adapter.
+# USB boot requires a sufficiently recent Pi 4 EEPROM bootloader.
+device:
+  layer: rpi4
+  storage_type: usb
+
+image:
+  name: msfixit-shopos-rpi4-usb
