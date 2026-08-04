@@ -66,6 +66,7 @@ for plugin in \
     msfixit-branding.php \
     msfixit-catalog-bridge.php \
     msfixit-commerce-region.php \
+    msfixit-customer-auth.php \
     msfixit-office-bridge.php \
     msfixit-compliance.php \
     msfixit-compliance-runtime.php \
@@ -85,6 +86,7 @@ install -m 0644 "$wordpress_assets/assets/msfixit-discovery.js" "$wordpress_dir/
 install -m 0644 "$wordpress_assets/assets/msfixit-discovery.css" "$wordpress_dir/wp-content/mu-plugins/assets/msfixit-discovery.css"
 install -m 0644 "$wordpress_assets/assets/msfixit-help-center.css" "$wordpress_dir/wp-content/mu-plugins/assets/msfixit-help-center.css"
 install -m 0644 "$wordpress_assets/assets/msfixit-service-requests.css" "$wordpress_dir/wp-content/mu-plugins/assets/msfixit-service-requests.css"
+install -m 0644 "$wordpress_assets/assets/msfixit-customer-auth.css" "$wordpress_dir/wp-content/mu-plugins/assets/msfixit-customer-auth.css"
 
 php "$wordpress_assets/msfixit-render-branding.php" \
     "$branding_dir/msfixit-brand-full.webp" \
@@ -162,7 +164,8 @@ for page_id in "${unmanaged_page_ids[@]}"; do
     run_wp post meta delete "$page_id" _msfixit_shopos_managed >/dev/null 2>&1 || true
 done
 
+run_wp rewrite flush --hard >/dev/null
 run_wp cache flush >/dev/null 2>&1 || true
 chown -R www-data:www-data "$wordpress_dir/wp-content"
 
-echo "Ms. FixIT WooCommerce branding, Google Workspace mail, AT pilot, cable discovery, help center, privacy-gated service portal, verified partner profiles, licensed ALSO content, supplier staging, article master, Office/Fulfillment and compliance core applied successfully."
+echo "Ms. FixIT WooCommerce branding, customer Google sign-in and 2FA, Google Workspace mail, AT pilot, cable discovery, help center, privacy-gated service portal, verified partner profiles, licensed ALSO content, supplier staging, article master, Office/Fulfillment and compliance core applied successfully."
