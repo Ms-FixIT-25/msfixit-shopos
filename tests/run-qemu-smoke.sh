@@ -1,6 +1,26 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+select_initramfs() {
+    local boot_dir="$1"
+    find "$boot_dir" -maxdepth 1 -type f \
+        \( -name 'initramfs*' -o -name 'initrd.img-*' \) \
+        -printf '%f\n' \
+        | sort -V \
+        | tail -n 1
+}
+
+if [ "${1:-}" = '--self-test' ]; then
+    tmp="$(mktemp -d)"
+    trap 'rm -rf "$tmp"' EXIT
+    touch "$tmp/initramfs_6.17.0-rpi-v8.img"
+    touch "$tmp/initramfs_6.18.39+rpt-rpi-v8.img"
+    selected="$(select_initramfs "$tmp")"
+    test "$selected" = 'initramfs_6.18.39+rpt-rpi-v8.img'
+    printf 'PASS: versioned Raspberry Pi initramfs discovery (%s)\n' "$selected"
+    exit 0
+fi
+
 image="${1:?usage: run-qemu-smoke.sh IMAGE OUTPUT_DIR}"
 output_dir="${2:?usage: run-qemu-smoke.sh IMAGE OUTPUT_DIR}"
 mkdir -p "$output_dir"
@@ -31,14 +51,16 @@ test -s /mnt/shopos-boot/bcm2711-rpi-4-b.dtb
 cp /mnt/shopos-boot/kernel8.img "$output_dir/kernel8.img"
 cp /mnt/shopos-boot/bcm2711-rpi-4-b.dtb "$output_dir/bcm2711-rpi-4-b.dtb"
 
-initrd=''
-for candidate in /mnt/shopos-boot/initramfs8 /mnt/shopos-boot/initramfs8.gz /mnt/shopos-boot/initrd.img-*; do
-    if [ -s "$candidate" ]; then
-        cp "$candidate" "$output_dir/initramfs8"
-        initrd="$output_dir/initramfs8"
-        break
-    fi
-done
+initramfs_name="$(select_initramfs /mnt/shopos-boot)"
+if [ -z "$initramfs_name" ]; then
+    printf 'No Raspberry Pi initramfs was found in the boot partition.\n' >&2
+    find /mnt/shopos-boot -maxdepth 1 -type f -printf '%f\n' | sort >&2
+    exit 1
+fi
+initrd="$output_dir/initramfs.img"
+cp "/mnt/shopos-boot/$initramfs_name" "$initrd"
+printf 'Selected initramfs: %s\n' "$initramfs_name" | tee "$output_dir/initramfs-selection.txt"
+test -s "$initrd"
 
 if ! grep -Eq '^enable_uart=1$' /mnt/shopos-boot/config.txt; then
     printf '\nenable_uart=1\n' >> /mnt/shopos-boot/config.txt
@@ -157,6 +179,7 @@ qemu_args=(
     -accel tcg,thread=multi
     -kernel "$output_dir/kernel8.img"
     -dtb "$output_dir/bcm2711-rpi-4-b.dtb"
+    -initrd "$initrd"
     -append 'earlycon=pl011,0xfe201000 console=ttyAMA0,115200 console=tty1 root=/dev/mmcblk1p2 rootfstype=ext4 rootwait rw fsck.repair=yes loglevel=7 systemd.show_status=1'
     -drive "file=${image},format=raw,if=sd,cache=writeback"
     -display none
@@ -164,9 +187,6 @@ qemu_args=(
     -monitor none
     -no-reboot
 )
-if [ -n "$initrd" ]; then
-    qemu_args+=( -initrd "$initrd" )
-fi
 
 set +e
 timeout --signal=TERM --kill-after=30s 35m qemu-system-aarch64 "${qemu_args[@]}" > "$output_dir/qemu-console.log" 2>&1
