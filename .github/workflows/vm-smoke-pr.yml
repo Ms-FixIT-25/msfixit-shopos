@@ -60,12 +60,68 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          sudo bash -x tests/run-qemu-smoke.sh vm/shopos-test.img vm 2>&1 | tee vm/harness.log
+          qemu_step_pid=''
+          heartbeat_pid=''
+          interrupted=0
+
+          snapshot_console() {
+            local source=vm/qemu-console.full.log
+            if sudo test -f "$source"; then
+              printf 'QEMU console bytes: '
+              sudo stat -c '%s' "$source" 2>/dev/null || true
+              printf '%s\n' '--- latest QEMU console output ---'
+              sudo tail -n 30 "$source" 2>/dev/null || true
+              sudo cp "$source" vm/qemu-console.log 2>/dev/null || true
+            else
+              printf '%s\n' 'QEMU console file has not been created yet.'
+            fi
+          }
+
+          handle_interrupt() {
+            interrupted=1
+            printf '%s\n' 'Workflow interruption received; stopping QEMU and preserving evidence.'
+            sudo pkill -TERM -f 'qemu-system-aarch64.*shopos-test.img' 2>/dev/null || true
+            snapshot_console
+          }
+          trap handle_interrupt TERM INT
+
+          sudo bash -x tests/run-qemu-smoke.sh vm/shopos-test.img vm 2>&1 | tee vm/harness.log &
+          qemu_step_pid=$!
+
+          (
+            while kill -0 "$qemu_step_pid" 2>/dev/null; do
+              sleep 60
+              kill -0 "$qemu_step_pid" 2>/dev/null || break
+              printf '%s\n' "QEMU_HEARTBEAT $(date --iso-8601=seconds)"
+              snapshot_console
+            done
+          ) &
+          heartbeat_pid=$!
+
+          set +e
+          wait "$qemu_step_pid"
+          qemu_rc=$?
+          set -e
+          kill "$heartbeat_pid" 2>/dev/null || true
+          wait "$heartbeat_pid" 2>/dev/null || true
+          snapshot_console
+
+          if [ "$interrupted" -eq 1 ]; then
+            printf 'QEMU_EXIT=interrupted\n' > vm/qemu-exit.txt
+            exit 143
+          fi
+          exit "$qemu_rc"
 
       - name: Prepare VM evidence for upload
         if: always()
         shell: bash
         run: |
+          if sudo test -f vm/qemu-console.full.log && ! sudo test -f vm/qemu-console.log; then
+            sudo cp vm/qemu-console.full.log vm/qemu-console.log || true
+          fi
+          if ! sudo test -f vm/qemu-exit.txt; then
+            printf 'QEMU_EXIT=workflow-interrupted-before-harness-finalization\n' | sudo tee vm/qemu-exit.txt >/dev/null
+          fi
           sudo chown -R "$USER:$USER" vm 2>/dev/null || true
           find vm -type d -exec chmod u+rwx {} + 2>/dev/null || true
           find vm -type f -exec chmod u+rw {} + 2>/dev/null || true
@@ -79,6 +135,7 @@ jobs:
             vm/harness.log
             vm/qemu-version.txt
             vm/qemu-console.log
+            vm/qemu-console.full.log
             vm/qemu-exit.txt
             vm/partition-identifiers.txt
             vm/fstab.before
