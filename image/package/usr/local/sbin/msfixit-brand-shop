@@ -17,6 +17,22 @@ run_wp() {
     runuser -u www-data -- env HOME=/tmp /usr/local/bin/wp --path="$wordpress_dir" "$@"
 }
 
+run_wp_eval_file() {
+    local source_file="$1" sanitized_file rc
+
+    test -f "$source_file"
+    sanitized_file="$(mktemp /tmp/msfixit-wp-eval.XXXXXX.php)"
+    awk '!/^[[:space:]]*declare\(strict_types=1\);[[:space:]]*$/' \
+        "$source_file" > "$sanitized_file"
+    chown www-data:www-data "$sanitized_file"
+    chmod 0600 "$sanitized_file"
+
+    rc=0
+    run_wp eval-file "$sanitized_file" || rc=$?
+    rm -f "$sanitized_file"
+    return "$rc"
+}
+
 ensure_media() {
     local option_name="$1" source_file="$2" title="$3" alt_text="$4"
     local attachment_id
@@ -44,7 +60,7 @@ run_wp core is-installed >/dev/null
 /usr/local/sbin/msfixit-also-init
 /usr/local/sbin/msfixit-partners-init
 
-install -d -m 0750 "$config_dir"
+install -d -o root -g www-data -m 0750 "$config_dir"
 if [ ! -f "$config_dir/discovery.env" ]; then
     install -m 0640 -o root -g www-data \
         /usr/share/msfixit-shopos/discovery/discovery.env.example \
@@ -153,11 +169,11 @@ run_wp eval "update_option('msfixit_shopos_protected_page_ids', [${protected_ids
 export MSFIXIT_LOGO_ID="$logo_id"
 export MSFIXIT_HERO_ID="$hero_id"
 export MSFIXIT_ICON_ID="$icon_id"
-run_wp eval-file "$wordpress_assets/msfixit-provision.php"
-run_wp eval-file "$wordpress_assets/msfixit-commerce-provision.php"
-run_wp eval-file "$wordpress_assets/msfixit-discovery-provision.php"
-run_wp eval-file "$wordpress_assets/msfixit-help-provision.php"
-run_wp eval-file "$wordpress_assets/msfixit-service-provision.php"
+run_wp_eval_file "$wordpress_assets/msfixit-provision.php"
+run_wp_eval_file "$wordpress_assets/msfixit-commerce-provision.php"
+run_wp_eval_file "$wordpress_assets/msfixit-discovery-provision.php"
+run_wp_eval_file "$wordpress_assets/msfixit-help-provision.php"
+run_wp_eval_file "$wordpress_assets/msfixit-service-provision.php"
 
 run_wp option delete msfixit_shopos_protected_page_ids >/dev/null 2>&1 || true
 for page_id in "${unmanaged_page_ids[@]}"; do
