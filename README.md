@@ -1,13 +1,15 @@
 # Ms. FixIT ShopOS
 
-A minimal, reproducible Raspberry Pi appliance operating system for the Ms. FixIT WooCommerce shop.
+A reproducible, flash-ready Raspberry Pi appliance operating system for the Ms. FixIT WooCommerce shop.
 
 ## Current status
 
-ShopOS is a **flash-image prototype**. Version 0.10 defaults to a deliberately small Austrian pop-up pilot and contains:
+ShopOS 0.10 is a **flash-ready appliance OS image** for a deliberately small Austrian pop-up pilot. It contains:
 
 - Raspberry Pi 4 Model B targets for USB SSD and microSD
 - Raspberry Pi 5 targets for USB SSD, microSD and native NVMe
+- branded quiet Plymouth startup and guided first-boot display
+- pinned WordPress, WooCommerce, Redis Object Cache and Storefront payloads inside the image
 - Nginx, PHP-FPM, MariaDB and Redis without Docker or a desktop
 - automated WordPress, WooCommerce and Ms. FixIT branding
 - Austria-only sales and shipping while pilot mode is enabled
@@ -31,7 +33,32 @@ ShopOS is a **flash-image prototype**. Version 0.10 defaults to a deliberately s
 - automatic health checks and local backups
 - GitHub Actions image builds with checksums and releases
 
-The default release target is the **Raspberry Pi 4 Model B with USB SSD**. The image still requires first-boot validation on the intended Raspberry Pi, storage and printers before production use.
+The default release target is the **Raspberry Pi 4 Model B with USB SSD**. The complete image can be flashed and initialized without downloading the default web application stack during first boot. Physical validation on the intended Raspberry Pi, storage, display and printers remains required before production use.
+
+## Boot and first-start experience
+
+A normal start shows the Ms. FixIT ShopOS Plymouth splash instead of a stream of Linux boot messages. Quiet display parameters are added without replacing the Raspberry Pi root-device or hardware settings.
+
+On the first start only, `tty1` shows a branded setup screen with:
+
+- the current initialization step;
+- a progress bar;
+- hostname and detected LAN address;
+- an explicit ready or failure result;
+- the location of the generated credential file.
+
+ShopOS does not show passwords on screen. It reports the system as ready only after the base web stack and the complete branded shop setup have both succeeded. Later reboots skip the setup screen.
+
+The image includes these checked default payloads:
+
+```text
+WordPress             7.0.2 de_DE
+WooCommerce           10.9.4
+Redis Object Cache    2.8.0
+Storefront            4.6.2
+```
+
+See [`docs/BOOT_EXPERIENCE.md`](docs/BOOT_EXPERIENCE.md).
 
 ## Austria-only pop-up pilot
 
@@ -131,7 +158,7 @@ See:
 
 After first boot, `msfixit-brand-shop.service`:
 
-- installs and activates WooCommerce and Storefront idempotently
+- activates the bundled WooCommerce and Storefront packages idempotently
 - imports the embedded Ms. FixIT artwork and applies the brand colors
 - creates the homepage, service, contact, help, service-request and WooCommerce pages
 - enables the Austria-only pilot shipping zone
@@ -206,6 +233,7 @@ For Raspberry Pi 4B USB boot, the EEPROM bootloader must permit USB mass-storage
 ## Administration
 
 ```bash
+shopos-version
 sudo msfixit-status
 sudo msfixit-also status
 sudo msfixit-also-content status
