@@ -32,6 +32,27 @@ rewrite_fstab_for_vm() {
     mv "$tmp" "$fstab"
 }
 
+bounded_copy() {
+    local source="$1" destination="$2" maximum_bytes="$3"
+    local size head_bytes tail_bytes
+    [ -f "$source" ] || return 1
+    size="$(stat -c '%s' "$source")"
+    if [ "$size" -le "$maximum_bytes" ]; then
+        cp "$source" "$destination"
+        return 0
+    fi
+
+    head_bytes=$((maximum_bytes / 4))
+    tail_bytes=$((maximum_bytes - head_bytes))
+    {
+        printf '--- LOG TRUNCATED: original bytes=%s, retained head=%s and tail=%s ---\n' \
+            "$size" "$head_bytes" "$tail_bytes"
+        head -c "$head_bytes" "$source"
+        printf '\n--- OMITTED MIDDLE ---\n'
+        tail -c "$tail_bytes" "$source"
+    } > "$destination"
+}
+
 if [ "${1:-}" = '--self-test' ]; then
     tmp="$(mktemp -d)"
     trap 'rm -rf "$tmp"' EXIT
@@ -49,8 +70,16 @@ EOF_FSTAB
     grep -Eq '^UUID=11111111-2222-3333-4444-555555555555[[:space:]]+/[[:space:]]+ext4' "$tmp/fstab"
     grep -Eq '^UUID=BOOT-1234[[:space:]]+/boot/firmware[[:space:]]+vfat' "$tmp/fstab"
 
+    printf 'head-data\n' > "$tmp/large.log"
+    dd if=/dev/zero bs=1024 count=16 status=none >> "$tmp/large.log"
+    printf 'tail-data\n' >> "$tmp/large.log"
+    bounded_copy "$tmp/large.log" "$tmp/bounded.log" 4096
+    test "$(stat -c '%s' "$tmp/bounded.log")" -lt 8192
+    grep -aq 'LOG TRUNCATED' "$tmp/bounded.log"
+
     printf 'PASS: versioned Raspberry Pi initramfs discovery (%s)\n' "$selected"
     printf 'PASS: VM fstab rewrite uses stable filesystem UUIDs\n'
+    printf 'PASS: evidence logs are bounded before upload\n'
     exit 0
 fi
 
@@ -149,15 +178,22 @@ printf 'MSFIXIT_VM_SMOKE_BEGIN\n'
 printf 'Kernel: %s\n' "$(uname -a)"
 printf 'Architecture: %s\n' "$(uname -m)"
 
-for _ in $(seq 1 180); do
+finished=no
+for _ in $(seq 1 300); do
     if [ -e /data/.shopos-ready ]; then
+        finished=yes
         break
     fi
-    if systemctl is-failed --quiet msfixit-firstboot.service || systemctl is-failed --quiet msfixit-brand-shop.service; then
+    if systemctl is-failed --quiet msfixit-firstboot.service \
+        || systemctl is-failed --quiet msfixit-brand-shop.service; then
         break
     fi
     sleep 5
 done
+
+if [ "$finished" != yes ]; then
+    printf 'ShopOS did not reach the ready marker before a service failed or the 25-minute guest watchdog expired.\n'
+fi
 
 systemctl --no-pager --full status msfixit-firstboot.service msfixit-brand-shop.service || true
 check 'boot partition mounted' mountpoint -q /boot/firmware
@@ -185,7 +221,7 @@ check 'local HTTP response' curl --fail --silent --show-error --max-time 30 http
 check 'version command' /usr/local/bin/shopos-version
 
 printf '\nFirst-boot log tail:\n'
-tail -n 160 /var/log/msfixit-firstboot.log 2>/dev/null || true
+tail -n 200 /var/log/msfixit-firstboot.log 2>/dev/null || true
 printf '\nFailed units:\n'
 systemctl --failed --no-pager --full || true
 
@@ -204,14 +240,14 @@ chmod 0755 /mnt/shopos-root/usr/local/sbin/msfixit-vm-smoke
 
 cat > /mnt/shopos-root/etc/systemd/system/msfixit-vm-smoke.service <<'EOF_UNIT'
 [Unit]
-Description=Ms. FixIT ShopOS QEMU acceptance smoke test
-After=msfixit-brand-shop.service msfixit-firstboot.service
-Wants=msfixit-brand-shop.service
+Description=Ms. FixIT ShopOS QEMU acceptance smoke test and watchdog
+After=local-fs.target
+Wants=msfixit-firstboot.service msfixit-brand-shop.service
 
 [Service]
 Type=oneshot
 ExecStart=/usr/local/sbin/msfixit-vm-smoke
-TimeoutStartSec=25min
+TimeoutStartSec=27min
 
 [Install]
 WantedBy=multi-user.target
@@ -227,7 +263,7 @@ trap - EXIT
 # QEMU exposes the PL011 at fe201000 as ttyAMA1 with this Raspberry Pi 4 DTB.
 # Using ttyAMA0 leaves the kernel without a usable /dev/console, so the
 # initramfs shell exits with code 2 while redirecting run-init and PID 1 panics.
-kernel_cmdline="earlycon=pl011,0xfe201000,115200 keep_bootcon console=tty0 console=ttyAMA1,115200 root=UUID=${root_uuid} rootfstype=ext4 rootwait rw fsck.repair=yes loglevel=7 systemd.show_status=1 plymouth.enable=0 panic=5"
+kernel_cmdline="earlycon=pl011,0xfe201000,115200 console=tty0 console=ttyAMA1,115200 root=UUID=${root_uuid} rootfstype=ext4 rootwait rw fsck.repair=yes loglevel=5 systemd.show_status=1 plymouth.enable=0 panic=5"
 printf '%s\n' "$kernel_cmdline" | tee "$output_dir/kernel-command-line.txt"
 
 qemu_args=(
@@ -244,23 +280,49 @@ qemu_args=(
     -no-reboot
 )
 
+qemu_full="$output_dir/qemu-console.full.log"
 set +e
-timeout --signal=TERM --kill-after=30s 35m qemu-system-aarch64 "${qemu_args[@]}" 2>&1 | tee "$output_dir/qemu-console.log"
-qemu_rc=${PIPESTATUS[0]}
+timeout --signal=TERM --kill-after=30s 32m qemu-system-aarch64 "${qemu_args[@]}" > "$qemu_full" 2>&1
+qemu_rc=$?
 set -e
 printf 'QEMU_EXIT=%s\n' "$qemu_rc" | tee "$output_dir/qemu-exit.txt"
+bounded_copy "$qemu_full" "$output_dir/qemu-console.log" $((16 * 1024 * 1024))
+rm -f "$qemu_full"
 
 loop="$(losetup --find --show --partscan "$image")"
 trap cleanup_mounts EXIT
 mount "${loop}p2" /mnt/shopos-root
-cp /mnt/shopos-root/var/log/msfixit-vm-smoke.log "$output_dir/" 2>/dev/null || true
+bounded_copy /mnt/shopos-root/var/log/msfixit-vm-smoke.log "$output_dir/msfixit-vm-smoke.log" $((8 * 1024 * 1024)) 2>/dev/null || true
 cp /mnt/shopos-root/var/log/msfixit-vm-smoke.result "$output_dir/" 2>/dev/null || true
-cp /mnt/shopos-root/var/log/msfixit-firstboot.log "$output_dir/" 2>/dev/null || true
-journalctl --directory=/mnt/shopos-root/var/log/journal --no-pager -b > "$output_dir/guest-journal.log" 2>/dev/null || true
+bounded_copy /mnt/shopos-root/var/log/msfixit-firstboot.log "$output_dir/msfixit-firstboot.log" $((8 * 1024 * 1024)) 2>/dev/null || true
+
+journal_tmp="$output_dir/guest-journal.full.log"
+journalctl --directory=/mnt/shopos-root/var/log/journal --no-pager -b -n 5000 -o short-monotonic > "$journal_tmp" 2>/dev/null || true
+if [ -f "$journal_tmp" ]; then
+    bounded_copy "$journal_tmp" "$output_dir/guest-journal.log" $((16 * 1024 * 1024)) || true
+    rm -f "$journal_tmp"
+fi
+
+{
+    printf 'ShopOS marker files:\n'
+    find /mnt/shopos-root/data -maxdepth 1 -type f -printf '%f %s bytes\n' 2>/dev/null | sort || true
+    printf '\nPersistent log sizes:\n'
+    du -ah /mnt/shopos-root/var/log/msfixit-* /mnt/shopos-root/var/log/journal 2>/dev/null | sort -h || true
+    printf '\nInstalled systemd overrides:\n'
+    find /mnt/shopos-root/etc/systemd/system -path '*msfixit*' -o -path '*journald*' 2>/dev/null | sort || true
+} > "$output_dir/guest-filesystem-state.txt"
+
 cleanup_mounts
 loop=''
 trap - EXIT
 
-tail -n 300 "$output_dir/qemu-console.log" || true
+printf '\nLast QEMU console lines:\n'
+tail -n 400 "$output_dir/qemu-console.log" || true
+printf '\nGuest smoke result:\n'
 cat "$output_dir/msfixit-vm-smoke.result" 2>/dev/null || true
+printf '\nFirst-boot failure hints:\n'
+grep -Ei 'fail|error|timeout|panic|fatal|denied|not found|cannot|unable' \
+    "$output_dir/msfixit-firstboot.log" "$output_dir/guest-journal.log" 2>/dev/null \
+    | tail -n 200 || true
+
 grep -q 'MSFIXIT_VM_SMOKE_RESULT=PASS' "$output_dir/msfixit-vm-smoke.result"
