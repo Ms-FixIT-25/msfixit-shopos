@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -u
+
+readonly info=/usr/share/msfixit-shopos/build-info.txt
+
+echo "Ms. FixIT ShopOS"
+echo "=================="
+if [ -r "$info" ]; then
+    sed -n -E '/^(SHOPOS_VERSION|BUILD_UTC|WORDPRESS_VERSION|WOOCOMMERCE_VERSION|REDIS_CACHE_VERSION|STOREFRONT_VERSION|CLOUDFLARED_VERSION|WP_CLI_VERSION)=/p' "$info"
+else
+    echo "Build information is unavailable."
+fi
