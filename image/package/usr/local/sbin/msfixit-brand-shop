@@ -74,6 +74,7 @@ for plugin in \
     msfixit-discovery.php \
     msfixit-help-center.php \
     msfixit-service-requests.php \
+    msfixit-workspace.php \
     zz-msfixit-discovery-compliance-sync.php \
     zz-msfixit-discovery-assets.php; do
     install -m 0644 \
@@ -164,4 +165,4 @@ done
 run_wp cache flush >/dev/null 2>&1 || true
 chown -R www-data:www-data "$wordpress_dir/wp-content"
 
-echo "Ms. FixIT WooCommerce branding, AT pilot, cable discovery, help center, privacy-gated service portal, verified partner profiles, licensed ALSO content, supplier staging, article master, Office/Fulfillment and compliance core applied successfully."
+echo "Ms. FixIT WooCommerce branding, Google Workspace mail, AT pilot, cable discovery, help center, privacy-gated service portal, verified partner profiles, licensed ALSO content, supplier staging, article master, Office/Fulfillment and compliance core applied successfully."
