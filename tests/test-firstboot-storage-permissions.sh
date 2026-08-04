@@ -55,8 +55,9 @@ for provisioner in \
     grep -Fq "run_wp_eval_file \"\$wordpress_assets/$provisioner\"" "$brand_shop"
 done
 
-if grep -Eq '^[[:space:]]*run_wp eval-file ' "$brand_shop"; then
-    printf 'Provisioning files must pass through the sanitized eval-file wrapper.\n' >&2
+direct_eval_count="$(grep -Ec '^[[:space:]]*run_wp eval-file ' "$brand_shop" || true)"
+if [ "$direct_eval_count" -ne 1 ]; then
+    printf 'Exactly one direct eval-file call is expected inside the sanitizer wrapper.\n' >&2
     exit 1
 fi
 
