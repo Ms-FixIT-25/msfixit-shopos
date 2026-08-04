@@ -43,4 +43,5 @@ if grep -Eqi 'name=["'\'' ]*(password|pin|credit_card|card_number)' "$plugin"; t
     exit 1
 fi
 
+bash "$root/tests/test-workspace-mail.sh"
 printf 'Service request security checks passed.\n'
