@@ -128,6 +128,56 @@
     font-weight: 400;
 }
 
+.msfixit-deletion-grid {
+    margin-top: 1.1rem;
+    grid-template-columns: 1fr;
+}
+
+.msfixit-danger-card {
+    border-color: #d9a6a6;
+    background: #fffafa;
+}
+
+.msfixit-danger-card h2 {
+    color: #8a1f1f;
+}
+
+.msfixit-deletion-blocked {
+    margin: 1rem 0;
+    padding: 1rem;
+    border-left: 4px solid #b32d2e;
+    background: #fff0f0;
+}
+
+.msfixit-deletion-blocked ul {
+    margin-bottom: .75rem;
+}
+
+.msfixit-deletion-ready {
+    margin: 1rem 0;
+    padding: 1rem;
+    border-left: 4px solid #2f7d32;
+    background: #f1fbf2;
+}
+
+.msfixit-delete-button {
+    border-color: #b32d2e !important;
+    color: #b32d2e !important;
+}
+
+.msfixit-account-deleted-notice {
+    position: fixed;
+    right: 1rem;
+    bottom: 1rem;
+    z-index: 99999;
+    max-width: 32rem;
+    padding: 1rem 1.25rem;
+    border-radius: 12px;
+    background: #1f2933;
+    color: #fff;
+    box-shadow: 0 12px 38px rgba(0, 0, 0, .24);
+}
+
 @media (max-width: 760px) {
     .msfixit-security-grid {
         grid-template-columns: 1fr;
@@ -140,5 +190,11 @@
     .msfixit-auth-details,
     .msfixit-auth-history li {
         grid-template-columns: 1fr;
+    }
+
+    .msfixit-account-deleted-notice {
+        right: .75rem;
+        bottom: .75rem;
+        left: .75rem;
     }
 }
