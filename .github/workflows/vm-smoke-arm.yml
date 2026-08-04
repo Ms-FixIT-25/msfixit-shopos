@@ -81,5 +81,6 @@ jobs:
             vm/msfixit-vm-smoke.result
             vm/msfixit-firstboot.log
             vm/guest-journal.log
+            vm/guest-filesystem-state.txt
           if-no-files-found: warn
           retention-days: 14
