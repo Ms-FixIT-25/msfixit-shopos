@@ -18,7 +18,7 @@ const MSFIXIT_CUSTOMER_GOOGLE_AUTH_ENDPOINT = 'https://accounts.google.com/o/oau
 const MSFIXIT_CUSTOMER_GOOGLE_TOKEN_ENDPOINT = 'https://oauth2.googleapis.com/token';
 const MSFIXIT_CUSTOMER_GOOGLE_USERINFO_ENDPOINT = 'https://openidconnect.googleapis.com/v1/userinfo';
 
-$msfixitCustomerAuthDirectory = __DIR__ . '/msfixit-customer-auth';
+$msfixitCustomerAuthDirectory = '/usr/share/msfixit-shopos/wordpress/msfixit-customer-auth';
 foreach (['google.php', 'totp.php', 'account.php', 'admin.php'] as $msfixitCustomerAuthModule) {
     require_once $msfixitCustomerAuthDirectory . '/' . $msfixitCustomerAuthModule;
 }
