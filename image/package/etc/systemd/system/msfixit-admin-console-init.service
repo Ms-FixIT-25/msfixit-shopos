@@ -1,0 +1,13 @@
+[Unit]
+Description=Initialize Ms. FixIT ShopOS admin console credentials
+After=local-fs.target msfixit-firstboot.service
+Requires=msfixit-firstboot.service
+ConditionPathExists=/usr/share/msfixit-shopos/admin-console/public/index.php
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /usr/local/sbin/msfixit-admin-console-init
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
