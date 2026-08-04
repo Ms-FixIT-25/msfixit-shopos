@@ -10,14 +10,23 @@ select_initramfs() {
         | tail -n 1
 }
 
+filesystem_uuid() {
+    local device="$1" mountpoint="$2" uuid
+    uuid="$(blkid -s UUID -o value "$device" 2>/dev/null || true)"
+    if [ -z "$uuid" ]; then
+        uuid="$(findmnt -n -o UUID --target "$mountpoint" 2>/dev/null || true)"
+    fi
+    printf '%s' "$uuid"
+}
+
 rewrite_fstab_for_vm() {
-    local fstab="$1" boot_partuuid="$2" root_partuuid="$3" tmp
+    local fstab="$1" boot_uuid="$2" root_uuid="$3" tmp
     tmp="${fstab}.vm-new"
-    awk -v boot="PARTUUID=${boot_partuuid}" -v root="PARTUUID=${root_partuuid}" '
+    awk -v boot="UUID=${boot_uuid}" -v root="UUID=${root_uuid}" '
         BEGIN { OFS="\t" }
         /^[[:space:]]*#/ || NF == 0 { print; next }
         $2 == "/boot/firmware" { $1 = boot; print; next }
-        $2 == "/" && $1 ~ /\/dev\/disk\/by-slot\/root/ { $1 = root; print; next }
+        $2 == "/" { $1 = root; print; next }
         { print }
     ' "$fstab" > "$tmp"
     mv "$tmp" "$fstab"
@@ -36,12 +45,12 @@ if [ "${1:-}" = '--self-test' ]; then
 /dev/disk/by-slot/root / ext4 defaults 0 1
 /dev/disk/by-slot/boot /boot/firmware vfat defaults 0 2
 EOF_FSTAB
-    rewrite_fstab_for_vm "$tmp/fstab" '1111-01' '1111-02'
-    grep -Eq '^PARTUUID=1111-02[[:space:]]+/[[:space:]]+ext4' "$tmp/fstab"
-    grep -Eq '^PARTUUID=1111-01[[:space:]]+/boot/firmware[[:space:]]+vfat' "$tmp/fstab"
+    rewrite_fstab_for_vm "$tmp/fstab" 'BOOT-1234' '11111111-2222-3333-4444-555555555555'
+    grep -Eq '^UUID=11111111-2222-3333-4444-555555555555[[:space:]]+/[[:space:]]+ext4' "$tmp/fstab"
+    grep -Eq '^UUID=BOOT-1234[[:space:]]+/boot/firmware[[:space:]]+vfat' "$tmp/fstab"
 
     printf 'PASS: versioned Raspberry Pi initramfs discovery (%s)\n' "$selected"
-    printf 'PASS: VM fstab rewrite uses stable partition identifiers\n'
+    printf 'PASS: VM fstab rewrite uses stable filesystem UUIDs\n'
     exit 0
 fi
 
@@ -70,20 +79,21 @@ mkdir -p /mnt/shopos-boot /mnt/shopos-root
 mount "${loop}p1" /mnt/shopos-boot
 mount "${loop}p2" /mnt/shopos-root
 
-boot_partuuid="$(blkid -s PARTUUID -o value "${loop}p1")"
-root_partuuid="$(blkid -s PARTUUID -o value "${loop}p2")"
-test -n "$boot_partuuid"
-test -n "$root_partuuid"
-printf 'Boot PARTUUID: %s\nRoot PARTUUID: %s\n' "$boot_partuuid" "$root_partuuid" | tee "$output_dir/partition-identifiers.txt"
+boot_uuid="$(filesystem_uuid "${loop}p1" /mnt/shopos-boot)"
+root_uuid="$(filesystem_uuid "${loop}p2" /mnt/shopos-root)"
+test -n "$boot_uuid"
+test -n "$root_uuid"
+printf 'Boot filesystem UUID: %s\nRoot filesystem UUID: %s\n' "$boot_uuid" "$root_uuid" | tee "$output_dir/partition-identifiers.txt"
 
 # The production image intentionally mounts partitions through Raspberry Pi
 # storage-slot aliases. QEMU presents the disposable image as an emulated SD
 # card and does not create /dev/disk/by-slot/boot. Rewrite only the disposable
-# test copy to stable PARTUUID sources so systemd can reach local-fs.target.
+# test copy to stable filesystem UUID sources so systemd can reach local-fs.target.
 cp /mnt/shopos-root/etc/fstab "$output_dir/fstab.before"
-rewrite_fstab_for_vm /mnt/shopos-root/etc/fstab "$boot_partuuid" "$root_partuuid"
+rewrite_fstab_for_vm /mnt/shopos-root/etc/fstab "$boot_uuid" "$root_uuid"
 cp /mnt/shopos-root/etc/fstab "$output_dir/fstab.after"
-grep -Eq "^PARTUUID=${boot_partuuid}[[:space:]]+/boot/firmware[[:space:]]" /mnt/shopos-root/etc/fstab
+grep -Eq "^UUID=${boot_uuid}[[:space:]]+/boot/firmware[[:space:]]" /mnt/shopos-root/etc/fstab
+grep -Eq "^UUID=${root_uuid}[[:space:]]+/[[:space:]]+ext4" /mnt/shopos-root/etc/fstab
 
 test -s /mnt/shopos-boot/kernel8.img
 test -s /mnt/shopos-boot/bcm2711-rpi-4-b.dtb
@@ -214,7 +224,7 @@ cleanup_mounts
 loop=''
 trap - EXIT
 
-kernel_cmdline="earlycon=pl011,0xfe201000,115200 keep_bootcon console=ttyAMA0,115200 root=PARTUUID=${root_partuuid} rootfstype=ext4 rootwait rw fsck.repair=yes loglevel=7 systemd.show_status=1 plymouth.enable=0"
+kernel_cmdline="earlycon=pl011,0xfe201000,115200 keep_bootcon console=ttyAMA0,115200 root=UUID=${root_uuid} rootfstype=ext4 rootwait rw fsck.repair=yes loglevel=7 systemd.show_status=1 plymouth.enable=0"
 printf '%s\n' "$kernel_cmdline" | tee "$output_dir/kernel-command-line.txt"
 
 qemu_args=(
