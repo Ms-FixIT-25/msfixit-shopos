@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -u
+
+version="unknown"
+build="unknown"
+if [ -r /usr/share/msfixit-shopos/build-info.txt ]; then
+    version="$(sed -n 's/^SHOPOS_VERSION=//p' /usr/share/msfixit-shopos/build-info.txt | head -n1)"
+    build="$(sed -n 's/^BUILD_UTC=//p' /usr/share/msfixit-shopos/build-info.txt | head -n1)"
+fi
+ip_address="$(hostname -I 2>/dev/null | awk '{print $1}')"
+[ -n "$ip_address" ] || ip_address="msfixit-shopos.local"
+
+printf '\n'
+printf '  Ms. FixIT ShopOS %s\n' "${version:-unknown}"
+printf '  IT gelöst. Einfach. Fix. Günstig.\n'
+printf '  ─────────────────────────────────────────────\n'
+printf '  Shop:       http://%s/\n' "$ip_address"
+printf '  Verwaltung: http://%s/wp-admin/\n' "$ip_address"
+printf '  Build:      %s\n' "${build:-unknown}"
+printf '  Status:     sudo msfixit-status\n'
+printf '  Hilfe:      sudo shopos-version\n\n'
