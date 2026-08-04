@@ -3,8 +3,10 @@ set -Eeuo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 firstboot="$root/image/package/usr/local/sbin/msfixit-firstboot"
+nginx_site="$root/image/package/etc/nginx/sites-available/msfixit-shopos.conf"
 
 test -f "$firstboot"
+test -f "$nginx_site"
 bash -n "$firstboot"
 
 grep -Fq 'install -d -m 0711 "$data_dir"' "$firstboot"
@@ -22,4 +24,10 @@ if [ "$chown_line" -ge "$init_line" ]; then
     exit 1
 fi
 
-printf 'PASS: first-boot storage root is traversable and service directories are owned before initialization.\n'
+grep -Fq 'include snippets/fastcgi-php.conf;' "$nginx_site"
+if grep -Fq '        try_files $uri =404;' "$nginx_site"; then
+    printf 'The PHP location must not duplicate try_files from snippets/fastcgi-php.conf.\n' >&2
+    exit 1
+fi
+
+printf 'PASS: first-boot storage ownership and Nginx PHP configuration are safe.\n'
