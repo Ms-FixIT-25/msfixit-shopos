@@ -40,6 +40,8 @@ check:
 	bash -n tests/test-also-content.sh
 	bash -n tests/test-partners.sh
 	bash -n tests/test-service-requests.sh
+	bash -n tests/test-workspace-mail.sh
+	bash -n tests/test-customer-auth.sh
 	bash -n tests/test-boot-experience.sh
 	bash -n image/package/DEBIAN/postinst
 	bash -n image/package/etc/update-motd.d/10-msfixit-shopos
@@ -86,12 +88,17 @@ check:
 	@test -s image/package/usr/share/msfixit-shopos/wordpress/assets/msfixit-discovery.css
 	@test -s image/package/usr/share/msfixit-shopos/wordpress/assets/msfixit-help-center.css
 	@test -s image/package/usr/share/msfixit-shopos/wordpress/assets/msfixit-service-requests.css
+	@test -s image/package/usr/share/msfixit-shopos/wordpress/assets/msfixit-customer-auth.css
 	@test -s image/package/usr/share/msfixit-shopos/wordpress/msfixit-service-requests.php
 	@test -s image/package/usr/share/msfixit-shopos/wordpress/msfixit-service-provision.php
+	@test -s image/package/usr/share/msfixit-shopos/wordpress/msfixit-workspace.php
+	@test -s image/package/usr/share/msfixit-shopos/wordpress/msfixit-customer-auth.php
 	@test -s image/package/usr/share/plymouth/themes/msfixit-shopos/msfixit-shopos.plymouth
 	@test -s image/package/usr/share/plymouth/themes/msfixit-shopos/msfixit-shopos.script
 	@test -s image/package/etc/systemd/system/msfixit-boot-console.service
 	@test -s docs/SERVICE_REQUESTS.md
+	@test -s docs/GOOGLE_WORKSPACE.md
+	@test -s docs/CUSTOMER_AUTH.md
 	@test -s docs/BOOT_EXPERIENCE.md
 	@grep -q 'catalog_products' image/package/usr/share/msfixit-shopos/catalog/schema.sql
 	@grep -q 'no_reassign' image/package/usr/share/msfixit-shopos/catalog/guards.sql
@@ -120,6 +127,8 @@ check:
 	@grep -q 'password_hash' image/package/usr/share/msfixit-shopos/wordpress/msfixit-service-requests.php
 	@grep -q 'Referrer-Policy: no-referrer' image/package/usr/share/msfixit-shopos/wordpress/msfixit-service-requests.php
 	bash tests/test-service-requests.sh
+	bash tests/test-workspace-mail.sh
+	bash tests/test-customer-auth.sh
 	bash tests/test-boot-experience.sh
 	@if command -v php >/dev/null 2>&1; then \
 		php -l tests/test-discovery.php; \
@@ -137,6 +146,7 @@ check:
 		php -l image/package/usr/share/msfixit-shopos/wordpress/msfixit-catalog-bridge.php; \
 		php -l image/package/usr/share/msfixit-shopos/wordpress/msfixit-commerce-provision.php; \
 		php -l image/package/usr/share/msfixit-shopos/wordpress/msfixit-commerce-region.php; \
+		php -l image/package/usr/share/msfixit-shopos/wordpress/msfixit-customer-auth.php; \
 		php -l image/package/usr/share/msfixit-shopos/wordpress/msfixit-office-bridge.php; \
 		php -l image/package/usr/share/msfixit-shopos/wordpress/msfixit-compliance.php; \
 		php -l image/package/usr/share/msfixit-shopos/wordpress/msfixit-compliance-runtime.php; \
@@ -151,6 +161,7 @@ check:
 		php -l image/package/usr/share/msfixit-shopos/wordpress/msfixit-help-provision.php; \
 		php -l image/package/usr/share/msfixit-shopos/wordpress/msfixit-service-requests.php; \
 		php -l image/package/usr/share/msfixit-shopos/wordpress/msfixit-service-provision.php; \
+		php -l image/package/usr/share/msfixit-shopos/wordpress/msfixit-workspace.php; \
 		php -l image/package/usr/share/msfixit-shopos/wordpress/msfixit-provision.php; \
 		php -l image/package/usr/share/msfixit-shopos/wordpress/msfixit-render-branding.php; \
 	fi
