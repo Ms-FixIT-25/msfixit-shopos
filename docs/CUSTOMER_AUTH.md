@@ -7,6 +7,7 @@ ShopOS provides customer-facing authentication separately from the internal Goog
 - Sign in with Google for WooCommerce customer accounts
 - separate external Google OAuth web client
 - authorization-code flow with one-time state and PKCE S256
+- callback bound to the browser that started the login
 - verified Google email and stable Google subject identifier
 - optional automatic creation of new `customer` users
 - deliberate linking of an existing account from the authenticated security page
@@ -26,7 +27,11 @@ openid email profile
 
 The customer flow receives no Gmail, Drive, Calendar, Contacts or Workspace administration permission.
 
+The one-time OAuth state also contains a hash of a short-lived HttpOnly, SameSite browser cookie. A callback without the matching browser token is rejected. This prevents an authorization response started in another browser from being used as a customer login.
+
 Existing local accounts are never linked solely because Google returns the same email address. The customer must first authenticate to the existing account and connect Google from `My account > Sicherheit`. A new account may be created only when customer registration is enabled and Google returns a verified email address.
+
+An account created only through Google cannot remove its Google link until the customer has deliberately created a local password. This prevents accidental loss of the account's only usable sign-in method.
 
 Administrator and shop-manager users cannot use the customer Google flow. Their access remains separate from public customer authentication.
 
@@ -57,11 +62,13 @@ Per customer, ShopOS may store:
 
 - Google `sub` identifier
 - Google verified email used for the link
+- whether the account originated from Google login
+- whether a separate local password was deliberately established
 - encrypted TOTP secret
 - hashed recovery codes
 - bounded security-event history containing time, event and method
 
-No Google access token or refresh token is retained for customer login. The authorization access token is used only to obtain the verified identity during the callback.
+The short-lived browser-binding token is kept only in an HttpOnly cookie and its keyed hash in a transient login record. No Google access token or refresh token is retained for customer login. The authorization access token is used only to obtain the verified identity during the callback.
 
 ## Operational checks
 
@@ -70,6 +77,8 @@ Before public launch:
 - verify the exact public HTTPS redirect URI
 - test first-time Google registration
 - test deliberate linking of an existing account
+- test rejection of a callback in a different browser
+- test setting a local password before disconnecting a Google-only account
 - test TOTP login, recovery-code use and clock tolerance
 - review privacy text for the stored identity and security metadata
 - confirm account deletion removes user metadata under the real retention policy
