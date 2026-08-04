@@ -67,6 +67,7 @@ chmod 0755 \
     "$stage/usr/local/sbin/msfixit-also-init" \
     "$stage/usr/local/sbin/msfixit-also" \
     "$stage/usr/local/sbin/msfixit-also-content" \
+    "$stage/usr/local/sbin/msfixit-also-content-sync" \
     "$stage/usr/local/sbin/msfixit-discovery" \
     "$stage/usr/local/sbin/msfixit-apply-config" \
     "$stage/usr/local/sbin/msfixit-health" \
@@ -96,6 +97,7 @@ install -d -m 0755 "$stage/usr/share/msfixit-shopos"
         "$stage/usr/local/sbin/msfixit-tax-decision" \
         "$stage/usr/local/sbin/msfixit-also" \
         "$stage/usr/local/sbin/msfixit-also-content" \
+        "$stage/usr/local/sbin/msfixit-also-content-sync" \
         "$stage/usr/local/sbin/msfixit-discovery" \
         "$brand_file" \
         "$stage/usr/share/msfixit-shopos/catalog/schema.sql" \
