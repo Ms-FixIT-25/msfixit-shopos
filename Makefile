@@ -43,6 +43,7 @@ check:
 	bash -n image/package/usr/local/sbin/msfixit-catalog-init
 	bash -n image/package/usr/local/sbin/msfixit-office-init
 	bash -n image/package/usr/local/sbin/msfixit-also-init
+	bash -n image/package/usr/local/sbin/msfixit-also-content-sync
 	bash -n image/package/usr/local/sbin/msfixit-discovery
 	bash -n image/package/usr/local/sbin/msfixit-office-worker
 	bash -n image/package/usr/local/sbin/msfixit-office-dunning
