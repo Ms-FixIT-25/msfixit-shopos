@@ -37,10 +37,12 @@ ensure_media() {
 run_wp core is-installed >/dev/null
 
 # Separate application databases remain the source of truth for article identity,
-# immutable commercial documents, DACH compliance and supplier staging.
+# immutable commercial documents, DACH compliance, supplier staging and verified
+# public partner claims.
 /usr/local/sbin/msfixit-catalog-init
 /usr/local/sbin/msfixit-office-init
 /usr/local/sbin/msfixit-also-init
+/usr/local/sbin/msfixit-partners-init
 
 install -d -m 0750 "$config_dir"
 if [ ! -f "$config_dir/discovery.env" ]; then
@@ -70,6 +72,7 @@ for plugin in \
     msfixit-at-pilot.php \
     msfixit-also-content.php \
     msfixit-discovery.php \
+    msfixit-help-center.php \
     zz-msfixit-discovery-compliance-sync.php \
     zz-msfixit-discovery-assets.php; do
     install -m 0644 \
@@ -78,6 +81,7 @@ for plugin in \
 done
 install -m 0644 "$wordpress_assets/assets/msfixit-discovery.js" "$wordpress_dir/wp-content/mu-plugins/assets/msfixit-discovery.js"
 install -m 0644 "$wordpress_assets/assets/msfixit-discovery.css" "$wordpress_dir/wp-content/mu-plugins/assets/msfixit-discovery.css"
+install -m 0644 "$wordpress_assets/assets/msfixit-help-center.css" "$wordpress_dir/wp-content/mu-plugins/assets/msfixit-help-center.css"
 
 php "$wordpress_assets/msfixit-render-branding.php" \
     "$branding_dir/msfixit-brand-full.webp" \
@@ -104,10 +108,24 @@ icon_id="$(ensure_media \
     'Ms. FixIT Einhorn')"
 
 unmanaged_page_ids=()
-for slug in startseite reparatur-services kontakt impressum datenschutz agb widerruf-rueckgabe vertrag-widerrufen kabel-zubehoer; do
+for slug in \
+    startseite \
+    reparatur-services \
+    kontakt \
+    impressum \
+    datenschutz \
+    agb \
+    widerruf-rueckgabe \
+    vertrag-widerrufen \
+    kabel-zubehoer \
+    hilfe \
+    hilfe/kabelberater \
+    hilfe/fritzbox-wlan \
+    hilfe/reparaturwissen \
+    hilfe/bestellung-versand-rueckgabe; do
     page_id="$(run_wp post list \
         --post_type=page \
-        --name="$slug" \
+        --name="$(basename "$slug")" \
         --post_status=any \
         --field=ID \
         --format=ids 2>/dev/null | awk '{print $1}')"
@@ -131,6 +149,7 @@ export MSFIXIT_ICON_ID="$icon_id"
 run_wp eval-file "$wordpress_assets/msfixit-provision.php"
 run_wp eval-file "$wordpress_assets/msfixit-commerce-provision.php"
 run_wp eval-file "$wordpress_assets/msfixit-discovery-provision.php"
+run_wp eval-file "$wordpress_assets/msfixit-help-provision.php"
 
 run_wp option delete msfixit_shopos_protected_page_ids >/dev/null 2>&1 || true
 for page_id in "${unmanaged_page_ids[@]}"; do
@@ -140,4 +159,4 @@ done
 run_wp cache flush >/dev/null 2>&1 || true
 chown -R www-data:www-data "$wordpress_dir/wp-content"
 
-echo "Ms. FixIT WooCommerce branding, AT pilot, cable discovery, licensed ALSO content, supplier staging, article master, Office/Fulfillment and compliance core applied successfully."
+echo "Ms. FixIT WooCommerce branding, AT pilot, cable discovery, help center, verified partner profiles, licensed ALSO content, supplier staging, article master, Office/Fulfillment and compliance core applied successfully."
