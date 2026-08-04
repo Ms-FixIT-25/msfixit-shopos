@@ -1,7 +1,7 @@
 [Unit]
 Description=Ms. FixIT branded WooCommerce setup
-Wants=network-online.target
-After=network-online.target msfixit-firstboot.service
+After=msfixit-firstboot.service
+Requires=msfixit-firstboot.service
 ConditionPathExists=/data/.shopos-initialized
 ConditionPathExists=!/data/.shopos-branded
 
