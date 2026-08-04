@@ -131,7 +131,7 @@ install -d -m 0755 /mnt/shopos-root/usr/local/sbin
 cat > /mnt/shopos-root/usr/local/sbin/msfixit-vm-smoke <<'EOF_SMOKE'
 #!/usr/bin/env bash
 set -u
-exec > >(tee -a /var/log/msfixit-vm-smoke.log /dev/ttyAMA0 2>/dev/null) 2>&1
+exec > >(tee -a /var/log/msfixit-vm-smoke.log /dev/console 2>/dev/null) 2>&1
 
 failures=0
 check() {
@@ -224,7 +224,10 @@ cleanup_mounts
 loop=''
 trap - EXIT
 
-kernel_cmdline="earlycon=pl011,0xfe201000,115200 keep_bootcon console=ttyAMA0,115200 root=UUID=${root_uuid} rootfstype=ext4 rootwait rw fsck.repair=yes loglevel=7 systemd.show_status=1 plymouth.enable=0"
+# QEMU exposes the PL011 at fe201000 as ttyAMA1 with this Raspberry Pi 4 DTB.
+# Using ttyAMA0 leaves the kernel without a usable /dev/console, so the
+# initramfs shell exits with code 2 while redirecting run-init and PID 1 panics.
+kernel_cmdline="earlycon=pl011,0xfe201000,115200 keep_bootcon console=tty0 console=ttyAMA1,115200 root=UUID=${root_uuid} rootfstype=ext4 rootwait rw fsck.repair=yes loglevel=7 systemd.show_status=1 plymouth.enable=0 panic=5"
 printf '%s\n' "$kernel_cmdline" | tee "$output_dir/kernel-command-line.txt"
 
 qemu_args=(
@@ -242,8 +245,8 @@ qemu_args=(
 )
 
 set +e
-timeout --signal=TERM --kill-after=30s 35m qemu-system-aarch64 "${qemu_args[@]}" > "$output_dir/qemu-console.log" 2>&1
-qemu_rc=$?
+timeout --signal=TERM --kill-after=30s 35m qemu-system-aarch64 "${qemu_args[@]}" 2>&1 | tee "$output_dir/qemu-console.log"
+qemu_rc=${PIPESTATUS[0]}
 set -e
 printf 'QEMU_EXIT=%s\n' "$qemu_rc" | tee "$output_dir/qemu-exit.txt"
 
