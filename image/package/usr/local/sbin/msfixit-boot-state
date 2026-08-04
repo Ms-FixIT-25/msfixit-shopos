@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+umask 022
+
+readonly runtime_dir=/run/msfixit-shopos
+readonly persistent_dir=/var/lib/msfixit-shopos
+readonly state_file="$runtime_dir/firstboot-state"
+readonly persistent_file="$persistent_dir/firstboot-state"
+
+sanitize() {
+    printf '%s' "$1" | tr '\r\n|' '   ' | cut -c1-220
+}
+
+write_state() {
+    local state="$1" progress="$2" title="$3" detail="$4" temporary
+
+    [[ "$progress" =~ ^[0-9]+$ ]] || progress=0
+    (( progress < 0 )) && progress=0
+    (( progress > 100 )) && progress=100
+
+    install -d -m 0755 "$runtime_dir" "$persistent_dir"
+    temporary="$(mktemp "$runtime_dir/.firstboot-state.XXXXXX")"
+    printf '%s|%s|%s|%s\n' \
+        "$(sanitize "$state")" \
+        "$progress" \
+        "$(sanitize "$title")" \
+        "$(sanitize "$detail")" > "$temporary"
+    chmod 0644 "$temporary"
+    mv -f "$temporary" "$state_file"
+    cp -f "$state_file" "$persistent_file"
+    chmod 0644 "$persistent_file"
+}
+
+command="${1:-update}"
+case "$command" in
+    update)
+        write_state running "${2:-0}" "${3:-ShopOS wird eingerichtet}" "${4:-}"
+        ;;
+    ready)
+        write_state ready "${2:-100}" "${3:-ShopOS ist bereit}" "${4:-Der Shop kann jetzt geöffnet werden.}"
+        ;;
+    fail)
+        write_state failed "${2:-0}" "${3:-Einrichtung nicht abgeschlossen}" "${4:-Details stehen in /var/log/msfixit-firstboot.log.}"
+        ;;
+    reset)
+        rm -f "$state_file" "$persistent_file"
+        ;;
+    *)
+        echo "Usage: $0 update PROGRESS TITLE [DETAIL] | ready [PROGRESS TITLE DETAIL] | fail [PROGRESS TITLE DETAIL] | reset" >&2
+        exit 2
+        ;;
+esac
