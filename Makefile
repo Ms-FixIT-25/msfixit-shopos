@@ -36,6 +36,7 @@ check:
 	bash -n tests/test-compliance-numbering.sh
 	bash -n tests/test-tax-renderer-boundary.sh
 	bash -n tests/test-also.sh
+	bash -n tests/test-also-content.sh
 	bash -n image/package/DEBIAN/postinst
 	bash -n image/package/usr/local/sbin/msfixit-firstboot
 	bash -n image/package/usr/local/sbin/msfixit-brand-shop
@@ -63,6 +64,8 @@ check:
 	@test -s image/package/usr/share/msfixit-shopos/compliance/tax-decision-migrations.sql
 	@test -s image/package/usr/share/msfixit-shopos/compliance/renderer-guards.sql
 	@test -s image/package/usr/share/msfixit-shopos/also/schema.sql
+	@test -s image/package/usr/share/msfixit-shopos/also/content.sql
+	@test -s image/package/usr/share/msfixit-shopos/also/content-guards.sql
 	@test -s image/package/usr/share/msfixit-shopos/also/also.env.example
 	@test -s image/package/usr/share/msfixit-shopos/discovery/discovery.env.example
 	@test -s image/package/usr/share/msfixit-shopos/discovery/discovery-lib.php
@@ -81,7 +84,11 @@ check:
 	@grep -q 'superseding decision' image/package/usr/share/msfixit-shopos/compliance/tax-decision-migrations.sql
 	@grep -q 'advanced DACH tax invoice renderer' image/package/usr/share/msfixit-shopos/compliance/renderer-guards.sql
 	@grep -q 'supplier_import_runs' image/package/usr/share/msfixit-shopos/also/schema.sql
+	@grep -q 'supplier_content_profiles' image/package/usr/share/msfixit-shopos/also/content.sql
+	@grep -q 'remote_only' image/package/usr/share/msfixit-shopos/also/content.sql
+	@grep -q 'supplier_content_changed' image/package/usr/share/msfixit-shopos/also/content-guards.sql
 	@grep -q 'AT_PILOT_AUTO_PUBLISH=no' image/package/usr/share/msfixit-shopos/also/also.env.example
+	@grep -q 'ALSO_CONTENT_MEDIA_MODE=remote_only' image/package/usr/share/msfixit-shopos/also/also.env.example
 	@grep -q 'GOOGLE_MERCHANT_FEED_ENABLED=no' image/package/usr/share/msfixit-shopos/discovery/discovery.env.example
 	@grep -q 'msfixit_discovery_publication_audit' image/package/usr/share/msfixit-shopos/discovery/discovery-lib.php
 	@if command -v php >/dev/null 2>&1; then \
@@ -92,6 +99,7 @@ check:
 		php -l image/package/usr/local/sbin/msfixit-compliance; \
 		php -l image/package/usr/local/sbin/msfixit-tax-decision; \
 		php -l image/package/usr/local/sbin/msfixit-also; \
+		php -l image/package/usr/local/sbin/msfixit-also-content; \
 		php -l image/package/usr/share/msfixit-shopos/discovery/discovery-lib.php; \
 		php -l image/package/usr/share/msfixit-shopos/office/office-lib.php; \
 		php -l image/package/usr/share/msfixit-shopos/wordpress/msfixit-branding.php; \
@@ -103,6 +111,8 @@ check:
 		php -l image/package/usr/share/msfixit-shopos/wordpress/msfixit-compliance-runtime.php; \
 		php -l image/package/usr/share/msfixit-shopos/wordpress/msfixit-at-pilot.php; \
 		php -l image/package/usr/share/msfixit-shopos/wordpress/msfixit-also-draft.php; \
+		php -l image/package/usr/share/msfixit-shopos/wordpress/msfixit-also-content.php; \
+		php -l image/package/usr/share/msfixit-shopos/wordpress/msfixit-also-content-apply.php; \
 		php -l image/package/usr/share/msfixit-shopos/wordpress/msfixit-discovery.php; \
 		php -l image/package/usr/share/msfixit-shopos/wordpress/msfixit-discovery-provision.php; \
 		php -l image/package/usr/share/msfixit-shopos/wordpress/msfixit-discovery-cli.php; \
