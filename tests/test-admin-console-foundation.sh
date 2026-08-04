@@ -22,8 +22,12 @@ grep -Fq "fastcgi_pass unix:/run/php/msfixit-fpm.sock;" "$snippet"
 grep -Fq "chmod 0640" "$init"
 grep -Fq "chown root:www-data" "$init"
 grep -Fq "ExecStart=/bin/bash /usr/local/sbin/msfixit-admin-console-init" "$unit"
-if grep -Eqi "PASSWORD[[:space:]]*=[[:space:]]*['\"][^$]" "$app" "$init"; then
+
+# Reject non-empty quoted password literals, while allowing an empty sentinel
+# and values populated from variables, files or password_hash().
+if grep -Eni "(password|passwd)[[:alnum:]_]*[[:space:]]*=[[:space:]]*['\"][^$'\"][^'\"]*['\"]" "$app" "$init"; then
     echo "Hard-coded password detected." >&2
     exit 1
 fi
+
 printf 'PASS: admin console Phase 1 authentication, CSRF, local-network restriction and secret handling checks.\n'
