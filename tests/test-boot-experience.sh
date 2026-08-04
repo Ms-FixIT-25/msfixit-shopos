@@ -48,10 +48,11 @@ assert_contains 'readonly woocommerce_version=10.9.4' scripts/fetch-vendor-asset
 assert_contains 'readonly redis_cache_version=2.8.0' scripts/fetch-vendor-assets.sh
 assert_contains 'readonly storefront_version=4.6.2' scripts/fetch-vendor-assets.sh
 assert_contains 'https://de.wordpress.org/wordpress-${wordpress_version}-de_DE.zip' scripts/fetch-vendor-assets.sh
+assert_contains 'https://de.wordpress.org/wordpress-${wordpress_version}-de_DE.zip.sha1' scripts/fetch-vendor-assets.sh
 assert_contains 'https://downloads.wordpress.org/plugin/woocommerce.${woocommerce_version}.zip' scripts/fetch-vendor-assets.sh
 assert_contains 'https://downloads.wordpress.org/plugin/redis-cache.${redis_cache_version}.zip' scripts/fetch-vendor-assets.sh
 assert_contains 'https://downloads.wordpress.org/theme/storefront.${storefront_version}.zip' scripts/fetch-vendor-assets.sh
-assert_contains 'f84f755adcf6732c6f681f0430358f0e09593c20' scripts/fetch-vendor-assets.sh
+assert_contains 'sha1sum --check --strict' scripts/fetch-vendor-assets.sh
 assert_contains '/usr/local/lib/msfixit-shopos/wp-cli.phar' image/package/usr/local/bin/wp
 assert_contains 'WordPress ${bundled_wordpress} (de_DE) installed from the ShopOS image.' image/package/usr/local/bin/wp
 assert_contains 'WORDPRESS_VERSION=7.0.2' image/package/usr/share/msfixit-shopos/shopos.env.example
