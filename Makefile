@@ -38,6 +38,7 @@ check:
 	bash -n tests/test-also.sh
 	bash -n tests/test-also-content.sh
 	bash -n tests/test-partners.sh
+	bash -n tests/test-service-requests.sh
 	bash -n image/package/DEBIAN/postinst
 	bash -n image/package/usr/local/sbin/msfixit-firstboot
 	bash -n image/package/usr/local/sbin/msfixit-brand-shop
@@ -76,6 +77,10 @@ check:
 	@test -s image/package/usr/share/msfixit-shopos/wordpress/assets/msfixit-discovery.js
 	@test -s image/package/usr/share/msfixit-shopos/wordpress/assets/msfixit-discovery.css
 	@test -s image/package/usr/share/msfixit-shopos/wordpress/assets/msfixit-help-center.css
+	@test -s image/package/usr/share/msfixit-shopos/wordpress/assets/msfixit-service-requests.css
+	@test -s image/package/usr/share/msfixit-shopos/wordpress/msfixit-service-requests.php
+	@test -s image/package/usr/share/msfixit-shopos/wordpress/msfixit-service-provision.php
+	@test -s docs/SERVICE_REQUESTS.md
 	@grep -q 'catalog_products' image/package/usr/share/msfixit-shopos/catalog/schema.sql
 	@grep -q 'no_reassign' image/package/usr/share/msfixit-shopos/catalog/guards.sql
 	@grep -q 'office_documents' image/package/usr/share/msfixit-shopos/office/schema.sql
@@ -99,6 +104,10 @@ check:
 	@grep -q 'partner_profiles' image/package/usr/share/msfixit-shopos/partners/schema.sql
 	@grep -q 'Partner logo requires separately verified usage rights' image/package/usr/share/msfixit-shopos/partners/schema.sql
 	@grep -q 'msfixit_help_center' image/package/usr/share/msfixit-shopos/wordpress/msfixit-help-center.php
+	@grep -q 'msfixit_service_public_enabled' image/package/usr/share/msfixit-shopos/wordpress/msfixit-service-requests.php
+	@grep -q 'password_hash' image/package/usr/share/msfixit-shopos/wordpress/msfixit-service-requests.php
+	@grep -q 'Referrer-Policy: no-referrer' image/package/usr/share/msfixit-shopos/wordpress/msfixit-service-requests.php
+	bash tests/test-service-requests.sh
 	@if command -v php >/dev/null 2>&1; then \
 		php -l tests/test-discovery.php; \
 		php tests/test-discovery.php; \
@@ -127,6 +136,8 @@ check:
 		php -l image/package/usr/share/msfixit-shopos/wordpress/msfixit-discovery-cli.php; \
 		php -l image/package/usr/share/msfixit-shopos/wordpress/msfixit-help-center.php; \
 		php -l image/package/usr/share/msfixit-shopos/wordpress/msfixit-help-provision.php; \
+		php -l image/package/usr/share/msfixit-shopos/wordpress/msfixit-service-requests.php; \
+		php -l image/package/usr/share/msfixit-shopos/wordpress/msfixit-service-provision.php; \
 		php -l image/package/usr/share/msfixit-shopos/wordpress/msfixit-provision.php; \
 		php -l image/package/usr/share/msfixit-shopos/wordpress/msfixit-render-branding.php; \
 	fi
