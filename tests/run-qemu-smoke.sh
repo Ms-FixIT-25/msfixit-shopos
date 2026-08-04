@@ -10,6 +10,19 @@ select_initramfs() {
         | tail -n 1
 }
 
+rewrite_fstab_for_vm() {
+    local fstab="$1" boot_partuuid="$2" root_partuuid="$3" tmp
+    tmp="${fstab}.vm-new"
+    awk -v boot="PARTUUID=${boot_partuuid}" -v root="PARTUUID=${root_partuuid}" '
+        BEGIN { OFS="\t" }
+        /^[[:space:]]*#/ || NF == 0 { print; next }
+        $2 == "/boot/firmware" { $1 = boot; print; next }
+        $2 == "/" && $1 ~ /\/dev\/disk\/by-slot\/root/ { $1 = root; print; next }
+        { print }
+    ' "$fstab" > "$tmp"
+    mv "$tmp" "$fstab"
+}
+
 if [ "${1:-}" = '--self-test' ]; then
     tmp="$(mktemp -d)"
     trap 'rm -rf "$tmp"' EXIT
@@ -17,7 +30,18 @@ if [ "${1:-}" = '--self-test' ]; then
     touch "$tmp/initramfs_6.18.39+rpt-rpi-v8.img"
     selected="$(select_initramfs "$tmp")"
     test "$selected" = 'initramfs_6.18.39+rpt-rpi-v8.img'
+
+    cat > "$tmp/fstab" <<'EOF_FSTAB'
+# ShopOS storage slots
+/dev/disk/by-slot/root / ext4 defaults 0 1
+/dev/disk/by-slot/boot /boot/firmware vfat defaults 0 2
+EOF_FSTAB
+    rewrite_fstab_for_vm "$tmp/fstab" '1111-01' '1111-02'
+    grep -Eq '^PARTUUID=1111-02[[:space:]]+/[[:space:]]+ext4' "$tmp/fstab"
+    grep -Eq '^PARTUUID=1111-01[[:space:]]+/boot/firmware[[:space:]]+vfat' "$tmp/fstab"
+
     printf 'PASS: versioned Raspberry Pi initramfs discovery (%s)\n' "$selected"
+    printf 'PASS: VM fstab rewrite uses stable partition identifiers\n'
     exit 0
 fi
 
@@ -45,6 +69,21 @@ loop="$(losetup --find --show --partscan "$image")"
 mkdir -p /mnt/shopos-boot /mnt/shopos-root
 mount "${loop}p1" /mnt/shopos-boot
 mount "${loop}p2" /mnt/shopos-root
+
+boot_partuuid="$(blkid -s PARTUUID -o value "${loop}p1")"
+root_partuuid="$(blkid -s PARTUUID -o value "${loop}p2")"
+test -n "$boot_partuuid"
+test -n "$root_partuuid"
+printf 'Boot PARTUUID: %s\nRoot PARTUUID: %s\n' "$boot_partuuid" "$root_partuuid" | tee "$output_dir/partition-identifiers.txt"
+
+# The production image intentionally mounts partitions through Raspberry Pi
+# storage-slot aliases. QEMU presents the disposable image as an emulated SD
+# card and does not create /dev/disk/by-slot/boot. Rewrite only the disposable
+# test copy to stable PARTUUID sources so systemd can reach local-fs.target.
+cp /mnt/shopos-root/etc/fstab "$output_dir/fstab.before"
+rewrite_fstab_for_vm /mnt/shopos-root/etc/fstab "$boot_partuuid" "$root_partuuid"
+cp /mnt/shopos-root/etc/fstab "$output_dir/fstab.after"
+grep -Eq "^PARTUUID=${boot_partuuid}[[:space:]]+/boot/firmware[[:space:]]" /mnt/shopos-root/etc/fstab
 
 test -s /mnt/shopos-boot/kernel8.img
 test -s /mnt/shopos-boot/bcm2711-rpi-4-b.dtb
@@ -111,6 +150,7 @@ for _ in $(seq 1 180); do
 done
 
 systemctl --no-pager --full status msfixit-firstboot.service msfixit-brand-shop.service || true
+check 'boot partition mounted' mountpoint -q /boot/firmware
 check 'initialization marker' test -e /data/.shopos-initialized
 check 'ready marker' test -e /data/.shopos-ready
 check 'credentials file' test -s /boot/firmware/SHOPOS-CREDENTIALS.txt
@@ -174,13 +214,16 @@ cleanup_mounts
 loop=''
 trap - EXIT
 
+kernel_cmdline="earlycon=pl011,0xfe201000,115200 keep_bootcon console=ttyAMA0,115200 root=PARTUUID=${root_partuuid} rootfstype=ext4 rootwait rw fsck.repair=yes loglevel=7 systemd.show_status=1 plymouth.enable=0"
+printf '%s\n' "$kernel_cmdline" | tee "$output_dir/kernel-command-line.txt"
+
 qemu_args=(
     -machine raspi4b
     -accel tcg,thread=multi
     -kernel "$output_dir/kernel8.img"
     -dtb "$output_dir/bcm2711-rpi-4-b.dtb"
     -initrd "$initrd"
-    -append 'earlycon=pl011,0xfe201000 console=ttyAMA0,115200 console=tty1 root=/dev/mmcblk1p2 rootfstype=ext4 rootwait rw fsck.repair=yes loglevel=7 systemd.show_status=1'
+    -append "$kernel_cmdline"
     -drive "file=${image},format=raw,if=sd,cache=writeback"
     -display none
     -serial stdio
