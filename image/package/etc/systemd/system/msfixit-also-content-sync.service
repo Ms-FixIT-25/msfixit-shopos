@@ -1,0 +1,19 @@
+[Unit]
+Description=Ms. FixIT licensed ALSO content synchronization
+After=network-online.target mariadb.service msfixit-firstboot.service
+Wants=network-online.target
+ConditionPathExists=/etc/msfixit-shopos/also.env
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+ExecStart=/usr/local/sbin/msfixit-also-content sync
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=6
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/data/suppliers/also/content /run /tmp
+NoNewPrivileges=true
