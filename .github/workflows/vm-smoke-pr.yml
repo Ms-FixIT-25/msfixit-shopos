@@ -36,8 +36,8 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          SHOPOS_ARTIFACT_ID: '8894426949'
-          SHOPOS_ARTIFACT_SHA256: bd10398a3fa93fd851103e0367d8711ae9daea39a0975fefc90d91312aafa87d
+          SHOPOS_ARTIFACT_ID: '8898297045'
+          SHOPOS_ARTIFACT_SHA256: a7d85a7f28ea16e0c10969e83394d8ee285b6bd622cfa678ea4bbf7dee69c362
         run: |
           set -Eeuo pipefail
           mkdir -p vm
