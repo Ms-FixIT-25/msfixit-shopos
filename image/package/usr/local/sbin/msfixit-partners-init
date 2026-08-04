@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+umask 077
+
+readonly config_dir=/etc/msfixit-shopos
+readonly schema_file=/usr/share/msfixit-shopos/partners/schema.sql
+readonly wordpress_env="${config_dir}/partners-wordpress.env"
+readonly database_name=shopos_catalog
+readonly wordpress_user=shopos_partners_wp
+
+if [ "$(id -u)" -ne 0 ]; then
+    echo "Run this command with sudo." >&2
+    exit 1
+fi
+
+[ -f "$schema_file" ] || {
+    echo "Partner schema not found: $schema_file" >&2
+    exit 1
+}
+
+random_secret() {
+    openssl rand -hex 24
+}
+
+read_value() {
+    local file="$1" key="$2"
+    [ -f "$file" ] || return 0
+    sed -n "s/^${key}=//p" "$file" | tail -n 1
+}
+
+install -d -m 0750 "$config_dir" /data/partners/evidence
+password="$(read_value "$wordpress_env" PARTNER_DB_PASSWORD)"
+password="${password:-$(random_secret)}"
+
+mariadb "$database_name" < "$schema_file"
+
+mariadb <<EOF_SQL
+CREATE USER IF NOT EXISTS '${wordpress_user}'@'localhost' IDENTIFIED BY '${password}';
+ALTER USER '${wordpress_user}'@'localhost' IDENTIFIED BY '${password}';
+REVOKE ALL PRIVILEGES, GRANT OPTION FROM '${wordpress_user}'@'localhost';
+GRANT SELECT ON ${database_name}.partner_profiles TO '${wordpress_user}'@'localhost';
+FLUSH PRIVILEGES;
+EOF_SQL
+
+cat > "$wordpress_env" <<EOF_ENV
+PARTNER_DB_HOST=127.0.0.1
+PARTNER_DB_PORT=3306
+PARTNER_DB_NAME=${database_name}
+PARTNER_DB_USER=${wordpress_user}
+PARTNER_DB_PASSWORD=${password}
+EOF_ENV
+chmod 0640 "$wordpress_env"
+chown root:www-data "$wordpress_env"
+
+echo "Ms. FixIT partner profiles initialized successfully."
