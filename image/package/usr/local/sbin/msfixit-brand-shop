@@ -66,6 +66,7 @@ for plugin in \
     msfixit-branding.php \
     msfixit-catalog-bridge.php \
     msfixit-commerce-region.php \
+    msfixit-customer-auth.php \
     msfixit-office-bridge.php \
     msfixit-compliance.php \
     msfixit-compliance-runtime.php \
@@ -73,6 +74,8 @@ for plugin in \
     msfixit-also-content.php \
     msfixit-discovery.php \
     msfixit-help-center.php \
+    msfixit-service-requests.php \
+    msfixit-workspace.php \
     zz-msfixit-discovery-compliance-sync.php \
     zz-msfixit-discovery-assets.php; do
     install -m 0644 \
@@ -82,6 +85,8 @@ done
 install -m 0644 "$wordpress_assets/assets/msfixit-discovery.js" "$wordpress_dir/wp-content/mu-plugins/assets/msfixit-discovery.js"
 install -m 0644 "$wordpress_assets/assets/msfixit-discovery.css" "$wordpress_dir/wp-content/mu-plugins/assets/msfixit-discovery.css"
 install -m 0644 "$wordpress_assets/assets/msfixit-help-center.css" "$wordpress_dir/wp-content/mu-plugins/assets/msfixit-help-center.css"
+install -m 0644 "$wordpress_assets/assets/msfixit-service-requests.css" "$wordpress_dir/wp-content/mu-plugins/assets/msfixit-service-requests.css"
+install -m 0644 "$wordpress_assets/assets/msfixit-customer-auth.css" "$wordpress_dir/wp-content/mu-plugins/assets/msfixit-customer-auth.css"
 
 php "$wordpress_assets/msfixit-render-branding.php" \
     "$branding_dir/msfixit-brand-full.webp" \
@@ -122,7 +127,9 @@ for slug in \
     hilfe/kabelberater \
     hilfe/fritzbox-wlan \
     hilfe/reparaturwissen \
-    hilfe/bestellung-versand-rueckgabe; do
+    hilfe/bestellung-versand-rueckgabe \
+    service-anfrage \
+    service-status; do
     page_id="$(run_wp post list \
         --post_type=page \
         --name="$(basename "$slug")" \
@@ -150,13 +157,15 @@ run_wp eval-file "$wordpress_assets/msfixit-provision.php"
 run_wp eval-file "$wordpress_assets/msfixit-commerce-provision.php"
 run_wp eval-file "$wordpress_assets/msfixit-discovery-provision.php"
 run_wp eval-file "$wordpress_assets/msfixit-help-provision.php"
+run_wp eval-file "$wordpress_assets/msfixit-service-provision.php"
 
 run_wp option delete msfixit_shopos_protected_page_ids >/dev/null 2>&1 || true
 for page_id in "${unmanaged_page_ids[@]}"; do
     run_wp post meta delete "$page_id" _msfixit_shopos_managed >/dev/null 2>&1 || true
 done
 
+run_wp rewrite flush --hard >/dev/null
 run_wp cache flush >/dev/null 2>&1 || true
 chown -R www-data:www-data "$wordpress_dir/wp-content"
 
-echo "Ms. FixIT WooCommerce branding, AT pilot, cable discovery, help center, verified partner profiles, licensed ALSO content, supplier staging, article master, Office/Fulfillment and compliance core applied successfully."
+echo "Ms. FixIT WooCommerce branding, customer Google sign-in and 2FA, Google Workspace mail, AT pilot, cable discovery, help center, privacy-gated service portal, verified partner profiles, licensed ALSO content, supplier staging, article master, Office/Fulfillment and compliance core applied successfully."

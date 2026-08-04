@@ -1,0 +1,21 @@
+[Unit]
+Description=Ms. FixIT ShopOS branded first-boot console
+Wants=network-online.target msfixit-firstboot.service msfixit-brand-shop.service
+After=local-fs.target systemd-vconsole-setup.service network-online.target
+Before=getty@tty1.service
+ConditionPathExists=!/data/.shopos-ready
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/msfixit-boot-console
+StandardInput=tty
+StandardOutput=tty
+StandardError=tty
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+TimeoutStartSec=35min
+
+[Install]
+WantedBy=multi-user.target

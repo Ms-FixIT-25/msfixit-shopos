@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+readonly log_file=/var/log/msfixit-firstboot.log
+readonly state_command=/usr/local/sbin/msfixit-boot-state
+
+"$state_command" update 5 "ShopOS wird vorbereitet" "Netzwerk und lokale Datenträger werden geprüft."
+
+/usr/local/sbin/msfixit-firstboot &
+firstboot_pid=$!
+last_stage=""
+
+while kill -0 "$firstboot_pid" 2>/dev/null; do
+    stage=""
+    if [ -r "$log_file" ]; then
+        recent="$(tail -n 80 "$log_file" 2>/dev/null || true)"
+        case "$recent" in
+            *"Enabling Nginx and PHP-FPM."*) stage=web ;;
+            *"Installing WordPress and WooCommerce."*) stage=wordpress ;;
+            *"Configuring Redis."*) stage=redis ;;
+            *"Configuring PHP-FPM."*) stage=php ;;
+            *"Configuring MariaDB on persistent storage."*) stage=database ;;
+            *"Starting ShopOS first-boot provisioning."*) stage=start ;;
+        esac
+    fi
+
+    if [ -n "$stage" ] && [ "$stage" != "$last_stage" ]; then
+        last_stage="$stage"
+        case "$stage" in
+            start) "$state_command" update 10 "Grundsystem wird eingerichtet" "Speicher, Zugangsdaten und Systemkonfiguration werden vorbereitet." ;;
+            database) "$state_command" update 25 "Datenbank wird eingerichtet" "MariaDB wird auf dem persistenten Datenträger initialisiert." ;;
+            php) "$state_command" update 40 "Anwendungsumgebung wird eingerichtet" "PHP-FPM und sichere Laufzeiteinstellungen werden aktiviert." ;;
+            redis) "$state_command" update 52 "Cache wird eingerichtet" "Redis wird lokal und geschützt konfiguriert." ;;
+            wordpress) "$state_command" update 65 "Webshop wird installiert" "Gebündeltes WordPress und WooCommerce werden lokal eingerichtet." ;;
+            web) "$state_command" update 82 "Webserver wird gestartet" "Nginx, PHP und ShopOS-Dienste werden geprüft." ;;
+        esac
+    fi
+    sleep 1
+done
+
+set +e
+wait "$firstboot_pid"
+status=$?
+set -e
+
+if [ "$status" -eq 0 ]; then
+    "$state_command" update 90 "Grundsystem ist bereit" "Shop, Design, Hilfeseiten und Verwaltungsfunktionen werden fertiggestellt."
+    exit 0
+fi
+
+"$state_command" fail 90 "Einrichtung nicht abgeschlossen" "Der erste Start wurde mit Fehlercode ${status} beendet."
+exit "$status"

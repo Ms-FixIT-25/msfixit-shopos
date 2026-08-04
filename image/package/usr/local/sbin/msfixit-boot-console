@@ -1,0 +1,143 @@
+#!/usr/bin/env bash
+set -u
+
+readonly state_file=/run/msfixit-shopos/firstboot-state
+readonly ready_marker=/data/.shopos-ready
+readonly log_file=/var/log/msfixit-firstboot.log
+
+cleanup() {
+    printf '\033[0m\033[?25h'
+}
+trap cleanup EXIT INT TERM
+
+repeat_char() {
+    local character="$1" count="$2" output=""
+    while (( count > 0 )); do
+        output+="$character"
+        ((count--))
+    done
+    printf '%s' "$output"
+}
+
+progress_bar() {
+    local progress="$1" width=42 filled empty
+    [[ "$progress" =~ ^[0-9]+$ ]] || progress=0
+    (( progress > 100 )) && progress=100
+    filled=$((progress * width / 100))
+    empty=$((width - filled))
+    printf '['
+    repeat_char '■' "$filled"
+    repeat_char '·' "$empty"
+    printf '] %3d%%' "$progress"
+}
+
+first_ip() {
+    local address
+    address="$(hostname -I 2>/dev/null | awk '{print $1}')"
+    printf '%s' "${address:-msfixit-shopos.local}"
+}
+
+credentials_path() {
+    local candidate
+    for candidate in /boot/firmware/SHOPOS-CREDENTIALS.txt /boot/SHOPOS-CREDENTIALS.txt; do
+        if [ -f "$candidate" ]; then
+            printf '%s' "$candidate"
+            return 0
+        fi
+    done
+    printf '%s' '/boot/firmware/SHOPOS-CREDENTIALS.txt'
+}
+
+draw_screen() {
+    local state="$1" progress="$2" title="$3" detail="$4" ip
+    ip="$(first_ip)"
+
+    printf '\033[2J\033[H\033[?25l'
+    printf '\033[48;2;10;25;48m\033[38;2;255;255;255m'
+    printf '\n\n'
+    printf '                 ╭──────────────────────────────────────────────╮\n'
+    printf '                 │                                              │\n'
+    printf '                 │              \033[1;38;2;36;184;189mMS. FIXIT\033[0;48;2;10;25;48m              │\n'
+    printf '                 │                \033[1;38;2;237;63;145mSHOPOS\033[0;48;2;10;25;48m                │\n'
+    printf '                 │                                              │\n'
+    printf '                 │       IT gelöst. Einfach. Fix. Günstig.      │\n'
+    printf '                 ╰──────────────────────────────────────────────╯\n\n'
+    printf '                    \033[1m%-54s\033[0;48;2;10;25;48m\n' "$title"
+    printf '                    %-54s\n\n' "$detail"
+    printf '                    '
+    if [ "$state" = failed ]; then
+        printf '\033[38;2;255;115;115m'
+    elif [ "$state" = ready ]; then
+        printf '\033[38;2;36;184;189m'
+    else
+        printf '\033[38;2;237;63;145m'
+    fi
+    progress_bar "$progress"
+    printf '\033[0;48;2;10;25;48m\n\n'
+    printf '                    Gerät:  %-44s\n' "$(hostname)"
+    printf '                    LAN:    %-44s\n' "$ip"
+
+    case "$state" in
+        ready)
+            printf '\n                    \033[1;38;2;36;184;189mShopOS ist vollständig eingerichtet.\033[0;48;2;10;25;48m\n'
+            printf '                    Shop:    http://%s/\n' "$ip"
+            printf '                    Zugang:  %s\n' "$(credentials_path)"
+            printf '\n                    Zugangsdaten sicher speichern und die Datei danach löschen.\n'
+            ;;
+        failed)
+            printf '\n                    \033[1;38;2;255;115;115mDie automatische Einrichtung wurde unterbrochen.\033[0;48;2;10;25;48m\n'
+            printf '                    Protokoll: %s\n' "$log_file"
+            printf '                    Diagnose:  sudo systemctl status msfixit-firstboot\n'
+            ;;
+        *)
+            printf '\n                    Der erste Start kann einige Minuten dauern.\n'
+            printf '                    Bitte das Gerät währenddessen nicht ausschalten.\n'
+            ;;
+    esac
+    printf '\033[0m'
+}
+
+state=running
+progress=2
+title='Ms. FixIT ShopOS startet'
+detail='Systemdienste und lokaler Shop werden vorbereitet.'
+
+for _ in $(seq 1 1800); do
+    if [ -r "$state_file" ]; then
+        IFS='|' read -r state progress title detail < "$state_file" || true
+    fi
+
+    if [ -e "$ready_marker" ]; then
+        state=ready
+        progress=100
+        title='ShopOS ist bereit'
+        detail='Webshop, Verwaltung und Hintergrunddienste wurden gestartet.'
+    elif systemctl is-failed --quiet msfixit-firstboot.service 2>/dev/null \
+        || systemctl is-failed --quiet msfixit-brand-shop.service 2>/dev/null; then
+        state=failed
+        title='Einrichtung nicht abgeschlossen'
+        detail='Die Anmeldung wird freigegeben, damit der Fehler geprüft werden kann.'
+    fi
+
+    draw_screen "$state" "$progress" "$title" "$detail"
+
+    case "$state" in
+        ready)
+            sleep 12
+            exit 0
+            ;;
+        failed)
+            sleep 20
+            exit 1
+            ;;
+    esac
+    sleep 1
+done
+
+state=failed
+progress=99
+title='Einrichtung dauert ungewöhnlich lange'
+detail='Die Anmeldung wird freigegeben; der Vorgang kann im Protokoll geprüft werden.'
+draw_screen "$state" "$progress" "$title" "$detail"
+sleep 20
+exit 1

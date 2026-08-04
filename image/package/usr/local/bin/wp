@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+readonly real_wp=/usr/local/lib/msfixit-shopos/wp-cli.phar
+readonly vendor_dir=/usr/share/msfixit-shopos/vendor
+readonly bundled_wordpress=7.0.2
+
+if [ ! -x "$real_wp" ]; then
+    echo "Bundled WP-CLI is missing: $real_wp" >&2
+    exit 1
+fi
+
+args=("$@")
+command_index=-1
+for index in "${!args[@]}"; do
+    case "${args[$index]}" in
+        --path=*|--url=*|--user=*|--ssh=*|--http=*|--require=*|--exec=*|--context=*|--color|--no-color|--debug|--quiet|--allow-root)
+            ;;
+        *)
+            command_index=$index
+            break
+            ;;
+    esac
+done
+
+if (( command_index >= 0 )) && [ "${args[$command_index]}" = core ] \
+    && [ "${args[$((command_index + 1))]:-}" = download ]; then
+    path="$(pwd)"
+    locale=de_DE
+    version=latest
+    for argument in "${args[@]}"; do
+        case "$argument" in
+            --path=*) path="${argument#--path=}" ;;
+            --locale=*) locale="${argument#--locale=}" ;;
+            --version=*) version="${argument#--version=}" ;;
+        esac
+    done
+
+    if [ "$locale" = de_DE ] && { [ "$version" = latest ] || [ "$version" = "$bundled_wordpress" ]; }; then
+        archive="$vendor_dir/wordpress-${bundled_wordpress}-de_DE.zip"
+        [ -r "$archive" ] || {
+            echo "Bundled WordPress archive is missing: $archive" >&2
+            exit 1
+        }
+        temporary="$(mktemp -d)"
+        trap 'rm -rf "$temporary"' EXIT
+        unzip -q "$archive" -d "$temporary"
+        install -d -m 0755 "$path"
+        rsync -a "$temporary/wordpress/" "$path/"
+        echo "WordPress ${bundled_wordpress} (de_DE) installed from the ShopOS image."
+        exit 0
+    fi
+fi
+
+if (( command_index >= 0 )) && [ "${args[$command_index]}" = plugin ] \
+    && [ "${args[$((command_index + 1))]:-}" = install ]; then
+    plugin_index=$((command_index + 2))
+    case "${args[$plugin_index]:-}" in
+        woocommerce)
+            args[$plugin_index]="$vendor_dir/woocommerce-10.9.4.zip"
+            ;;
+        redis-cache)
+            args[$plugin_index]="$vendor_dir/redis-cache-2.8.0.zip"
+            ;;
+    esac
+fi
+
+if (( command_index >= 0 )) && [ "${args[$command_index]}" = theme ] \
+    && [ "${args[$((command_index + 1))]:-}" = install ]; then
+    theme_index=$((command_index + 2))
+    if [ "${args[$theme_index]:-}" = storefront ]; then
+        args[$theme_index]="$vendor_dir/storefront-4.6.2.zip"
+    fi
+fi
+
+exec "$real_wp" "${args[@]}"

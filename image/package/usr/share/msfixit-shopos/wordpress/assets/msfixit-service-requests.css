@@ -1,0 +1,172 @@
+.msfixit-service-form,
+.msfixit-service-status-form,
+.msfixit-service-status-card {
+  border: 1px solid #d9e2ec;
+  border-radius: 18px;
+  background: #fff;
+  box-shadow: 0 12px 30px rgba(16, 36, 63, 0.08);
+  padding: clamp(1rem, 3vw, 2rem);
+  margin: 1.5rem 0;
+}
+
+.msfixit-service-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.msfixit-service-form label,
+.msfixit-service-status-form label {
+  display: grid;
+  gap: 0.4rem;
+  color: #10243f;
+  font-weight: 700;
+}
+
+.msfixit-service-form input,
+.msfixit-service-form select,
+.msfixit-service-form textarea,
+.msfixit-service-status-form input {
+  width: 100%;
+  border: 1px solid #aebdca;
+  border-radius: 10px;
+  background: #fff;
+  color: #24364e;
+  padding: 0.75rem 0.85rem;
+  font: inherit;
+}
+
+.msfixit-service-form input:focus,
+.msfixit-service-form select:focus,
+.msfixit-service-form textarea:focus,
+.msfixit-service-status-form input:focus {
+  border-color: #24b8bd;
+  box-shadow: 0 0 0 3px rgba(36, 184, 189, 0.2);
+  outline: 0;
+}
+
+.msfixit-service-wide {
+  grid-column: 1 / -1;
+}
+
+.msfixit-service-form button,
+.msfixit-service-status-form button {
+  border: 0;
+  border-radius: 999px;
+  background: #24b8bd;
+  color: #fff;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 800;
+  padding: 0.8rem 1.25rem;
+}
+
+.msfixit-service-form button:hover,
+.msfixit-service-form button:focus-visible,
+.msfixit-service-status-form button:hover,
+.msfixit-service-status-form button:focus-visible {
+  background: #10243f;
+}
+
+.msfixit-service-warning,
+.msfixit-service-alert,
+.msfixit-service-public-note {
+  border-left: 5px solid #24b8bd;
+  border-radius: 8px;
+  background: #eefbfb;
+  color: #10243f;
+  margin: 1rem 0;
+  padding: 0.9rem 1rem;
+}
+
+.msfixit-service-alert-error {
+  border-left-color: #b42318;
+  background: #fff2f0;
+}
+
+.msfixit-service-alert-success {
+  border-left-color: #16803b;
+  background: #effaf2;
+}
+
+.msfixit-service-consent {
+  display: grid !important;
+  grid-template-columns: auto 1fr;
+  align-items: start;
+  gap: 0.65rem !important;
+  margin: 1rem 0;
+  font-weight: 400 !important;
+}
+
+.msfixit-service-consent input {
+  margin-top: 0.2rem;
+  width: auto;
+}
+
+.msfixit-service-honeypot {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  overflow: hidden !important;
+  clip: rect(1px, 1px, 1px, 1px) !important;
+  white-space: nowrap !important;
+}
+
+.msfixit-service-small {
+  color: #52677d;
+  font-size: 0.92rem;
+}
+
+.msfixit-service-status-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 1rem;
+}
+
+.msfixit-service-reference {
+  color: #52677d;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  overflow-wrap: anywhere;
+}
+
+.msfixit-service-status-card h2 {
+  margin-top: 0.25rem;
+}
+
+.msfixit-service-status-card dl {
+  display: grid;
+  gap: 0;
+  margin: 1.25rem 0;
+}
+
+.msfixit-service-status-card dl div {
+  display: grid;
+  grid-template-columns: minmax(8rem, 0.35fr) 1fr;
+  gap: 1rem;
+  border-top: 1px solid #e7edf2;
+  padding: 0.8rem 0;
+}
+
+.msfixit-service-status-card dt {
+  color: #52677d;
+  font-weight: 700;
+}
+
+.msfixit-service-status-card dd {
+  margin: 0;
+}
+
+@media (max-width: 760px) {
+  .msfixit-service-grid,
+  .msfixit-service-status-form {
+    grid-template-columns: 1fr;
+  }
+
+  .msfixit-service-status-card dl div {
+    grid-template-columns: 1fr;
+    gap: 0.2rem;
+  }
+}

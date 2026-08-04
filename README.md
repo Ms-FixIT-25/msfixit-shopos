@@ -1,18 +1,21 @@
 # Ms. FixIT ShopOS
 
-A minimal, reproducible Raspberry Pi appliance operating system for the Ms. FixIT WooCommerce shop.
+A reproducible, flash-ready Raspberry Pi appliance operating system for the Ms. FixIT WooCommerce shop.
 
 ## Current status
 
-ShopOS is a **flash-image prototype**. Version 0.9 defaults to a deliberately small Austrian pop-up pilot and contains:
+ShopOS 0.10 is a **flash-ready appliance OS image** for a deliberately small Austrian pop-up pilot. It contains:
 
 - Raspberry Pi 4 Model B targets for USB SSD and microSD
 - Raspberry Pi 5 targets for USB SSD, microSD and native NVMe
+- branded quiet Plymouth startup and guided first-boot display
+- pinned WordPress, WooCommerce, Redis Object Cache and Storefront payloads inside the image
 - Nginx, PHP-FPM, MariaDB and Redis without Docker or a desktop
 - automated WordPress, WooCommerce and Ms. FixIT branding
 - Austria-only sales and shipping while pilot mode is enabled
 - a maximum of 30 manually approved pilot products
 - searchable help center with cable adviser, FRITZ!Box/WLAN guidance and repair preparation
+- privacy-gated service requests with secret-link repair status
 - evidence-based FRITZ! and iFixit Pro programme profiles
 - guarded ALSO Austria SFTP price-list staging
 - licensed ALSO/1WorldSync descriptions, specifications, remote images and documents
@@ -30,7 +33,32 @@ ShopOS is a **flash-image prototype**. Version 0.9 defaults to a deliberately sm
 - automatic health checks and local backups
 - GitHub Actions image builds with checksums and releases
 
-The default release target is the **Raspberry Pi 4 Model B with USB SSD**. The image still requires first-boot validation on the intended Raspberry Pi, storage and printers before production use.
+The default release target is the **Raspberry Pi 4 Model B with USB SSD**. The complete image can be flashed and initialized without downloading the default web application stack during first boot. Physical validation on the intended Raspberry Pi, storage, display and printers remains required before production use.
+
+## Boot and first-start experience
+
+A normal start shows the Ms. FixIT ShopOS Plymouth splash instead of a stream of Linux boot messages. Quiet display parameters are added without replacing the Raspberry Pi root-device or hardware settings.
+
+On the first start only, `tty1` shows a branded setup screen with:
+
+- the current initialization step;
+- a progress bar;
+- hostname and detected LAN address;
+- an explicit ready or failure result;
+- the location of the generated credential file.
+
+ShopOS does not show passwords on screen. It reports the system as ready only after the base web stack and the complete branded shop setup have both succeeded. Later reboots skip the setup screen.
+
+The image includes these checked default payloads:
+
+```text
+WordPress             7.0.2 de_DE
+WooCommerce           10.9.4
+Redis Object Cache    2.8.0
+Storefront            4.6.2
+```
+
+See [`docs/BOOT_EXPERIENCE.md`](docs/BOOT_EXPERIENCE.md).
 
 ## Austria-only pop-up pilot
 
@@ -67,6 +95,21 @@ The help search is restricted to these managed pages. Search-result URLs are not
 The cable adviser narrows products by connector, intended use and length without treating connector shape as proof of performance or compatibility.
 
 FRITZ!Box/WLAN and repair pages use original Ms. FixIT content. Public third-party guides may be linked, but third-party guide text, photographs and logos are not copied by default.
+
+## Service requests and repair status
+
+ShopOS provisions:
+
+```text
+/service-anfrage/
+/service-status/
+```
+
+Customers can submit structured repair, diagnosis, setup, network, data-transfer, purchase-advice and order questions. Each request receives a reference and a random secret access key. Only a one-way hash of that key is stored; the public status view requires both values and does not expose contact data or the full fault description.
+
+The public form remains disabled after first boot. It becomes usable only after the `datenschutz` page is published and an administrator explicitly sets `msfixit_service_public_enabled=yes`. The form uses a nonce, honeypot, allowlists, input limits, rate limiting and mandatory consent. It does not accept uploads, passwords, PINs or payment-card data.
+
+See [`docs/SERVICE_REQUESTS.md`](docs/SERVICE_REQUESTS.md).
 
 ## Verified partner programmes
 
@@ -115,16 +158,16 @@ See:
 
 After first boot, `msfixit-brand-shop.service`:
 
-- installs and activates WooCommerce and Storefront idempotently
+- activates the bundled WooCommerce and Storefront packages idempotently
 - imports the embedded Ms. FixIT artwork and applies the brand colors
-- creates the homepage, service, contact, help and WooCommerce pages
+- creates the homepage, service, contact, help, service-request and WooCommerce pages
 - enables the Austria-only pilot shipping zone
 - initializes the article master, Office/Fulfillment, compliance and partner-profile databases
 - initializes ALSO commercial and licensed-content staging
-- installs WooCommerce, discovery, help and Austria pilot guards
+- installs WooCommerce, discovery, help, service-request and Austria pilot guards
 - starts lightweight timers for Office, compliance, printing and ALSO intake
 - creates legal-page placeholders without pretending they are reviewed texts
-- keeps public indexing disabled until deliberate approval
+- keeps public indexing and service-request intake disabled until deliberate approval
 
 Existing user-created pages are protected from automatic replacement. Payment providers, shipping rates, tax decisions, carrier credentials, legal texts, partner claims and supplier credentials are never invented by the appliance.
 
@@ -190,6 +233,7 @@ For Raspberry Pi 4B USB boot, the EEPROM bootloader must permit USB mass-storage
 ## Administration
 
 ```bash
+shopos-version
 sudo msfixit-status
 sudo msfixit-also status
 sudo msfixit-also-content status
@@ -203,6 +247,14 @@ sudo msfixit-health
 sudo msfixit-backup
 ```
 
+After the reviewed privacy page is published, service intake can be enabled explicitly:
+
+```bash
+sudo -u www-data env HOME=/tmp /usr/local/bin/wp \
+  --path=/srv/www/wordpress \
+  option update msfixit_service_public_enabled yes
+```
+
 ## Design boundaries
 
 - production credentials remain outside Git
@@ -211,6 +263,8 @@ sudo msfixit-backup
 - linked ALSO media remains remote-only unless a separate agreement is implemented
 - pilot products are never auto-published
 - pilot orders are never sent to ALSO automatically
+- service intake remains blocked without a published privacy page and explicit enablement
+- service requests create no automatic chargeable repair order
 - partner membership is not automatically described as certification
 - third-party logos require separate evidence of usage rights
 - compliance and tax decisions fail closed
@@ -226,5 +280,7 @@ sudo msfixit-backup
 - guarded pricing and supplier-routing rules
 - ready2order or another POS adapter
 - SAP/ERP and marketplace adapters
+- service appointment calendar and consented attachment exchange
+- reviewed service-record retention and anonymization workflow
 - external encrypted backups
 - A/B operating-system updates
