@@ -8,6 +8,10 @@ readonly marker=/data/.shopos-initialized
 readonly config_dir=/etc/msfixit-shopos
 readonly wordpress_dir=/srv/www/wordpress
 readonly data_dir=/data
+readonly vendor_helper=/usr/local/lib/msfixit-shopos/vendor-assets.sh
+
+# shellcheck source=/dev/null
+source "$vendor_helper"
 
 log() {
     printf '[%s] %s\n' "$(date --iso-8601=seconds)" "$*"
@@ -54,6 +58,27 @@ run_wp() {
     runuser -u www-data -- env HOME=/tmp /usr/local/bin/wp --path="$wordpress_dir" "$@"
 }
 
+install_bundled_wordpress() {
+    local archive temporary
+    archive="$(msfixit_vendor_wordpress_archive)"
+    temporary="$(mktemp -d)"
+
+    unzip -q "$archive" -d "$temporary"
+    test -s "$temporary/wordpress/wp-load.php"
+
+    find "$wordpress_dir" -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +
+    cp -a "$temporary/wordpress/." "$wordpress_dir/"
+    rm -rf "$temporary"
+}
+
+install_bundled_plugin() {
+    local slug="$1" archive="$2"
+    if ! run_wp plugin is-installed "$slug" >/dev/null 2>&1; then
+        run_wp plugin install "$archive"
+    fi
+    run_wp plugin activate "$slug"
+}
+
 if [ -e "$marker" ]; then
     log "ShopOS is already initialized."
     exit 0
@@ -69,7 +94,7 @@ SHOP_ADMIN_PASSWORD=""
 OS_ADMIN_PASSWORD=""
 CF_TUNNEL_TOKEN=""
 WORDPRESS_LOCALE="de_DE"
-WORDPRESS_VERSION="latest"
+WORDPRESS_VERSION=""
 
 boot_root=/boot
 [ -d /boot/firmware ] && boot_root=/boot/firmware
@@ -80,6 +105,24 @@ if [ ! -f "${boot_root}/shopos.env.example" ]; then
     install -m 0644 /usr/share/msfixit-shopos/shopos.env.example "${boot_root}/shopos.env.example"
 fi
 read_shopos_config "$config_file"
+
+log "Verifying bundled WordPress application assets."
+msfixit_vendor_verify
+bundled_wordpress_version="$(msfixit_vendor_wordpress_version)"
+bundled_wordpress_locale="$(msfixit_vendor_wordpress_locale)"
+test -n "$bundled_wordpress_version"
+test -n "$bundled_wordpress_locale"
+
+if [ -n "$WORDPRESS_VERSION" ] \
+    && [ "$WORDPRESS_VERSION" != "latest" ] \
+    && [ "$WORDPRESS_VERSION" != "$bundled_wordpress_version" ]; then
+    log "Requested WordPress ${WORDPRESS_VERSION} is not embedded; using verified bundled version ${bundled_wordpress_version}."
+fi
+if [ -n "$WORDPRESS_LOCALE" ] && [ "$WORDPRESS_LOCALE" != "$bundled_wordpress_locale" ]; then
+    log "Requested WordPress locale ${WORDPRESS_LOCALE} is not embedded; using ${bundled_wordpress_locale}."
+fi
+WORDPRESS_VERSION="$bundled_wordpress_version"
+WORDPRESS_LOCALE="$bundled_wordpress_locale"
 
 local_ip=""
 for _ in $(seq 1 60); do
@@ -200,14 +243,12 @@ fi
 systemctl enable redis-server.service
 systemctl start redis-server.service
 
-log "Installing WordPress and WooCommerce."
+log "Installing bundled WordPress and WooCommerce assets."
 chown -R www-data:www-data "$wordpress_dir" "$data_dir/wordpress"
 if [ ! -f "$wordpress_dir/wp-load.php" ]; then
-    if ! run_wp core download --locale="$WORDPRESS_LOCALE" --version="$WORDPRESS_VERSION"; then
-        log "Requested locale failed; retrying with en_US."
-        run_wp core download --locale=en_US --version="$WORDPRESS_VERSION"
-    fi
+    install_bundled_wordpress
 fi
+chown -R www-data:www-data "$wordpress_dir"
 
 rm -rf "$wordpress_dir/wp-content/uploads"
 ln -s "$data_dir/wordpress/uploads" "$wordpress_dir/wp-content/uploads"
@@ -240,8 +281,8 @@ if ! run_wp core is-installed >/dev/null 2>&1; then
         --skip-email
 fi
 
-run_wp plugin install woocommerce --activate
-run_wp plugin install redis-cache --activate
+install_bundled_plugin woocommerce "$(msfixit_vendor_woocommerce_archive)"
+install_bundled_plugin redis-cache "$(msfixit_vendor_redis_cache_archive)"
 run_wp redis enable >/dev/null 2>&1 || true
 run_wp option update blog_public 0
 run_wp rewrite structure '/%postname%/' --hard
