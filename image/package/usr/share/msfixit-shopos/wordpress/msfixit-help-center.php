@@ -238,7 +238,7 @@ add_shortcode('msfixit_cable_advisor', static function (): string {
         foreach ($notes as $note) {
             $html .= '<p>' . esc_html($note) . '</p>';
         }
-        $html .= '<p><a class="button" href="' . esc_url(add_query_arg('s', $searchTerm, home_url('/kabel-zubehoer/'))) . '">Passende Kabel im Shop suchen</a></p>'
+        $html .= '<p><a class="button" href="' . esc_url(add_query_arg('kabelsuche', $searchTerm, home_url('/kabel-zubehoer/'))) . '">Passende Kabel im Shop suchen</a></p>'
             . '<p>Bei Unsicherheit prüfe ich den Anschluss und die benötigte Leistung gerne vor dem Kauf.</p></section>';
     }
     return $html;
