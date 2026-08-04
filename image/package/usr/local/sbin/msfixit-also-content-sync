@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+umask 077
+
+readonly config=/etc/msfixit-shopos/also.env
+readonly data_root=/data/suppliers/also/content
+
+if [ "$(id -u)" -ne 0 ]; then
+    echo "Run this command with sudo." >&2
+    exit 1
+fi
+
+[ -r "$config" ] || {
+    echo "ALSO configuration is unavailable: $config" >&2
+    exit 1
+}
+
+# shellcheck disable=SC1090
+set -a
+source "$config"
+set +a
+
+case "${ALSO_CONTENT_ENABLED:-no}" in
+    1|yes|true|on|ja) ;;
+    *) echo "Licensed ALSO content synchronization is disabled."; exit 0 ;;
+esac
+
+: "${ALSO_SFTP_HOST:?ALSO_SFTP_HOST is required}"
+: "${ALSO_SFTP_USER:?ALSO_SFTP_USER is required}"
+: "${ALSO_CONTENT_SFTP_REMOTE_FILE:?ALSO_CONTENT_SFTP_REMOTE_FILE is required}"
+: "${ALSO_SFTP_KNOWN_HOSTS:?ALSO_SFTP_KNOWN_HOSTS is required}"
+
+[ -s "$ALSO_SFTP_KNOWN_HOSTS" ] || {
+    echo "Verified ALSO known_hosts file is missing or empty." >&2
+    exit 1
+}
+
+install -d -m 0750 "$data_root/incoming" "$data_root/archive"
+stamp="$(date +%Y%m%d-%H%M%S)"
+remote_name="$(basename "$ALSO_CONTENT_SFTP_REMOTE_FILE")"
+local_file="$data_root/incoming/${stamp}-${remote_name}"
+batch_file="$(mktemp)"
+trap 'rm -f "$batch_file"' EXIT
+printf 'get %s %s\n' "$ALSO_CONTENT_SFTP_REMOTE_FILE" "$local_file" > "$batch_file"
+chmod 0600 "$batch_file"
+
+port="${ALSO_SFTP_PORT:-22}"
+common=(
+    -P "$port"
+    -o StrictHostKeyChecking=yes
+    -o "UserKnownHostsFile=$ALSO_SFTP_KNOWN_HOSTS"
+    -b "$batch_file"
+)
+
+auth="${ALSO_SFTP_AUTH:-key}"
+if [ "$auth" = "password" ]; then
+    : "${ALSO_SFTP_PASSWORD_FILE:?ALSO_SFTP_PASSWORD_FILE is required for password authentication}"
+    [ -r "$ALSO_SFTP_PASSWORD_FILE" ] || {
+        echo "ALSO SFTP password file is unavailable." >&2
+        exit 1
+    }
+    export SSHPASS
+    SSHPASS="$(cat "$ALSO_SFTP_PASSWORD_FILE")"
+    sshpass -e sftp \
+        "${common[@]}" \
+        -o PreferredAuthentications=password \
+        -o PubkeyAuthentication=no \
+        "$ALSO_SFTP_USER@$ALSO_SFTP_HOST"
+    unset SSHPASS
+else
+    : "${ALSO_SFTP_IDENTITY_FILE:?ALSO_SFTP_IDENTITY_FILE is required for key authentication}"
+    [ -r "$ALSO_SFTP_IDENTITY_FILE" ] || {
+        echo "ALSO SFTP identity file is unavailable." >&2
+        exit 1
+    }
+    sftp \
+        "${common[@]}" \
+        -o BatchMode=yes \
+        -i "$ALSO_SFTP_IDENTITY_FILE" \
+        "$ALSO_SFTP_USER@$ALSO_SFTP_HOST"
+fi
+
+[ -s "$local_file" ] || {
+    echo "ALSO content download produced no file." >&2
+    exit 1
+}
+chmod 0600 "$local_file"
+
+/usr/local/sbin/msfixit-also-content import-file "$local_file"
+mv "$local_file" "$data_root/archive/$(basename "$local_file")"
+
+echo "Licensed ALSO content feed imported and archived."

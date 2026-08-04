@@ -1,0 +1,738 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+const ALSO_CONTENT_CONFIG = '/etc/msfixit-shopos/also.env';
+const ALSO_CONTENT_DB_CONFIG = '/etc/msfixit-shopos/catalog.env';
+const ALSO_CONTENT_DATA = '/data/suppliers/also/content';
+const ALSO_CONTENT_WP_PATH = '/srv/www/wordpress';
+const ALSO_CONTENT_APPLY_SCRIPT = '/usr/share/msfixit-shopos/wordpress/msfixit-also-content-apply.php';
+
+function content_fail(string $message, int $code = 1): never
+{
+    fwrite(STDERR, $message . PHP_EOL);
+    exit($code);
+}
+
+function content_usage(): never
+{
+    fwrite(STDERR, <<<'TEXT'
+Ms. FixIT licensed ALSO content connector
+
+Commands:
+  msfixit-also-content status
+  msfixit-also-content contract PACKAGE ACTOR [NOTE]
+  msfixit-also-content sync
+  msfixit-also-content import-file FILE [dry-run]
+  msfixit-also-content list [STATUS] [LIMIT]
+  msfixit-also-content show SUPPLIER_SKU
+  msfixit-also-content approve SUPPLIER_SKU ACTOR
+  msfixit-also-content reject SUPPLIER_SKU REASON ACTOR
+  msfixit-also-content apply SUPPLIER_SKU
+
+PACKAGE is one of: standard, extended, bmecat.
+Content is never published automatically and linked media is not cached locally.
+TEXT
+    );
+    exit(2);
+}
+
+function content_env(string $path): array
+{
+    if (!is_readable($path)) {
+        content_fail("Configuration is unavailable: {$path}");
+    }
+    $settings = [];
+    foreach (file($path, FILE_IGNORE_NEW_LINES) ?: [] as $line) {
+        $line = trim($line);
+        if ($line === '' || str_starts_with($line, '#') || !str_contains($line, '=')) {
+            continue;
+        }
+        [$key, $value] = explode('=', $line, 2);
+        $settings[trim($key)] = trim($value, " \t\n\r\0\x0B\"'");
+    }
+    return $settings;
+}
+
+function content_bool(mixed $value): bool
+{
+    return in_array(strtolower(trim((string) $value)), ['1', 'yes', 'true', 'on', 'ja'], true);
+}
+
+function content_uuid(): string
+{
+    $bytes = random_bytes(16);
+    $bytes[6] = chr((ord($bytes[6]) & 0x0f) | 0x40);
+    $bytes[8] = chr((ord($bytes[8]) & 0x3f) | 0x80);
+    $hex = bin2hex($bytes);
+    return sprintf('%s-%s-%s-%s-%s',
+        substr($hex, 0, 8), substr($hex, 8, 4), substr($hex, 12, 4),
+        substr($hex, 16, 4), substr($hex, 20, 12)
+    );
+}
+
+function content_db(): PDO
+{
+    static $pdo = null;
+    if ($pdo instanceof PDO) {
+        return $pdo;
+    }
+    $env = content_env(ALSO_CONTENT_DB_CONFIG);
+    foreach (['CATALOG_DB_HOST', 'CATALOG_DB_PORT', 'CATALOG_DB_NAME', 'CATALOG_DB_USER', 'CATALOG_DB_PASSWORD'] as $key) {
+        if (empty($env[$key])) {
+            content_fail("Missing catalog database setting: {$key}");
+        }
+    }
+    $pdo = new PDO(
+        sprintf('mysql:host=%s;port=%s;dbname=%s;charset=utf8mb4',
+            $env['CATALOG_DB_HOST'], $env['CATALOG_DB_PORT'], $env['CATALOG_DB_NAME']),
+        $env['CATALOG_DB_USER'],
+        $env['CATALOG_DB_PASSWORD'],
+        [
+            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+            PDO::ATTR_EMULATE_PREPARES => false,
+        ]
+    );
+    return $pdo;
+}
+
+function content_json(mixed $value): string
+{
+    return json_encode($value, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+}
+
+function content_output(mixed $value): void
+{
+    echo json_encode($value, JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . PHP_EOL;
+}
+
+function content_delimiter(string $setting, string $sample): string
+{
+    return match (strtolower(trim($setting))) {
+        'semicolon', ';' => ';',
+        'comma', ',' => ',',
+        'tab', '\\t' => "\t",
+        'pipe', '|' => '|',
+        default => (function () use ($sample): string {
+            $candidates = ["\t", ';', ',', '|'];
+            usort($candidates, static fn(string $a, string $b): int => substr_count($sample, $b) <=> substr_count($sample, $a));
+            return $candidates[0];
+        })(),
+    };
+}
+
+function content_value(array $row, array $headers, array $config, string $key): string
+{
+    $header = trim((string) ($config[$key] ?? ''));
+    if ($header === '') {
+        return '';
+    }
+    $index = array_search($header, $headers, true);
+    return $index === false ? '' : trim((string) ($row[(int) $index] ?? ''));
+}
+
+function content_list(string $value, string $separator = '|'): array
+{
+    $value = trim($value);
+    if ($value === '') {
+        return [];
+    }
+    if (str_starts_with($value, '[')) {
+        try {
+            $decoded = json_decode($value, true, 512, JSON_THROW_ON_ERROR);
+            if (is_array($decoded)) {
+                return array_values(array_unique(array_filter(array_map(
+                    static fn(mixed $item): string => trim(is_scalar($item) ? (string) $item : ''),
+                    $decoded
+                ))));
+            }
+        } catch (Throwable) {
+        }
+    }
+    return array_values(array_unique(array_filter(array_map('trim', explode($separator, $value)))));
+}
+
+function content_json_or_list(string $value, string $separator = '|'): array
+{
+    $value = trim($value);
+    if ($value === '') {
+        return [];
+    }
+    if (str_starts_with($value, '{') || str_starts_with($value, '[')) {
+        try {
+            $decoded = json_decode($value, true, 512, JSON_THROW_ON_ERROR);
+            return is_array($decoded) ? $decoded : [];
+        } catch (Throwable) {
+        }
+    }
+    return content_list($value, $separator);
+}
+
+function content_https_urls(array $values): array
+{
+    $urls = [];
+    foreach ($values as $value) {
+        $url = trim((string) $value);
+        if ($url === '') {
+            continue;
+        }
+        if (!filter_var($url, FILTER_VALIDATE_URL) || !str_starts_with(strtolower($url), 'https://')) {
+            throw new RuntimeException("Content asset is not a valid HTTPS URL: {$url}");
+        }
+        $urls[] = $url;
+    }
+    return array_values(array_unique($urls));
+}
+
+function content_profile(PDO $pdo, string $supplier): array
+{
+    $statement = $pdo->prepare('SELECT * FROM supplier_content_profiles WHERE supplier_code=?');
+    $statement->execute([$supplier]);
+    $profile = $statement->fetch();
+    if (!$profile) {
+        throw new RuntimeException("Content profile is missing for supplier {$supplier}");
+    }
+    return $profile;
+}
+
+function content_item(PDO $pdo, string $supplier, string $sku): array
+{
+    $statement = $pdo->prepare(
+        'SELECT c.*,f.woocommerce_product_id,f.linked_product_id,f.product_name
+           FROM supplier_content_items c
+           LEFT JOIN supplier_feed_items f ON f.id=c.feed_item_id
+          WHERE c.supplier_code=? AND c.supplier_sku=?'
+    );
+    $statement->execute([$supplier, trim($sku)]);
+    $item = $statement->fetch();
+    if (!$item) {
+        throw new RuntimeException("Unknown ALSO content SKU: {$sku}");
+    }
+    return $item;
+}
+
+function content_record_change(PDO $pdo, int $itemId, string $runId, string $field, mixed $old, mixed $new): void
+{
+    $statement = $pdo->prepare(
+        'INSERT INTO supplier_content_changes
+         (content_item_id,import_run_id,field_name,old_value,new_value,requires_review)
+         VALUES (?,?,?,?,?,1)'
+    );
+    $statement->execute([
+        $itemId,
+        $runId,
+        $field,
+        $old === null ? null : (is_string($old) ? $old : content_json($old)),
+        $new === null ? null : (is_string($new) ? $new : content_json($new)),
+    ]);
+}
+
+function content_import(string $path, bool $dryRun = false): array
+{
+    if (!is_file($path) || !is_readable($path)) {
+        throw new RuntimeException("Content feed is not readable: {$path}");
+    }
+    $config = content_env(ALSO_CONTENT_CONFIG);
+    $supplier = trim((string) ($config['ALSO_SUPPLIER_CODE'] ?? 'also-at')) ?: 'also-at';
+    $package = strtolower(trim((string) ($config['ALSO_CONTENT_PACKAGE'] ?? 'none')));
+    $language = trim((string) ($config['ALSO_CONTENT_LANGUAGE'] ?? 'de-AT')) ?: 'de-AT';
+    if (!in_array($package, ['standard', 'extended', 'bmecat'], true)) {
+        throw new RuntimeException('ALSO_CONTENT_PACKAGE must be standard, extended or bmecat before importing content');
+    }
+    $hash = hash_file('sha256', $path);
+    if ($hash === false) {
+        throw new RuntimeException('Unable to hash content feed');
+    }
+
+    $raw = file_get_contents($path);
+    if ($raw === false) {
+        throw new RuntimeException('Unable to read content feed');
+    }
+    $encoding = trim((string) ($config['ALSO_CONTENT_FEED_ENCODING'] ?? 'UTF-8')) ?: 'UTF-8';
+    if (strcasecmp($encoding, 'UTF-8') !== 0) {
+        $converted = iconv($encoding, 'UTF-8//TRANSLIT', $raw);
+        if ($converted === false) {
+            throw new RuntimeException("Unable to convert content encoding {$encoding}");
+        }
+        $raw = $converted;
+    }
+    $raw = preg_replace('/^\xEF\xBB\xBF/', '', $raw) ?? $raw;
+    $lines = preg_split('/\R/', $raw) ?: [];
+    $first = array_shift($lines);
+    if ($first === null || trim($first) === '') {
+        throw new RuntimeException('Content feed is empty');
+    }
+    $delimiter = content_delimiter((string) ($config['ALSO_CONTENT_FEED_DELIMITER'] ?? 'auto'), $first);
+    $headers = array_map('trim', str_getcsv($first, $delimiter));
+    $skuHeader = trim((string) ($config['ALSO_CONTENT_FIELD_SUPPLIER_SKU'] ?? 'SupplierSKU'));
+    if ($skuHeader === '' || array_search($skuHeader, $headers, true) === false) {
+        throw new RuntimeException("Required content header is missing: {$skuHeader}");
+    }
+    $separator = (string) ($config['ALSO_CONTENT_LIST_SEPARATOR'] ?? '|');
+    $pdo = content_db();
+    $profile = content_profile($pdo, $supplier);
+
+    $duplicate = $pdo->prepare(
+        "SELECT id,run_status FROM supplier_content_import_runs
+          WHERE supplier_code=? AND source_sha256=? LIMIT 1"
+    );
+    $duplicate->execute([$supplier, $hash]);
+    $prior = $duplicate->fetch();
+    if ($prior && $prior['run_status'] === 'completed') {
+        return ['status' => 'duplicate', 'run_id' => $prior['id'], 'sha256' => $hash];
+    }
+
+    $runId = content_uuid();
+    if (!$dryRun) {
+        $statement = $pdo->prepare(
+            'INSERT INTO supplier_content_import_runs
+             (id,supplier_code,source_name,source_sha256,content_package,language_code)
+             VALUES (?,?,?,?,?,?)'
+        );
+        $statement->execute([$runId, $supplier, basename($path), $hash, $package, $language]);
+    }
+
+    $stats = ['total' => 0, 'accepted' => 0, 'quarantined' => 0, 'updated' => 0, 'new' => 0];
+    $maxRows = max(1, (int) ($config['ALSO_CONTENT_MAX_ROWS_PER_IMPORT'] ?? 100000));
+
+    try {
+        foreach ($lines as $line) {
+            if (trim($line) === '') {
+                continue;
+            }
+            $stats['total']++;
+            if ($stats['total'] > $maxRows) {
+                throw new RuntimeException("Content feed exceeds configured row limit of {$maxRows}");
+            }
+            $row = str_getcsv($line, $delimiter);
+            $sku = content_value($row, $headers, $config, 'ALSO_CONTENT_FIELD_SUPPLIER_SKU');
+            $standard = content_value($row, $headers, $config, 'ALSO_CONTENT_FIELD_STANDARD_DESCRIPTION');
+            $marketing = content_value($row, $headers, $config, 'ALSO_CONTENT_FIELD_MARKETING_DESCRIPTION');
+            $sellingPoints = content_json_or_list(content_value($row, $headers, $config, 'ALSO_CONTENT_FIELD_SELLING_POINTS'), $separator);
+            $features = content_json_or_list(content_value($row, $headers, $config, 'ALSO_CONTENT_FIELD_FEATURES'), $separator);
+            $specifications = content_json_or_list(content_value($row, $headers, $config, 'ALSO_CONTENT_FIELD_SPECIFICATIONS'), $separator);
+            $images = content_https_urls(content_list(content_value($row, $headers, $config, 'ALSO_CONTENT_FIELD_IMAGE_URLS'), $separator));
+            $documents = content_https_urls(content_list(content_value($row, $headers, $config, 'ALSO_CONTENT_FIELD_DOCUMENT_URLS'), $separator));
+            $datasheet = trim(content_value($row, $headers, $config, 'ALSO_CONTENT_FIELD_DATASHEET_URL'));
+            if ($datasheet !== '') {
+                $documents = array_values(array_unique(array_merge($documents, content_https_urls([$datasheet]))));
+            }
+            $accessories = content_list(content_value($row, $headers, $config, 'ALSO_CONTENT_FIELD_ACCESSORY_SKUS'), $separator);
+
+            $reason = null;
+            if ($sku === '') {
+                $reason = 'missing_supplier_sku';
+            } elseif ($standard === '' && $marketing === '' && $images === [] && $documents === [] && $specifications === []) {
+                $reason = 'empty_content_record';
+            }
+            if ($reason !== null) {
+                $stats['quarantined']++;
+                continue;
+            }
+            $stats['accepted']++;
+            if ($dryRun) {
+                continue;
+            }
+
+            $source = [
+                'standard_description' => $standard,
+                'marketing_description' => $marketing,
+                'selling_points' => $sellingPoints,
+                'features' => $features,
+                'specifications' => $specifications,
+                'images' => $images,
+                'documents' => $documents,
+                'accessories' => $accessories,
+            ];
+            $sourceHash = hash('sha256', content_json($source));
+            $pdo->beginTransaction();
+            $feed = $pdo->prepare('SELECT id FROM supplier_feed_items WHERE supplier_code=? AND supplier_sku=?');
+            $feed->execute([$supplier, $sku]);
+            $feedItemId = $feed->fetchColumn();
+
+            $select = $pdo->prepare(
+                'SELECT * FROM supplier_content_items
+                  WHERE supplier_code=? AND supplier_sku=? AND language_code=? FOR UPDATE'
+            );
+            $select->execute([$supplier, $sku, $language]);
+            $existing = $select->fetch();
+            if (!$existing) {
+                $insert = $pdo->prepare(
+                    'INSERT INTO supplier_content_items
+                     (supplier_code,supplier_sku,feed_item_id,content_package,language_code,
+                      standard_description,marketing_description,selling_points_json,
+                      features_json,specifications_json,source_sha256,review_status)
+                     VALUES (?,?,?,?,?,?,?,?,?,?,?,?)'
+                );
+                $insert->execute([
+                    $supplier, $sku, $feedItemId ?: null, $package, $language,
+                    $standard ?: null, $marketing ?: null,
+                    content_json($sellingPoints), content_json($features), content_json($specifications),
+                    $sourceHash, 'pending',
+                ]);
+                $itemId = (int) $pdo->lastInsertId();
+                $stats['new']++;
+            } else {
+                $itemId = (int) $existing['id'];
+                $fields = [
+                    'content_package' => $package,
+                    'standard_description' => $standard ?: null,
+                    'marketing_description' => $marketing ?: null,
+                    'selling_points_json' => content_json($sellingPoints),
+                    'features_json' => content_json($features),
+                    'specifications_json' => content_json($specifications),
+                ];
+                $changed = false;
+                foreach ($fields as $field => $newValue) {
+                    $oldValue = $existing[$field] ?? null;
+                    if ((string) $oldValue !== (string) $newValue) {
+                        content_record_change($pdo, $itemId, $runId, $field, $oldValue, $newValue);
+                        $changed = true;
+                    }
+                }
+                $update = $pdo->prepare(
+                    'UPDATE supplier_content_items
+                        SET feed_item_id=?,content_package=?,standard_description=?,marketing_description=?,
+                            selling_points_json=?,features_json=?,specifications_json=?,source_sha256=?,
+                            review_status=IF(source_sha256<>?,"pending",review_status),
+                            review_reason=IF(source_sha256<>?,"supplier_content_changed",review_reason),
+                            last_seen_at=CURRENT_TIMESTAMP
+                      WHERE id=?'
+                );
+                $update->execute([
+                    $feedItemId ?: null, $package, $standard ?: null, $marketing ?: null,
+                    content_json($sellingPoints), content_json($features), content_json($specifications),
+                    $sourceHash, $sourceHash, $sourceHash, $itemId,
+                ]);
+                if ($changed) {
+                    $stats['updated']++;
+                }
+            }
+
+            $assetUpsert = $pdo->prepare(
+                'INSERT INTO supplier_content_assets
+                 (content_item_id,asset_type,asset_role,display_order,source_url,language_code)
+                 VALUES (?,?,?,?,?,?)
+                 ON DUPLICATE KEY UPDATE last_seen_at=CURRENT_TIMESTAMP'
+            );
+            foreach ($images as $index => $url) {
+                $assetUpsert->execute([$itemId, 'image', $index === 0 ? 'primary' : 'gallery', $index, $url, $language]);
+            }
+            foreach ($documents as $index => $url) {
+                $role = $url === $datasheet ? 'datasheet' : 'manufacturer_document';
+                $assetUpsert->execute([$itemId, 'document', $role, $index, $url, $language]);
+            }
+
+            $relationUpsert = $pdo->prepare(
+                'INSERT INTO supplier_content_relations
+                 (supplier_code,source_supplier_sku,target_supplier_sku,relation_type)
+                 VALUES (?,?,?,?)
+                 ON DUPLICATE KEY UPDATE active=1,last_seen_at=CURRENT_TIMESTAMP'
+            );
+            foreach ($accessories as $accessorySku) {
+                if ($accessorySku !== $sku) {
+                    $relationUpsert->execute([$supplier, $sku, $accessorySku, 'accessory']);
+                }
+            }
+            $pdo->commit();
+        }
+
+        if (!$dryRun) {
+            $finish = $pdo->prepare(
+                'UPDATE supplier_content_import_runs
+                    SET run_status="completed",rows_total=?,rows_accepted=?,rows_quarantined=?,
+                        rows_updated=?,rows_new=?,finished_at=CURRENT_TIMESTAMP
+                  WHERE id=?'
+            );
+            $finish->execute([
+                $stats['total'], $stats['accepted'], $stats['quarantined'],
+                $stats['updated'], $stats['new'], $runId,
+            ]);
+        }
+    } catch (Throwable $exception) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        if (!$dryRun) {
+            $fail = $pdo->prepare(
+                'UPDATE supplier_content_import_runs
+                    SET run_status="failed",error_json=?,finished_at=CURRENT_TIMESTAMP WHERE id=?'
+            );
+            $fail->execute([content_json(['message' => $exception->getMessage()]), $runId]);
+        }
+        throw $exception;
+    }
+
+    return [
+        'status' => $dryRun ? 'dry_run' : 'completed',
+        'run_id' => $runId,
+        'sha256' => $hash,
+        'package' => $package,
+        'contract_status' => $profile['contract_status'],
+        'statistics' => $stats,
+    ];
+}
+
+function content_sync(): array
+{
+    $config = content_env(ALSO_CONTENT_CONFIG);
+    if (!content_bool($config['ALSO_CONTENT_ENABLED'] ?? 'no')) {
+        return ['status' => 'disabled'];
+    }
+    $remote = trim((string) ($config['ALSO_CONTENT_SFTP_REMOTE_FILE'] ?? ''));
+    if ($remote === '') {
+        throw new RuntimeException('ALSO_CONTENT_SFTP_REMOTE_FILE is empty');
+    }
+    $host = trim((string) ($config['ALSO_SFTP_HOST'] ?? ''));
+    $user = trim((string) ($config['ALSO_SFTP_USER'] ?? ''));
+    $port = max(1, (int) ($config['ALSO_SFTP_PORT'] ?? 22));
+    $knownHosts = trim((string) ($config['ALSO_SFTP_KNOWN_HOSTS'] ?? ''));
+    $identity = trim((string) ($config['ALSO_SFTP_IDENTITY_FILE'] ?? ''));
+    if ($host === '' || $user === '' || $knownHosts === '' || !is_readable($knownHosts)) {
+        throw new RuntimeException('ALSO SFTP host, user and verified known_hosts are required');
+    }
+
+    if (!is_dir(ALSO_CONTENT_DATA . '/incoming') && !mkdir(ALSO_CONTENT_DATA . '/incoming', 0700, true) && !is_dir(ALSO_CONTENT_DATA . '/incoming')) {
+        throw new RuntimeException('Unable to create content incoming directory');
+    }
+    $local = ALSO_CONTENT_DATA . '/incoming/' . date('Ymd-His') . '-' . basename($remote);
+    $batch = tempnam('/tmp', 'also-content-sftp-');
+    if ($batch === false) {
+        throw new RuntimeException('Unable to create SFTP batch file');
+    }
+    file_put_contents($batch, 'get ' . str_replace(["\r", "\n"], '', $remote) . ' ' . $local . PHP_EOL);
+    chmod($batch, 0600);
+
+    $command = [
+        '/usr/bin/sftp', '-P', (string) $port,
+        '-o', 'BatchMode=yes',
+        '-o', 'StrictHostKeyChecking=yes',
+        '-o', 'UserKnownHostsFile=' . $knownHosts,
+    ];
+    if ($identity !== '') {
+        $command[] = '-i';
+        $command[] = $identity;
+    }
+    $command[] = '-b';
+    $command[] = $batch;
+    $command[] = $user . '@' . $host;
+
+    $escaped = implode(' ', array_map('escapeshellarg', $command));
+    exec($escaped . ' 2>&1', $output, $exitCode);
+    @unlink($batch);
+    if ($exitCode !== 0 || !is_file($local)) {
+        @unlink($local);
+        throw new RuntimeException('ALSO content SFTP download failed: ' . implode("\n", $output));
+    }
+    chmod($local, 0600);
+    return content_import($local, false);
+}
+
+function content_apply(array $item, PDO $pdo): int
+{
+    if ($item['review_status'] !== 'approved') {
+        throw new RuntimeException('ALSO content must be approved before it can be applied');
+    }
+    if (empty($item['woocommerce_product_id'])) {
+        throw new RuntimeException('The supplier item has no WooCommerce draft yet');
+    }
+    $assets = $pdo->prepare(
+        'SELECT asset_type,asset_role,display_order,source_url,language_code
+           FROM supplier_content_assets
+          WHERE content_item_id=? AND approval_status="approved"
+          ORDER BY asset_type,display_order,id'
+    );
+    $assets->execute([(int) $item['id']]);
+    $relations = $pdo->prepare(
+        'SELECT target_supplier_sku,relation_type
+           FROM supplier_content_relations
+          WHERE supplier_code=? AND source_supplier_sku=? AND active=1
+          ORDER BY relation_type,target_supplier_sku'
+    );
+    $relations->execute([$item['supplier_code'], $item['supplier_sku']]);
+    $profile = content_profile($pdo, $item['supplier_code']);
+
+    $payload = [
+        'woocommerce_product_id' => (int) $item['woocommerce_product_id'],
+        'supplier_sku' => $item['supplier_sku'],
+        'content_package' => $item['content_package'],
+        'language_code' => $item['language_code'],
+        'standard_description' => $item['standard_description'],
+        'marketing_description' => $item['marketing_description'],
+        'selling_points' => json_decode((string) $item['selling_points_json'], true) ?: [],
+        'features' => json_decode((string) $item['features_json'], true) ?: [],
+        'specifications' => json_decode((string) $item['specifications_json'], true) ?: [],
+        'source_sha256' => $item['source_sha256'],
+        'assets' => $assets->fetchAll(),
+        'relations' => $relations->fetchAll(),
+        'media_mode' => $profile['media_mode'],
+        'allow_remote_images' => (bool) $profile['allow_remote_images'],
+        'allow_remote_documents' => (bool) $profile['allow_remote_documents'],
+    ];
+    $temp = tempnam('/tmp', 'also-content-');
+    if ($temp === false) {
+        throw new RuntimeException('Unable to create temporary content payload');
+    }
+    file_put_contents($temp, content_json($payload));
+    chmod($temp, 0640);
+    chown($temp, 'www-data');
+    $command = sprintf(
+        'runuser -u www-data -- env HOME=/tmp MSFIXIT_ALSO_CONTENT_PAYLOAD_FILE=%s /usr/local/bin/wp --path=%s eval-file %s',
+        escapeshellarg($temp), escapeshellarg(ALSO_CONTENT_WP_PATH), escapeshellarg(ALSO_CONTENT_APPLY_SCRIPT)
+    );
+    exec($command . ' 2>&1', $output, $exitCode);
+    @unlink($temp);
+    if ($exitCode !== 0) {
+        throw new RuntimeException('WooCommerce content application failed: ' . implode("\n", $output));
+    }
+    $productId = (int) trim((string) end($output));
+    if ($productId < 1) {
+        throw new RuntimeException('WooCommerce content application returned no product ID');
+    }
+    return $productId;
+}
+
+$arguments = $_SERVER['argv'];
+array_shift($arguments);
+$command = array_shift($arguments) ?? '';
+
+try {
+    $pdo = content_db();
+    $config = content_env(ALSO_CONTENT_CONFIG);
+    $supplier = trim((string) ($config['ALSO_SUPPLIER_CODE'] ?? 'also-at')) ?: 'also-at';
+
+    switch ($command) {
+        case 'status':
+            $profile = content_profile($pdo, $supplier);
+            $counts = $pdo->prepare(
+                'SELECT review_status,COUNT(*) AS count
+                   FROM supplier_content_items WHERE supplier_code=? GROUP BY review_status'
+            );
+            $counts->execute([$supplier]);
+            content_output([
+                'enabled' => content_bool($config['ALSO_CONTENT_ENABLED'] ?? 'no'),
+                'profile' => $profile,
+                'content_items' => $counts->fetchAll(),
+                'remote_only' => true,
+            ]);
+            break;
+
+        case 'contract':
+            $package = strtolower(trim((string) ($arguments[0] ?? '')));
+            $actor = trim((string) ($arguments[1] ?? ''));
+            $note = trim((string) ($arguments[2] ?? ''));
+            if (!in_array($package, ['standard', 'extended', 'bmecat'], true) || $actor === '') {
+                content_usage();
+            }
+            $statement = $pdo->prepare(
+                'UPDATE supplier_content_profiles
+                    SET content_package=?,contract_status="verified",media_mode="remote_only",
+                        allow_text_import=1,allow_remote_images=1,allow_remote_documents=1,
+                        allow_local_image_cache=0,allow_local_document_cache=0,
+                        verified_at=CURRENT_TIMESTAMP,verified_by=?,notes=?
+                  WHERE supplier_code=?'
+            );
+            $statement->execute([$package, $actor, $note ?: null, $supplier]);
+            echo "Licensed ALSO {$package} content profile verified for remote-only use." . PHP_EOL;
+            break;
+
+        case 'sync':
+            content_output(content_sync());
+            break;
+
+        case 'import-file':
+            $path = $arguments[0] ?? '';
+            if ($path === '') {
+                content_usage();
+            }
+            content_output(content_import($path, strtolower((string) ($arguments[1] ?? '')) === 'dry-run'));
+            break;
+
+        case 'list':
+            $status = trim((string) ($arguments[0] ?? ''));
+            $limit = max(1, min(1000, (int) ($arguments[1] ?? 100)));
+            $sql = 'SELECT supplier_sku,content_package,language_code,review_status,last_seen_at,review_reason
+                      FROM supplier_content_items WHERE supplier_code=?';
+            $parameters = [$supplier];
+            if ($status !== '') {
+                $sql .= ' AND review_status=?';
+                $parameters[] = $status;
+            }
+            $sql .= ' ORDER BY last_seen_at DESC LIMIT ' . $limit;
+            $statement = $pdo->prepare($sql);
+            $statement->execute($parameters);
+            content_output($statement->fetchAll());
+            break;
+
+        case 'show':
+            $sku = $arguments[0] ?? '';
+            if ($sku === '') {
+                content_usage();
+            }
+            $item = content_item($pdo, $supplier, $sku);
+            $assets = $pdo->prepare('SELECT * FROM supplier_content_assets WHERE content_item_id=? ORDER BY asset_type,display_order,id');
+            $assets->execute([(int) $item['id']]);
+            $relations = $pdo->prepare('SELECT * FROM supplier_content_relations WHERE supplier_code=? AND source_supplier_sku=? ORDER BY relation_type,target_supplier_sku');
+            $relations->execute([$supplier, $sku]);
+            $item['assets'] = $assets->fetchAll();
+            $item['relations'] = $relations->fetchAll();
+            content_output($item);
+            break;
+
+        case 'approve':
+            $sku = $arguments[0] ?? '';
+            $actor = trim((string) ($arguments[1] ?? ''));
+            if ($sku === '' || $actor === '') {
+                content_usage();
+            }
+            $item = content_item($pdo, $supplier, $sku);
+            $pdo->beginTransaction();
+            $update = $pdo->prepare(
+                'UPDATE supplier_content_items
+                    SET review_status="approved",review_reason=NULL,reviewed_at=CURRENT_TIMESTAMP,reviewed_by=?
+                  WHERE id=?'
+            );
+            $update->execute([$actor, (int) $item['id']]);
+            $assetUpdate = $pdo->prepare(
+                'UPDATE supplier_content_assets SET approval_status="approved" WHERE content_item_id=?'
+            );
+            $assetUpdate->execute([(int) $item['id']]);
+            $pdo->commit();
+            echo "Licensed content approved for {$sku}." . PHP_EOL;
+            break;
+
+        case 'reject':
+            $sku = $arguments[0] ?? '';
+            $reason = trim((string) ($arguments[1] ?? ''));
+            $actor = trim((string) ($arguments[2] ?? ''));
+            if ($sku === '' || $reason === '' || $actor === '') {
+                content_usage();
+            }
+            $item = content_item($pdo, $supplier, $sku);
+            $statement = $pdo->prepare(
+                'UPDATE supplier_content_items
+                    SET review_status="rejected",review_reason=?,reviewed_at=CURRENT_TIMESTAMP,reviewed_by=?
+                  WHERE id=?'
+            );
+            $statement->execute([$reason, $actor, (int) $item['id']]);
+            echo "Licensed content rejected for {$sku}." . PHP_EOL;
+            break;
+
+        case 'apply':
+            $sku = $arguments[0] ?? '';
+            if ($sku === '') {
+                content_usage();
+            }
+            $item = content_item($pdo, $supplier, $sku);
+            $productId = content_apply($item, $pdo);
+            echo "Licensed content applied to WooCommerce draft {$productId}." . PHP_EOL;
+            break;
+
+        default:
+            content_usage();
+    }
+} catch (Throwable $exception) {
+    content_fail('ALSO content error: ' . $exception->getMessage());
+}

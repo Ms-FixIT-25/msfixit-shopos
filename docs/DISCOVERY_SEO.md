@@ -1,6 +1,6 @@
 # Cable discovery, SEO and Google product feed
 
-ShopOS 0.7 introduces a deliberately small discovery layer for the Austria-only cable pilot. It does not promise a ranking position. It makes the storefront technically understandable, crawlable, searchable and consistent so search engines and customers receive the same product facts.
+ShopOS provides a deliberately small discovery layer for the Austria-only cable pilot. It does not promise a ranking position. It makes the storefront technically understandable, crawlable, searchable and consistent so search engines and customers receive the same product facts.
 
 ## Search and filter experience
 
@@ -38,10 +38,11 @@ A cable cannot remain published unless all required checks pass:
 - Austria pilot approval;
 - product compliance approval;
 - discovery and SEO approval;
-- verified main image;
+- verified local or licensed remote main image;
 - useful title;
 - sufficiently detailed short and long descriptions;
-- manual editorial confirmation instead of an unchecked supplier text;
+- manual factual and editorial confirmation;
+- verified content licence when supplier content is used;
 - brand;
 - GTIN/EAN or manufacturer part number;
 - cable type;
@@ -60,9 +61,24 @@ sudo msfixit-discovery audit
 sudo msfixit-discovery audit 123
 ```
 
+## ALSO commercial and content feeds
+
+The commercial ALSO feed supplies price, stock and core identity data. The separately licensed ALSO/1WorldSync content feed can supply:
+
+- standard and marketing descriptions;
+- selling points and product characteristics;
+- multiple high-resolution product-image links;
+- manufacturer PDF and data-sheet links;
+- extended specifications;
+- accessory SKU relations.
+
+ShopOS stores linked media as remote-only virtual WordPress attachments. WooCommerce can therefore display a main image and gallery without downloading the linked image files to the appliance. The same approved main-image URL is used in structured data and the Merchant feed.
+
+See `docs/ALSO_CONTENT.md` for contract modes, remote-media handling and import commands.
+
 ## ALSO draft suggestions
 
-When an approved ALSO staging item creates a WooCommerce draft, ShopOS may suggest obvious values from the supplier title and description, for example:
+When an approved ALSO staging item creates a WooCommerce draft, ShopOS may suggest obvious values from the supplier title, descriptions and structured content, for example:
 
 - HDMI 2.1;
 - 2 m;
@@ -71,7 +87,7 @@ When an approved ALSO staging item creates a WooCommerce draft, ShopOS may sugge
 - Cat 6a / RJ45;
 - 60 W charging.
 
-Suggestions remain unapproved. They must be checked against the manufacturer data before the product receives discovery and compliance approval.
+Suggestions remain unapproved. They must be checked against the supplied manufacturer data before the product receives discovery and compliance approval.
 
 ## Structured data
 
@@ -81,10 +97,11 @@ For approved cable products ShopOS enriches WooCommerce product structured data 
 - valid-length GTIN;
 - manufacturer part number;
 - brand;
+- approved local or licensed remote product images;
 - cable properties as `PropertyValue` entries;
 - optional Austrian shipping details only after explicit approval.
 
-ShopOS also publishes `WebSite` and `Organization` data. It deliberately does not add the obsolete Google sitelinks search-box markup.
+ShopOS also publishes `WebSite` and `Organization` data. It deliberately does not add obsolete sitelinks search-box markup.
 
 Shipping and return structured data remain off until the values shown to customers and the real fulfilment process are identical.
 
@@ -134,7 +151,7 @@ The feed then appears at:
 https://SHOP-DOMAIN/google-products.xml
 ```
 
-It includes only products that pass the complete publication audit. The feed uses the permanent Ms. FixIT SKU as its product ID and includes title, description, URL, image, availability, EUR price, brand, GTIN/MPN, product type, Austrian shipping cost and delivery window.
+It includes only products that pass the complete publication audit. The feed uses the permanent Ms. FixIT SKU as its product ID and includes title, description, URL, approved image URL, availability, EUR price, brand, GTIN/MPN, product type, Austrian shipping cost and delivery window.
 
 Do not enable the feed with placeholder shipping values. Merchant Center compares feed data, structured data and the landing page; inconsistent values can cause product disapproval.
 
@@ -148,22 +165,12 @@ HDMI-2.1-Kabel 2 m – 4K 120 Hz / 8K 60 Hz
 Cat-6a-Patchkabel 3 m – RJ45, geschirmt, Schwarz
 ```
 
-A useful description should explain:
+A useful description should explain intended use, connectors, length, supported standard, charging power or data rate, resolution where relevant, important limitations, package contents and manufacturer identity.
 
-- intended use;
-- connector direction;
-- length;
-- supported standard;
-- charging power or data rate where applicable;
-- supported resolution/frame rate where applicable;
-- important limitations;
-- package contents;
-- manufacturer and product identity.
-
-Do not copy long supplier marketing text unchanged. It is often duplicated across many retailers and may include unsupported claims.
+Licensed ALSO/1WorldSync descriptions, selling points and technical data may be used after the corresponding content package is verified and the concrete article content is reviewed. A short original Ms. FixIT compatibility or buying note is recommended because it helps customers understand why the product fits their use case. Unsupported supplier claims must be removed or corrected.
 
 ## Performance and privacy
 
-The discovery JavaScript and CSS are small local assets. Product search runs on the Raspberry Pi and scans only approved pilot products. Images use WordPress/WooCommerce thumbnail sizes and browser lazy loading.
+The discovery JavaScript and CSS are small local assets. Product search runs on the Raspberry Pi and scans only approved pilot products. Licensed ALSO media stays on the approved remote source and is browser-lazy-loaded through virtual WordPress attachments; linked bytes are not cached by ShopOS.
 
 No analytics, advertising pixels or consent-dependent tracking are added by this component. Search Console ownership verification and the Merchant product feed work without them.
