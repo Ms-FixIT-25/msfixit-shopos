@@ -178,8 +178,63 @@
     box-shadow: 0 12px 38px rgba(0, 0, 0, .24);
 }
 
+.msfixit-privacy-intro {
+    margin-bottom: 1.1rem;
+    padding: 1.35rem;
+    border-radius: 18px;
+    background: linear-gradient(135deg, #f4f7fb, #fff);
+    border: 1px solid #dce4ee;
+}
+
+.msfixit-privacy-intro h2 {
+    margin-top: 0;
+}
+
+.msfixit-privacy-summary,
+.msfixit-export-card {
+    margin-bottom: 1.1rem;
+}
+
+.msfixit-privacy-catalog {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1.1rem;
+    margin-bottom: 1.1rem;
+}
+
+.msfixit-privacy-card h3 {
+    margin-top: 0;
+    font-size: 1.15rem;
+}
+
+.msfixit-privacy-card dl {
+    margin-bottom: 0;
+}
+
+.msfixit-privacy-card dl div {
+    padding: .7rem 0;
+    border-top: 1px solid #eceef1;
+}
+
+.msfixit-privacy-card dt {
+    margin-bottom: .15rem;
+    font-weight: 700;
+    color: #3d4652;
+}
+
+.msfixit-privacy-card dd {
+    margin: 0;
+    color: #5a6470;
+}
+
+.msfixit-export-card {
+    border-color: #9db8d6;
+    background: #f7fbff;
+}
+
 @media (max-width: 760px) {
-    .msfixit-security-grid {
+    .msfixit-security-grid,
+    .msfixit-privacy-catalog {
         grid-template-columns: 1fr;
     }
 
