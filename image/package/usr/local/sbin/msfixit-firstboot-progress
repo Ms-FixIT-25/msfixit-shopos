@@ -38,11 +38,15 @@ while kill -0 "$firstboot_pid" 2>/dev/null; do
     sleep 1
 done
 
-if wait "$firstboot_pid"; then
+set +e
+wait "$firstboot_pid"
+status=$?
+set -e
+
+if [ "$status" -eq 0 ]; then
     "$state_command" update 90 "Grundsystem ist bereit" "Shop, Design, Hilfeseiten und Verwaltungsfunktionen werden fertiggestellt."
     exit 0
 fi
 
-status=$?
 "$state_command" fail 90 "Einrichtung nicht abgeschlossen" "Der erste Start wurde mit Fehlercode ${status} beendet."
 exit "$status"
