@@ -21,6 +21,10 @@ jobs:
       - name: Check out test harness
         uses: actions/checkout@v7
 
+      - name: Test versioned initramfs discovery
+        shell: bash
+        run: bash tests/run-qemu-smoke.sh --self-test
+
       - name: Install QEMU and image tools
         shell: bash
         run: |
@@ -60,6 +64,7 @@ jobs:
           name: shopos-0.14-qemu-arm-smoke-evidence
           path: |
             vm/qemu-version.txt
+            vm/initramfs-selection.txt
             vm/qemu-console.log
             vm/qemu-exit.txt
             vm/msfixit-vm-smoke.log
