@@ -64,12 +64,13 @@ EOF_BRAND
 ln -sf /dev/null "$mount_dir/etc/systemd/system/msfixit-boot-console.service"
 
 # Keep a runaway driver or service from generating multi-gigabyte evidence.
-# Persistent ShopOS application logs remain available; the VM journal is a
-# bounded diagnostic buffer for this one test boot.
-install -d -m 0755 "$mount_dir/etc/systemd/journald.conf.d"
+# Preserve the bounded journal on disk so it can be inspected after QEMU exits.
+install -d -m 0755 "$mount_dir/etc/systemd/journald.conf.d" "$mount_dir/var/log/journal"
 cat > "$mount_dir/etc/systemd/journald.conf.d/10-qemu-bounded.conf" <<'EOF_JOURNAL'
 [Journal]
-Storage=volatile
+Storage=persistent
+SystemMaxUse=64M
+SystemKeepFree=32M
 RuntimeMaxUse=64M
 RuntimeKeepFree=32M
 MaxFileSec=5min
