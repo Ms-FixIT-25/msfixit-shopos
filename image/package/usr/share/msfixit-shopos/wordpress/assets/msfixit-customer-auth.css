@@ -1,0 +1,144 @@
+.msfixit-social-login {
+    margin: 0 0 1.5rem;
+    padding: 1rem;
+    border: 1px solid #d9dce1;
+    border-radius: 14px;
+    background: #fff;
+    text-align: center;
+}
+
+.msfixit-google-button {
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    gap: .65rem;
+    min-height: 46px;
+    width: 100%;
+}
+
+.msfixit-google-g {
+    display: inline-grid;
+    place-items: center;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    background: #fff;
+    color: #4285f4;
+    font-weight: 800;
+    box-shadow: 0 0 0 1px #ccd1d8;
+}
+
+.msfixit-auth-hint {
+    margin: .65rem 0 0;
+    font-size: .88rem;
+    color: #5e6672;
+}
+
+.msfixit-security-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 1.1rem;
+}
+
+.msfixit-security-card {
+    padding: 1.25rem;
+    border: 1px solid #d9dce1;
+    border-radius: 16px;
+    background: #fff;
+    box-shadow: 0 8px 30px rgba(24, 28, 35, .05);
+}
+
+.msfixit-security-card h2 {
+    margin-top: 0;
+    font-size: 1.25rem;
+}
+
+.msfixit-security-card details {
+    margin-top: .8rem;
+    padding-top: .8rem;
+    border-top: 1px solid #eceef1;
+}
+
+.msfixit-security-card summary {
+    cursor: pointer;
+    font-weight: 700;
+}
+
+.msfixit-security-card input {
+    width: 100%;
+    max-width: 34rem;
+}
+
+.msfixit-auth-details {
+    display: grid;
+    grid-template-columns: minmax(7rem, auto) minmax(0, 1fr);
+    gap: .45rem .8rem;
+}
+
+.msfixit-auth-details dt {
+    font-weight: 700;
+}
+
+.msfixit-auth-details dd {
+    margin: 0;
+    min-width: 0;
+}
+
+.msfixit-wrap {
+    display: block;
+    overflow-wrap: anywhere;
+    white-space: normal;
+}
+
+.msfixit-recovery-card {
+    grid-column: 1 / -1;
+    border-color: #b89000;
+    background: #fffaf0;
+}
+
+.msfixit-recovery-card pre {
+    padding: 1rem;
+    overflow: auto;
+    border-radius: 10px;
+    background: #1f2329;
+    color: #fff;
+    letter-spacing: .08em;
+}
+
+.msfixit-auth-history {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.msfixit-auth-history li {
+    display: grid;
+    grid-template-columns: minmax(10rem, 1fr) minmax(8rem, 1fr) auto;
+    gap: .75rem;
+    padding: .55rem 0;
+    border-bottom: 1px solid #eceef1;
+}
+
+.msfixit-auth-history time,
+.msfixit-auth-history small {
+    color: #68717d;
+}
+
+.msfixit-2fa-login .optional {
+    font-weight: 400;
+}
+
+@media (max-width: 760px) {
+    .msfixit-security-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .msfixit-recovery-card {
+        grid-column: auto;
+    }
+
+    .msfixit-auth-details,
+    .msfixit-auth-history li {
+        grid-template-columns: 1fr;
+    }
+}
