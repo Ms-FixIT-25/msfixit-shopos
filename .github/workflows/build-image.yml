@@ -43,7 +43,7 @@ concurrency:
 
 jobs:
   validate:
-    name: Validate AT pilot, ALSO content, discovery, Office and compliance cores
+    name: Validate help, partners, AT pilot, ALSO, Office and compliance cores
     runs-on: ubuntu-24.04
     services:
       mariadb:
@@ -75,6 +75,11 @@ jobs:
         env:
           MYSQL_PWD: shopos-ci-root
         run: bash tests/test-catalog.sh
+
+      - name: Test verified partner claims and logo rights
+        env:
+          MYSQL_PWD: shopos-ci-root
+        run: sudo env MYSQL_PWD="$MYSQL_PWD" GITHUB_WORKSPACE="$GITHUB_WORKSPACE" bash tests/test-partners.sh
 
       - name: Test AT pilot and ALSO commercial feed staging
         env:
@@ -182,13 +187,13 @@ jobs:
           - compressed Raspberry Pi 4B ShopOS image
           - portable SHA-256 checksum
 
-          This build defaults to a small Austria-only cable pop-up pilot. It includes guarded ALSO Austria commercial catalogue staging plus a separate licensed ALSO/1WorldSync content connector for descriptions, selling points, specifications, multiple remote product images, manufacturer documents, data sheets and accessory relations.
+          This build defaults to a small Austria-only cable pop-up pilot. It includes a searchable customer help center, cable-selection assistant, FRITZ!Box and WLAN guidance, repair preparation, ordering and service information, and evidence-based partner programme profiles.
 
-          Linked ALSO media remains remote-only and is not cached on the appliance. Content must match a verified account package and pass review before it can be applied to a WooCommerce draft. Content application never publishes a product. Supplier changes reopen review instead of silently replacing approved information.
+          FRITZ! and iFixit programme claims remain hidden until the exact membership status, validity and evidence have been checked. Partner logos require a separate rights record and HTTPS asset URL. Membership is never presented as certification unless the verified programme evidence explicitly supports that wording.
 
-          The build also includes permanent Ms. FixIT article numbers, accessible synonym search, cable filters, indexable categories, product publication quality gates, enriched product structured data and a disabled-by-default Austrian Google Merchant feed.
+          The image also includes guarded ALSO Austria commercial catalogue staging plus a separate licensed ALSO/1WorldSync content connector for descriptions, selling points, specifications, multiple remote product images, manufacturer documents, data sheets and accessory relations.
 
-          ALSO XML live queries, order submission and dropshipping remain disabled until the reseller account receives its official account-specific guideline, endpoint, credentials and test approval. Products are never auto-published and supplier orders are never sent automatically in pilot mode.
+          Linked ALSO media remains remote-only and is not cached on the appliance. Content must match a verified account package and pass review before it can be applied to a WooCommerce draft. Products are never auto-published and supplier orders are never sent automatically in pilot mode.
           EOF
 
           if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then

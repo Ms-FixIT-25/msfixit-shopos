@@ -37,6 +37,7 @@ check:
 	bash -n tests/test-tax-renderer-boundary.sh
 	bash -n tests/test-also.sh
 	bash -n tests/test-also-content.sh
+	bash -n tests/test-partners.sh
 	bash -n image/package/DEBIAN/postinst
 	bash -n image/package/usr/local/sbin/msfixit-firstboot
 	bash -n image/package/usr/local/sbin/msfixit-brand-shop
@@ -44,6 +45,7 @@ check:
 	bash -n image/package/usr/local/sbin/msfixit-office-init
 	bash -n image/package/usr/local/sbin/msfixit-also-init
 	bash -n image/package/usr/local/sbin/msfixit-also-content-sync
+	bash -n image/package/usr/local/sbin/msfixit-partners-init
 	bash -n image/package/usr/local/sbin/msfixit-discovery
 	bash -n image/package/usr/local/sbin/msfixit-office-worker
 	bash -n image/package/usr/local/sbin/msfixit-office-dunning
@@ -70,8 +72,10 @@ check:
 	@test -s image/package/usr/share/msfixit-shopos/also/also.env.example
 	@test -s image/package/usr/share/msfixit-shopos/discovery/discovery.env.example
 	@test -s image/package/usr/share/msfixit-shopos/discovery/discovery-lib.php
+	@test -s image/package/usr/share/msfixit-shopos/partners/schema.sql
 	@test -s image/package/usr/share/msfixit-shopos/wordpress/assets/msfixit-discovery.js
 	@test -s image/package/usr/share/msfixit-shopos/wordpress/assets/msfixit-discovery.css
+	@test -s image/package/usr/share/msfixit-shopos/wordpress/assets/msfixit-help-center.css
 	@grep -q 'catalog_products' image/package/usr/share/msfixit-shopos/catalog/schema.sql
 	@grep -q 'no_reassign' image/package/usr/share/msfixit-shopos/catalog/guards.sql
 	@grep -q 'office_documents' image/package/usr/share/msfixit-shopos/office/schema.sql
@@ -92,6 +96,9 @@ check:
 	@grep -q 'ALSO_CONTENT_MEDIA_MODE=remote_only' image/package/usr/share/msfixit-shopos/also/also.env.example
 	@grep -q 'GOOGLE_MERCHANT_FEED_ENABLED=no' image/package/usr/share/msfixit-shopos/discovery/discovery.env.example
 	@grep -q 'msfixit_discovery_publication_audit' image/package/usr/share/msfixit-shopos/discovery/discovery-lib.php
+	@grep -q 'partner_profiles' image/package/usr/share/msfixit-shopos/partners/schema.sql
+	@grep -q 'Partner logo requires separately verified usage rights' image/package/usr/share/msfixit-shopos/partners/schema.sql
+	@grep -q 'msfixit_help_center' image/package/usr/share/msfixit-shopos/wordpress/msfixit-help-center.php
 	@if command -v php >/dev/null 2>&1; then \
 		php -l tests/test-discovery.php; \
 		php tests/test-discovery.php; \
@@ -101,6 +108,7 @@ check:
 		php -l image/package/usr/local/sbin/msfixit-tax-decision; \
 		php -l image/package/usr/local/sbin/msfixit-also; \
 		php -l image/package/usr/local/sbin/msfixit-also-content; \
+		php -l image/package/usr/local/sbin/msfixit-partners; \
 		php -l image/package/usr/share/msfixit-shopos/discovery/discovery-lib.php; \
 		php -l image/package/usr/share/msfixit-shopos/office/office-lib.php; \
 		php -l image/package/usr/share/msfixit-shopos/wordpress/msfixit-branding.php; \
@@ -117,6 +125,8 @@ check:
 		php -l image/package/usr/share/msfixit-shopos/wordpress/msfixit-discovery.php; \
 		php -l image/package/usr/share/msfixit-shopos/wordpress/msfixit-discovery-provision.php; \
 		php -l image/package/usr/share/msfixit-shopos/wordpress/msfixit-discovery-cli.php; \
+		php -l image/package/usr/share/msfixit-shopos/wordpress/msfixit-help-center.php; \
+		php -l image/package/usr/share/msfixit-shopos/wordpress/msfixit-help-provision.php; \
 		php -l image/package/usr/share/msfixit-shopos/wordpress/msfixit-provision.php; \
 		php -l image/package/usr/share/msfixit-shopos/wordpress/msfixit-render-branding.php; \
 	fi

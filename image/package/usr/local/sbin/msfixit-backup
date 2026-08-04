@@ -30,6 +30,10 @@ if [ -d /data/office ]; then
     tar -C /data -czf "${workdir}/office-data.tar.gz" office
 fi
 
+if [ -d /data/partners ]; then
+    tar -C /data -czf "${workdir}/partner-evidence.tar.gz" partners
+fi
+
 # Import history and supplier payloads are already preserved in shopos_catalog.
 # Keep only compact human review reports in the normal backup, not every raw
 # wholesaler feed archive.

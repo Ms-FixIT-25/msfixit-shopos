@@ -69,6 +69,8 @@ chmod 0755 \
     "$stage/usr/local/sbin/msfixit-also-content" \
     "$stage/usr/local/sbin/msfixit-also-content-sync" \
     "$stage/usr/local/sbin/msfixit-discovery" \
+    "$stage/usr/local/sbin/msfixit-partners-init" \
+    "$stage/usr/local/sbin/msfixit-partners" \
     "$stage/usr/local/sbin/msfixit-apply-config" \
     "$stage/usr/local/sbin/msfixit-health" \
     "$stage/usr/local/sbin/msfixit-backup" \
@@ -90,6 +92,8 @@ install -d -m 0755 "$stage/usr/share/msfixit-shopos"
     printf 'ALSO_PILOT_SCHEMA_VERSION=1\n'
     printf 'ALSO_CONTENT_SCHEMA_VERSION=1\n'
     printf 'DISCOVERY_SCHEMA_VERSION=1\n'
+    printf 'PARTNER_SCHEMA_VERSION=1\n'
+    printf 'HELP_CENTER_VERSION=1\n'
     printf 'BUILD_UTC=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
     sha256sum \
         "$stage/usr/local/bin/cloudflared" \
@@ -99,6 +103,8 @@ install -d -m 0755 "$stage/usr/share/msfixit-shopos"
         "$stage/usr/local/sbin/msfixit-also-content" \
         "$stage/usr/local/sbin/msfixit-also-content-sync" \
         "$stage/usr/local/sbin/msfixit-discovery" \
+        "$stage/usr/local/sbin/msfixit-partners-init" \
+        "$stage/usr/local/sbin/msfixit-partners" \
         "$brand_file" \
         "$stage/usr/share/msfixit-shopos/catalog/schema.sql" \
         "$stage/usr/share/msfixit-shopos/catalog/guards.sql" \
@@ -118,6 +124,7 @@ install -d -m 0755 "$stage/usr/share/msfixit-shopos"
         "$stage/usr/share/msfixit-shopos/also/also.env.example" \
         "$stage/usr/share/msfixit-shopos/discovery/discovery.env.example" \
         "$stage/usr/share/msfixit-shopos/discovery/discovery-lib.php" \
+        "$stage/usr/share/msfixit-shopos/partners/schema.sql" \
         "$stage/usr/share/msfixit-shopos/wordpress/msfixit-compliance.php" \
         "$stage/usr/share/msfixit-shopos/wordpress/msfixit-compliance-runtime.php" \
         "$stage/usr/share/msfixit-shopos/wordpress/msfixit-at-pilot.php" \
@@ -127,8 +134,11 @@ install -d -m 0755 "$stage/usr/share/msfixit-shopos"
         "$stage/usr/share/msfixit-shopos/wordpress/msfixit-discovery.php" \
         "$stage/usr/share/msfixit-shopos/wordpress/msfixit-discovery-provision.php" \
         "$stage/usr/share/msfixit-shopos/wordpress/msfixit-discovery-cli.php" \
+        "$stage/usr/share/msfixit-shopos/wordpress/msfixit-help-center.php" \
+        "$stage/usr/share/msfixit-shopos/wordpress/msfixit-help-provision.php" \
         "$stage/usr/share/msfixit-shopos/wordpress/assets/msfixit-discovery.js" \
-        "$stage/usr/share/msfixit-shopos/wordpress/assets/msfixit-discovery.css"
+        "$stage/usr/share/msfixit-shopos/wordpress/assets/msfixit-discovery.css" \
+        "$stage/usr/share/msfixit-shopos/wordpress/assets/msfixit-help-center.css"
 } > "$stage/usr/share/msfixit-shopos/build-info.txt"
 
 rm -rf "$output_dir"

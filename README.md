@@ -4,7 +4,7 @@ A minimal, reproducible Raspberry Pi appliance operating system for the Ms. FixI
 
 ## Current status
 
-ShopOS is a **flash-image prototype**. Version 0.6 defaults to a deliberately small Austrian pop-up pilot and contains:
+ShopOS is a **flash-image prototype**. Version 0.9 defaults to a deliberately small Austrian pop-up pilot and contains:
 
 - Raspberry Pi 4 Model B targets for USB SSD and microSD
 - Raspberry Pi 5 targets for USB SSD, microSD and native NVMe
@@ -12,8 +12,10 @@ ShopOS is a **flash-image prototype**. Version 0.6 defaults to a deliberately sm
 - automated WordPress, WooCommerce and Ms. FixIT branding
 - Austria-only sales and shipping while pilot mode is enabled
 - a maximum of 30 manually approved pilot products
+- searchable help center with cable adviser, FRITZ!Box/WLAN guidance and repair preparation
+- evidence-based FRITZ! and iFixit Pro programme profiles
 - guarded ALSO Austria SFTP price-list staging
-- optional licensed 1WorldSync field intake without default image caching
+- licensed ALSO/1WorldSync descriptions, specifications, remote images and documents
 - no webshop scraping, no automatic publication and no automatic supplier order
 - an independent article master with immutable `MF-00000001` numbers
 - mappings for suppliers, GTIN/EAN, WooCommerce, POS, marketplaces and ERP/SAP
@@ -48,6 +50,38 @@ Germany / Switzerland     blocked
 
 The complete DACH structures remain installed for future expansion, but Germany and Switzerland are not offered at checkout while `AT_PILOT_ENABLED=yes`.
 
+## Help center and advice
+
+ShopOS provisions crawlable, customer-facing help pages:
+
+```text
+/hilfe/
+/hilfe/kabelberater/
+/hilfe/fritzbox-wlan/
+/hilfe/reparaturwissen/
+/hilfe/bestellung-versand-rueckgabe/
+```
+
+The help search is restricted to these managed pages. Search-result URLs are not indexed, while the underlying topic pages remain normal linked content after the overall shop indexing approval.
+
+The cable adviser narrows products by connector, intended use and length without treating connector shape as proof of performance or compatibility.
+
+FRITZ!Box/WLAN and repair pages use original Ms. FixIT content. Public third-party guides may be linked, but third-party guide text, photographs and logos are not copied by default.
+
+## Verified partner programmes
+
+FRITZ! and iFixit programme claims are stored separately from ordinary WordPress content. A public claim requires:
+
+- exact programme wording;
+- evidence file and SHA-256 checksum;
+- reviewer and review date;
+- non-expired validity when applicable;
+- deliberate public enablement.
+
+Logo rights are checked separately from membership. A programme membership is never automatically presented as certification, authorised service status or Premium Partner status.
+
+See [`docs/HELP_CENTER_PARTNERS.md`](docs/HELP_CENTER_PARTNERS.md).
+
 ## ALSO Austria connector
 
 The first connector uses the official account-specific ALSO SFTP price list. It can stage supplier SKU, manufacturer, manufacturer part number, EAN, title, descriptions, category, purchase price, availability, lead time and licensed content links.
@@ -72,7 +106,10 @@ Existing linked products may receive updated supplier-offer price, stock and lea
 
 ALSO XML price/availability, order submission, order response and direct-to-customer delivery remain disabled until ALSO supplies the reseller account's official XML guideline, endpoint, credentials and test environment.
 
-See [`docs/AT_PILOT_ALSO.md`](docs/AT_PILOT_ALSO.md).
+See:
+
+- [`docs/AT_PILOT_ALSO.md`](docs/AT_PILOT_ALSO.md)
+- [`docs/ALSO_CONTENT.md`](docs/ALSO_CONTENT.md)
 
 ## Automatic shop setup
 
@@ -80,16 +117,16 @@ After first boot, `msfixit-brand-shop.service`:
 
 - installs and activates WooCommerce and Storefront idempotently
 - imports the embedded Ms. FixIT artwork and applies the brand colors
-- creates the homepage, service, contact and WooCommerce pages
+- creates the homepage, service, contact, help and WooCommerce pages
 - enables the Austria-only pilot shipping zone
-- initializes the article master, Office/Fulfillment and compliance databases
-- initializes the ALSO staging tables and a disabled-by-default SFTP connector
-- installs WooCommerce bridges and the Austria pilot guard
+- initializes the article master, Office/Fulfillment, compliance and partner-profile databases
+- initializes ALSO commercial and licensed-content staging
+- installs WooCommerce, discovery, help and Austria pilot guards
 - starts lightweight timers for Office, compliance, printing and ALSO intake
 - creates legal-page placeholders without pretending they are reviewed texts
 - keeps public indexing disabled until deliberate approval
 
-Existing user-created pages are protected from automatic replacement. Payment providers, shipping rates, tax decisions, carrier credentials, legal texts and supplier credentials are never invented by the appliance.
+Existing user-created pages are protected from automatic replacement. Payment providers, shipping rates, tax decisions, carrier credentials, legal texts, partner claims and supplier credentials are never invented by the appliance.
 
 ## Article identity and expansion
 
@@ -155,10 +192,10 @@ For Raspberry Pi 4B USB boot, the EEPROM bootloader must permit USB mass-storage
 ```bash
 sudo msfixit-status
 sudo msfixit-also status
-sudo msfixit-also import-file /path/to/also.csv dry-run
-sudo msfixit-also list new 100
-sudo msfixit-also approve ALSO-SKU 149.90 shopadmin
-sudo msfixit-also release-order WOOCOMMERCE_ORDER_ID PURCHASE_TOTAL shopadmin
+sudo msfixit-also-content status
+sudo msfixit-partners list
+sudo msfixit-partners show fritz-business-at
+sudo msfixit-partners show ifixit-pro
 sudo msfixit-catalog list
 sudo msfixit-office status
 sudo msfixit-compliance status
@@ -170,10 +207,12 @@ sudo msfixit-backup
 
 - production credentials remain outside Git
 - the ALSO reseller webshop is not scraped
-- supplier content is used only within the licensed feed rights
-- images are not cached locally by default
+- supplier content is used only within licensed feed rights
+- linked ALSO media remains remote-only unless a separate agreement is implemented
 - pilot products are never auto-published
 - pilot orders are never sent to ALSO automatically
+- partner membership is not automatically described as certification
+- third-party logos require separate evidence of usage rights
 - compliance and tax decisions fail closed
 - technical controls do not replace professional legal or tax review
 
