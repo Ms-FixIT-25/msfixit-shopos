@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 
+// Phase 1 remains intentionally read-only; this touch rebuilds the stacked integration image.
 session_name('SHOPOSADMIN');
 session_set_cookie_params([
     'lifetime' => 0,
