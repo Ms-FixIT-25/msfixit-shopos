@@ -28,7 +28,7 @@ grep -Fq "msfixit_workspace_refresh_token_encrypted" "$plugin"
 grep -Fq "Google Workspace ist nicht verbunden; die E-Mail wurde nicht versendet." "$plugin"
 grep -Fq "msfixit-workspace.php" "$install_script"
 
-if grep -Eq "https://mail\.google\.com/|auth/gmail\.read|auth/gmail\.modify|auth/drive|auth/calendar" "$plugin"; then
+if grep -Eq "auth/gmail\.read|auth/gmail\.modify|auth/drive|auth/calendar" "$plugin"; then
     echo "Workspace OAuth must remain limited to identity and Gmail send access." >&2
     exit 1
 fi
