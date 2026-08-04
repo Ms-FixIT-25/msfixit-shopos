@@ -68,6 +68,7 @@ for plugin in \
     msfixit-compliance.php \
     msfixit-compliance-runtime.php \
     msfixit-at-pilot.php \
+    msfixit-also-content.php \
     msfixit-discovery.php \
     zz-msfixit-discovery-compliance-sync.php \
     zz-msfixit-discovery-assets.php; do
@@ -139,4 +140,4 @@ done
 run_wp cache flush >/dev/null 2>&1 || true
 chown -R www-data:www-data "$wordpress_dir/wp-content"
 
-echo "Ms. FixIT WooCommerce branding, AT pilot, cable discovery, ALSO staging, article master, Office/Fulfillment and compliance core applied successfully."
+echo "Ms. FixIT WooCommerce branding, AT pilot, cable discovery, licensed ALSO content, supplier staging, article master, Office/Fulfillment and compliance core applied successfully."
