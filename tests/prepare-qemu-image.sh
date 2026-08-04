@@ -58,5 +58,25 @@ Restart=no
 TimeoutStartSec=15min
 EOF_BRAND
 
+# The appliance boot console is a full-screen user experience intended for a
+# physical display. It adds no acceptance-test coverage and can flood the
+# emulated serial path, so disable it only in the disposable QEMU image.
+ln -sf /dev/null "$mount_dir/etc/systemd/system/msfixit-boot-console.service"
+
+# Keep a runaway driver or service from generating multi-gigabyte evidence.
+# Persistent ShopOS application logs remain available; the VM journal is a
+# bounded diagnostic buffer for this one test boot.
+install -d -m 0755 "$mount_dir/etc/systemd/journald.conf.d"
+cat > "$mount_dir/etc/systemd/journald.conf.d/10-qemu-bounded.conf" <<'EOF_JOURNAL'
+[Journal]
+Storage=volatile
+RuntimeMaxUse=64M
+RuntimeKeepFree=32M
+MaxFileSec=5min
+RateLimitIntervalSec=30s
+RateLimitBurst=2000
+ForwardToConsole=no
+EOF_JOURNAL
+
 sync
-printf 'Prepared QEMU guest with a fresh random seed and offline service ordering.\n'
+printf 'Prepared QEMU guest with random seed, offline ordering and bounded diagnostics.\n'
