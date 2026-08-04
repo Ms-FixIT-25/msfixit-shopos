@@ -12,7 +12,8 @@ trap 'rm -f "$combined"' EXIT
 
 for file in "$plugin" "$style" "$doc" \
     "$modules/google.php" "$modules/flow.php" "$modules/totp.php" \
-    "$modules/deletion.php" "$modules/account.php" "$modules/deletion-ui.php" "$modules/admin.php"; do
+    "$modules/deletion.php" "$modules/account.php" "$modules/deletion-ui.php" \
+    "$modules/privacy.php" "$modules/admin.php"; do
     test -s "$file"
 done
 
@@ -83,4 +84,5 @@ if grep -Fq "get_user_by('email', \$email);" "$combined" && ! grep -Fq "msfixit_
     exit 1
 fi
 
-printf 'Customer authentication and deletion security checks passed.\n'
+bash "$root/tests/test-customer-privacy.sh"
+printf 'Customer authentication, deletion and privacy security checks passed.\n'
