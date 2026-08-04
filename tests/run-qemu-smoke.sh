@@ -45,7 +45,7 @@ bounded_copy() {
     head_bytes=$((maximum_bytes / 4))
     tail_bytes=$((maximum_bytes - head_bytes))
     {
-        printf '--- LOG TRUNCATED: original bytes=%s, retained head=%s and tail=%s ---\n' \
+        printf -- '--- LOG TRUNCATED: original bytes=%s, retained head=%s and tail=%s ---\n' \
             "$size" "$head_bytes" "$tail_bytes"
         head -c "$head_bytes" "$source"
         printf '\n--- OMITTED MIDDLE ---\n'
