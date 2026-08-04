@@ -10,7 +10,7 @@ install_script="$root/image/package/usr/local/sbin/msfixit-brand-shop"
 combined="$(mktemp)"
 trap 'rm -f "$combined"' EXIT
 
-for file in "$plugin" "$style" "$doc" "$modules/google.php" "$modules/totp.php" "$modules/account.php" "$modules/admin.php"; do
+for file in "$plugin" "$style" "$doc" "$modules/google.php" "$modules/flow.php" "$modules/totp.php" "$modules/account.php" "$modules/admin.php"; do
     test -s "$file"
 done
 
@@ -22,6 +22,11 @@ done
 grep -Fq "openid email profile" "$combined"
 grep -Fq "code_challenge_method' => 'S256'" "$combined"
 grep -Fq "msfixit_customer_auth_state_key" "$combined"
+grep -Fq "browser_hash" "$combined"
+grep -Fq "MSFIXIT_CUSTOMER_GOOGLE_FLOW_COOKIE" "$combined"
+grep -Fq "'httponly' => true" "$combined"
+grep -Fq "'samesite' => 'Lax'" "$combined"
+grep -Fq "hash_equals((string) \$flow['browser_hash']" "$combined"
 grep -Fq "email_verified" "$combined"
 grep -Fq "_msfixit_google_sub" "$combined"
 grep -Fq "link_required" "$combined"
@@ -33,6 +38,8 @@ grep -Fq "hash_hmac('sha1'" "$combined"
 grep -Fq "wp_hash_password" "$combined"
 grep -Fq "wp_check_password" "$combined"
 grep -Fq "destroy_others" "$combined"
+grep -Fq "_msfixit_google_created" "$combined"
+grep -Fq "_msfixit_local_password_ready" "$combined"
 grep -Fq "msfixit-customer-auth.php" "$install_script"
 grep -Fq "msfixit-customer-auth.css" "$install_script"
 grep -Fq "Existing local accounts are never linked solely" "$doc"
