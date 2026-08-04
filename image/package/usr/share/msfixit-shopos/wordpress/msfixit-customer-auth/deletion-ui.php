@@ -6,9 +6,34 @@ if (!defined('ABSPATH')) {
     exit;
 }
 
+function msfixit_customer_deletion_is_privileged(int $userId): bool
+{
+    $user = get_user_by('id', $userId);
+    return $user instanceof WP_User
+        && (bool) array_intersect($user->roles, ['administrator', 'shop_manager']);
+}
+
+function msfixit_customer_deletion_guard_request(): void
+{
+    if (is_user_logged_in() && msfixit_customer_deletion_is_privileged(get_current_user_id())) {
+        wp_die('Administrator- und Shop-Manager-Konten können nicht über die öffentliche Kundenfunktion gelöscht werden.', 'Konto löschen', ['response' => 403]);
+    }
+}
+add_action('admin_post_msfixit_customer_delete_request', 'msfixit_customer_deletion_guard_request', 0);
+
+function msfixit_customer_deletion_guard_confirm(): void
+{
+    $userId = absint($_GET['user_id'] ?? 0);
+    if ($userId > 0 && msfixit_customer_deletion_is_privileged($userId)) {
+        wp_die('Dieses Konto kann nicht über die öffentliche Kundenfunktion gelöscht werden.', 'Konto löschen', ['response' => 403]);
+    }
+}
+add_action('admin_post_nopriv_msfixit_customer_delete_confirm', 'msfixit_customer_deletion_guard_confirm', 0);
+add_action('admin_post_msfixit_customer_delete_confirm', 'msfixit_customer_deletion_guard_confirm', 0);
+
 function msfixit_customer_deletion_panel(): void
 {
-    if (!is_user_logged_in()) {
+    if (!is_user_logged_in() || msfixit_customer_deletion_is_privileged(get_current_user_id())) {
         return;
     }
 
