@@ -2,7 +2,7 @@ name: ShopOS QEMU acceptance test
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, agent/fix-firstboot-mariadb-permissions]
     paths:
       - tests/run-qemu-smoke.sh
       - tests/prepare-qemu-image.sh
@@ -32,12 +32,12 @@ jobs:
           bash -n tests/prepare-qemu-image.sh
           bash tests/run-qemu-smoke.sh --self-test
 
-      - name: Download and verify ShopOS 0.14
+      - name: Download and verify corrected ShopOS 0.14
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          SHOPOS_ARTIFACT_ID: '8883903047'
-          SHOPOS_ARTIFACT_SHA256: b5baf112e6bb1caddd2153759fabba7cad10dadb43b80a8d7b53c2537968c35c
+          SHOPOS_ARTIFACT_ID: '8892987895'
+          SHOPOS_ARTIFACT_SHA256: 5763e3b65e4e8ab15bed19724aa7dc7f14b4706e076c7e7ebdf6d3f960321ec5
         run: |
           set -Eeuo pipefail
           mkdir -p vm
@@ -61,6 +61,14 @@ jobs:
         run: |
           set -Eeuo pipefail
           sudo bash -x tests/run-qemu-smoke.sh vm/shopos-test.img vm 2>&1 | tee vm/harness.log
+
+      - name: Prepare VM evidence for upload
+        if: always()
+        shell: bash
+        run: |
+          sudo chown -R "$USER:$USER" vm 2>/dev/null || true
+          find vm -type d -exec chmod u+rwx {} + 2>/dev/null || true
+          find vm -type f -exec chmod u+rw {} + 2>/dev/null || true
 
       - name: Upload VM evidence
         if: always()
