@@ -1,0 +1,8 @@
+[Plymouth Theme]
+Name=Ms. FixIT ShopOS
+Description=Branded quiet boot experience for Ms. FixIT ShopOS
+ModuleName=script
+
+[script]
+ImageDir=/usr/share/plymouth/themes/msfixit-shopos
+ScriptFile=/usr/share/plymouth/themes/msfixit-shopos/msfixit-shopos.script
