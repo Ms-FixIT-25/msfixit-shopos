@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily Ms. FixIT licensed ALSO content synchronization
+
+[Timer]
+OnCalendar=*-*-* 03:10:00
+Persistent=true
+RandomizedDelaySec=20m
+Unit=msfixit-also-content-sync.service
+
+[Install]
+WantedBy=timers.target
