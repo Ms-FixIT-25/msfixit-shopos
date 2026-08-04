@@ -1,0 +1,27 @@
+name: First-boot storage permissions
+
+on:
+  pull_request:
+    paths:
+      - 'image/package/usr/local/sbin/msfixit-firstboot'
+      - 'tests/test-firstboot-storage-permissions.sh'
+      - '.github/workflows/firstboot-storage-permissions.yml'
+  push:
+    branches:
+      - 'agent/fix-firstboot-mariadb-permissions'
+    paths:
+      - 'image/package/usr/local/sbin/msfixit-firstboot'
+      - 'tests/test-firstboot-storage-permissions.sh'
+      - '.github/workflows/firstboot-storage-permissions.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  validate-storage-permissions:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out ShopOS
+        uses: actions/checkout@v7
+      - name: Validate first-boot storage ownership ordering
+        run: bash tests/test-firstboot-storage-permissions.sh
