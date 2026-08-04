@@ -19,6 +19,6 @@ const MSFIXIT_CUSTOMER_GOOGLE_TOKEN_ENDPOINT = 'https://oauth2.googleapis.com/to
 const MSFIXIT_CUSTOMER_GOOGLE_USERINFO_ENDPOINT = 'https://openidconnect.googleapis.com/v1/userinfo';
 
 $msfixitCustomerAuthDirectory = '/usr/share/msfixit-shopos/wordpress/msfixit-customer-auth';
-foreach (['google.php', 'flow.php', 'totp.php', 'deletion.php', 'account.php', 'admin.php'] as $msfixitCustomerAuthModule) {
+foreach (['google.php', 'flow.php', 'totp.php', 'deletion.php', 'account.php', 'deletion-ui.php', 'admin.php'] as $msfixitCustomerAuthModule) {
     require_once $msfixitCustomerAuthDirectory . '/' . $msfixitCustomerAuthModule;
 }
