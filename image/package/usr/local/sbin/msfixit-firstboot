@@ -99,10 +99,12 @@ if id shopadmin >/dev/null 2>&1; then
 fi
 
 install -d -m 0750 "$config_dir"
-install -d -m 0750 "$data_dir"
-install -d -m 0750 "$data_dir/mariadb"
-install -d -m 0750 "$data_dir/wordpress"
-install -d -m 0750 "$data_dir/wordpress/uploads"
+# Service-owned subdirectories stay private, while the persistent storage root
+# remains traversable so MariaDB and PHP-FPM can reach their own directories.
+install -d -m 0711 "$data_dir"
+install -d -o mysql -g mysql -m 0750 "$data_dir/mariadb"
+install -d -o www-data -g www-data -m 0750 "$data_dir/wordpress"
+install -d -o www-data -g www-data -m 0750 "$data_dir/wordpress/uploads"
 install -d -m 0700 "$data_dir/backups"
 install -d -m 0750 "$data_dir/logs"
 install -d -m 0755 "$wordpress_dir"
@@ -121,6 +123,10 @@ innodb_file_per_table=1
 max_connections=100
 EOF_DB
 
+# Repair ownership before initialization as well as after it. This also makes
+# first boot recover cleanly from a previously interrupted database setup.
+chown -R mysql:mysql "$data_dir/mariadb"
+chmod 0750 "$data_dir/mariadb"
 if [ ! -d "$data_dir/mariadb/mysql" ]; then
     rm -rf "$data_dir/mariadb"/*
     mariadb-install-db --user=mysql --datadir="$data_dir/mariadb" --skip-test-db
