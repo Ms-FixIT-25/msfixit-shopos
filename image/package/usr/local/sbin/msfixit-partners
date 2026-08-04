@@ -1,0 +1,262 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+const PARTNER_ADMIN_ENV = '/etc/msfixit-shopos/catalog.env';
+
+function fail(string $message, int $code = 1): never
+{
+    fwrite(STDERR, $message . PHP_EOL);
+    exit($code);
+}
+
+function usage(): never
+{
+    fwrite(STDERR, <<<'TEXT'
+Ms. FixIT partner profile administration
+
+Commands:
+  msfixit-partners list
+  msfixit-partners show CODE
+  msfixit-partners verify CODE PROGRAM_NAME VALID_UNTIL|none EVIDENCE_FILE ACTOR PUBLIC_CLAIM
+  msfixit-partners logo CODE HTTPS_URL EVIDENCE_FILE ACTOR
+  msfixit-partners enable CODE ACTOR
+  msfixit-partners disable CODE ACTOR [REASON]
+
+Examples:
+  sudo msfixit-partners verify fritz-business-at \
+    "FRITZ! Business-Partnerprogramm Österreich" 2026-12-31 \
+    /data/partners/evidence/fritz-status.pdf shopadmin \
+    "Teilnahme am FRITZ! Business-Partnerprogramm Österreich"
+
+  sudo msfixit-partners verify ifixit-pro \
+    "iFixit Pro" none /data/partners/evidence/ifixit-pro.pdf shopadmin \
+    "iFixit Pro Mitglied"
+TEXT);
+    exit(2);
+}
+
+function envFile(string $path): array
+{
+    if (!is_readable($path)) {
+        fail("Configuration unavailable: {$path}");
+    }
+    $result = [];
+    foreach (file($path, FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) ?: [] as $line) {
+        $line = trim($line);
+        if ($line === '' || str_starts_with($line, '#') || !str_contains($line, '=')) {
+            continue;
+        }
+        [$key, $value] = explode('=', $line, 2);
+        $result[trim($key)] = trim($value);
+    }
+    return $result;
+}
+
+function db(): PDO
+{
+    static $pdo = null;
+    if ($pdo instanceof PDO) {
+        return $pdo;
+    }
+    $env = envFile(PARTNER_ADMIN_ENV);
+    foreach (['CATALOG_DB_HOST', 'CATALOG_DB_PORT', 'CATALOG_DB_NAME', 'CATALOG_DB_USER', 'CATALOG_DB_PASSWORD'] as $key) {
+        if (empty($env[$key])) {
+            fail("Missing database setting: {$key}");
+        }
+    }
+    $pdo = new PDO(
+        sprintf('mysql:host=%s;port=%s;dbname=%s;charset=utf8mb4', $env['CATALOG_DB_HOST'], $env['CATALOG_DB_PORT'], $env['CATALOG_DB_NAME']),
+        $env['CATALOG_DB_USER'],
+        $env['CATALOG_DB_PASSWORD'],
+        [
+            PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION,
+            PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
+            PDO::ATTR_EMULATE_PREPARES => false,
+        ]
+    );
+    return $pdo;
+}
+
+function profile(PDO $pdo, string $code): array
+{
+    $statement = $pdo->prepare('SELECT * FROM partner_profiles WHERE partner_code=?');
+    $statement->execute([$code]);
+    $row = $statement->fetch();
+    if (!$row) {
+        fail("Unknown partner profile: {$code}");
+    }
+    return $row;
+}
+
+function evidence(string $path): array
+{
+    $real = realpath($path);
+    if ($real === false || !is_file($real) || !is_readable($real)) {
+        fail("Evidence file is unavailable: {$path}");
+    }
+    $allowedRoot = realpath('/data/partners/evidence');
+    if ($allowedRoot === false || !str_starts_with($real, $allowedRoot . DIRECTORY_SEPARATOR)) {
+        fail('Evidence files must be stored below /data/partners/evidence.');
+    }
+    $hash = hash_file('sha256', $real);
+    if (!is_string($hash) || strlen($hash) !== 64) {
+        fail("Unable to hash evidence file: {$real}");
+    }
+    return [$real, $hash];
+}
+
+function audit(PDO $pdo, string $code, string $action, string $actor, array $details = []): void
+{
+    $statement = $pdo->prepare(
+        'INSERT INTO partner_profile_audit (partner_code, action_name, actor_name, details_json)
+         VALUES (?, ?, ?, ?)'
+    );
+    $statement->execute([
+        $code,
+        $action,
+        $actor,
+        json_encode($details, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+    ]);
+}
+
+function verifyStoredEvidence(array $row): void
+{
+    $path = (string) ($row['evidence_path'] ?? '');
+    $expected = (string) ($row['evidence_sha256'] ?? '');
+    if ($path === '' || $expected === '' || !is_file($path) || !is_readable($path)) {
+        fail('Stored membership evidence is missing or unreadable.');
+    }
+    $actual = hash_file('sha256', $path);
+    if (!hash_equals($expected, (string) $actual)) {
+        fail('Stored membership evidence checksum no longer matches.');
+    }
+}
+
+$args = $_SERVER['argv'];
+array_shift($args);
+$command = array_shift($args) ?? '';
+$pdo = db();
+
+try {
+    switch ($command) {
+        case 'list':
+            $rows = $pdo->query(
+                'SELECT partner_code, provider_name, program_name, membership_status,
+                        valid_until, public_enabled, logo_mode, updated_at
+                 FROM partner_profiles ORDER BY provider_name, partner_code'
+            )->fetchAll();
+            echo json_encode($rows, JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE) . PHP_EOL;
+            break;
+
+        case 'show':
+            echo json_encode(profile($pdo, $args[0] ?? ''), JSON_PRETTY_PRINT | JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . PHP_EOL;
+            break;
+
+        case 'verify':
+            if (count($args) < 6) {
+                usage();
+            }
+            [$code, $program, $until, $file, $actor, $claim] = array_slice($args, 0, 6);
+            profile($pdo, $code);
+            [$path, $hash] = evidence($file);
+            $validUntil = strtolower($until) === 'none' ? null : $until;
+            if ($validUntil !== null && !preg_match('/^\d{4}-\d{2}-\d{2}$/', $validUntil)) {
+                fail('VALID_UNTIL must be YYYY-MM-DD or none.');
+            }
+            if (trim($program) === '' || trim($claim) === '') {
+                fail('Programme name and public claim must not be empty.');
+            }
+            $pdo->beginTransaction();
+            $statement = $pdo->prepare(
+                "UPDATE partner_profiles
+                 SET program_name=?, public_label=?, membership_status='verified',
+                     valid_from=COALESCE(valid_from, CURRENT_DATE), valid_until=?,
+                     evidence_path=?, evidence_sha256=?, evidence_checked_at=CURRENT_TIMESTAMP,
+                     evidence_checked_by=?, public_claim=?, public_enabled=0
+                 WHERE partner_code=?"
+            );
+            $statement->execute([$program, $program, $validUntil, $path, $hash, $actor, $claim, $code]);
+            audit($pdo, $code, 'membership_verified', $actor, [
+                'program_name' => $program,
+                'valid_until' => $validUntil,
+                'evidence_path' => $path,
+                'evidence_sha256' => $hash,
+                'public_claim' => $claim,
+            ]);
+            $pdo->commit();
+            echo "Partner membership verified; public display remains disabled." . PHP_EOL;
+            break;
+
+        case 'logo':
+            if (count($args) < 4) {
+                usage();
+            }
+            [$code, $url, $file, $actor] = array_slice($args, 0, 4);
+            profile($pdo, $code);
+            if (!str_starts_with($url, 'https://')) {
+                fail('Logo URL must use HTTPS.');
+            }
+            [$path, $hash] = evidence($file);
+            $pdo->beginTransaction();
+            $statement = $pdo->prepare(
+                "UPDATE partner_profiles
+                 SET logo_mode='approved_remote', logo_url=?, logo_rights_verified=1,
+                     logo_evidence_path=?, logo_evidence_sha256=?,
+                     logo_checked_at=CURRENT_TIMESTAMP, logo_checked_by=?
+                 WHERE partner_code=?"
+            );
+            $statement->execute([$url, $path, $hash, $actor, $code]);
+            audit($pdo, $code, 'logo_rights_verified', $actor, [
+                'logo_url' => $url,
+                'evidence_path' => $path,
+                'evidence_sha256' => $hash,
+            ]);
+            $pdo->commit();
+            echo "Partner logo rights and URL recorded." . PHP_EOL;
+            break;
+
+        case 'enable':
+            if (count($args) < 2) {
+                usage();
+            }
+            [$code, $actor] = array_slice($args, 0, 2);
+            $row = profile($pdo, $code);
+            verifyStoredEvidence($row);
+            if (!empty($row['valid_until']) && $row['valid_until'] < date('Y-m-d')) {
+                fail('Partner membership is expired.');
+            }
+            $pdo->beginTransaction();
+            $statement = $pdo->prepare('UPDATE partner_profiles SET public_enabled=1 WHERE partner_code=?');
+            $statement->execute([$code]);
+            audit($pdo, $code, 'public_enabled', $actor);
+            $pdo->commit();
+            echo "Partner profile enabled for public display." . PHP_EOL;
+            break;
+
+        case 'disable':
+            if (count($args) < 2) {
+                usage();
+            }
+            $code = $args[0];
+            $actor = $args[1];
+            $reason = $args[2] ?? 'manual_disable';
+            profile($pdo, $code);
+            $pdo->beginTransaction();
+            $statement = $pdo->prepare('UPDATE partner_profiles SET public_enabled=0 WHERE partner_code=?');
+            $statement->execute([$code]);
+            audit($pdo, $code, 'public_disabled', $actor, ['reason' => $reason]);
+            $pdo->commit();
+            echo "Partner profile disabled." . PHP_EOL;
+            break;
+
+        default:
+            usage();
+    }
+} catch (Throwable $exception) {
+    if ($pdo->inTransaction()) {
+        $pdo->rollBack();
+    }
+    fail('Partner profile error: ' . $exception->getMessage());
+}
