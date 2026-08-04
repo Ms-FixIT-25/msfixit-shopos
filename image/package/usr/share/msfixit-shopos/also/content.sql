@@ -82,6 +82,7 @@ CREATE TABLE IF NOT EXISTS supplier_content_assets (
     asset_role VARCHAR(48) NOT NULL DEFAULT 'generic',
     display_order SMALLINT UNSIGNED NOT NULL DEFAULT 0,
     source_url VARCHAR(2000) NOT NULL,
+    source_url_hash CHAR(64) GENERATED ALWAYS AS (SHA2(source_url, 256)) STORED,
     mime_hint VARCHAR(96) NULL,
     language_code VARCHAR(16) NULL,
     approval_status VARCHAR(24) NOT NULL DEFAULT 'pending',
@@ -89,7 +90,7 @@ CREATE TABLE IF NOT EXISTS supplier_content_assets (
     last_seen_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    UNIQUE KEY uq_supplier_content_asset (content_item_id, source_url),
+    UNIQUE KEY uq_supplier_content_asset (content_item_id, source_url_hash),
     KEY ix_supplier_content_asset_review (approval_status, asset_type),
     CONSTRAINT fk_supplier_content_asset_item
         FOREIGN KEY (content_item_id) REFERENCES supplier_content_items (id)
