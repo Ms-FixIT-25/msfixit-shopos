@@ -4,7 +4,7 @@ A minimal, reproducible Raspberry Pi appliance operating system for the Ms. FixI
 
 ## Current status
 
-ShopOS is a **flash-image prototype**. Version 0.9 defaults to a deliberately small Austrian pop-up pilot and contains:
+ShopOS is a **flash-image prototype**. Version 0.10 defaults to a deliberately small Austrian pop-up pilot and contains:
 
 - Raspberry Pi 4 Model B targets for USB SSD and microSD
 - Raspberry Pi 5 targets for USB SSD, microSD and native NVMe
@@ -13,6 +13,7 @@ ShopOS is a **flash-image prototype**. Version 0.9 defaults to a deliberately sm
 - Austria-only sales and shipping while pilot mode is enabled
 - a maximum of 30 manually approved pilot products
 - searchable help center with cable adviser, FRITZ!Box/WLAN guidance and repair preparation
+- privacy-gated service requests with secret-link repair status
 - evidence-based FRITZ! and iFixit Pro programme profiles
 - guarded ALSO Austria SFTP price-list staging
 - licensed ALSO/1WorldSync descriptions, specifications, remote images and documents
@@ -68,6 +69,21 @@ The cable adviser narrows products by connector, intended use and length without
 
 FRITZ!Box/WLAN and repair pages use original Ms. FixIT content. Public third-party guides may be linked, but third-party guide text, photographs and logos are not copied by default.
 
+## Service requests and repair status
+
+ShopOS provisions:
+
+```text
+/service-anfrage/
+/service-status/
+```
+
+Customers can submit structured repair, diagnosis, setup, network, data-transfer, purchase-advice and order questions. Each request receives a reference and a random secret access key. Only a one-way hash of that key is stored; the public status view requires both values and does not expose contact data or the full fault description.
+
+The public form remains disabled after first boot. It becomes usable only after the `datenschutz` page is published and an administrator explicitly sets `msfixit_service_public_enabled=yes`. The form uses a nonce, honeypot, allowlists, input limits, rate limiting and mandatory consent. It does not accept uploads, passwords, PINs or payment-card data.
+
+See [`docs/SERVICE_REQUESTS.md`](docs/SERVICE_REQUESTS.md).
+
 ## Verified partner programmes
 
 FRITZ! and iFixit programme claims are stored separately from ordinary WordPress content. A public claim requires:
@@ -117,14 +133,14 @@ After first boot, `msfixit-brand-shop.service`:
 
 - installs and activates WooCommerce and Storefront idempotently
 - imports the embedded Ms. FixIT artwork and applies the brand colors
-- creates the homepage, service, contact, help and WooCommerce pages
+- creates the homepage, service, contact, help, service-request and WooCommerce pages
 - enables the Austria-only pilot shipping zone
 - initializes the article master, Office/Fulfillment, compliance and partner-profile databases
 - initializes ALSO commercial and licensed-content staging
-- installs WooCommerce, discovery, help and Austria pilot guards
+- installs WooCommerce, discovery, help, service-request and Austria pilot guards
 - starts lightweight timers for Office, compliance, printing and ALSO intake
 - creates legal-page placeholders without pretending they are reviewed texts
-- keeps public indexing disabled until deliberate approval
+- keeps public indexing and service-request intake disabled until deliberate approval
 
 Existing user-created pages are protected from automatic replacement. Payment providers, shipping rates, tax decisions, carrier credentials, legal texts, partner claims and supplier credentials are never invented by the appliance.
 
@@ -203,6 +219,14 @@ sudo msfixit-health
 sudo msfixit-backup
 ```
 
+After the reviewed privacy page is published, service intake can be enabled explicitly:
+
+```bash
+sudo -u www-data env HOME=/tmp /usr/local/bin/wp \
+  --path=/srv/www/wordpress \
+  option update msfixit_service_public_enabled yes
+```
+
 ## Design boundaries
 
 - production credentials remain outside Git
@@ -211,6 +235,8 @@ sudo msfixit-backup
 - linked ALSO media remains remote-only unless a separate agreement is implemented
 - pilot products are never auto-published
 - pilot orders are never sent to ALSO automatically
+- service intake remains blocked without a published privacy page and explicit enablement
+- service requests create no automatic chargeable repair order
 - partner membership is not automatically described as certification
 - third-party logos require separate evidence of usage rights
 - compliance and tax decisions fail closed
@@ -226,5 +252,7 @@ sudo msfixit-backup
 - guarded pricing and supplier-routing rules
 - ready2order or another POS adapter
 - SAP/ERP and marketplace adapters
+- service appointment calendar and consented attachment exchange
+- reviewed service-record retention and anonymization workflow
 - external encrypted backups
 - A/B operating-system updates
