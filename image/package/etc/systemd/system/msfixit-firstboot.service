@@ -6,7 +6,7 @@ ConditionPathExists=!/data/.shopos-initialized
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/sbin/msfixit-firstboot
+ExecStart=/usr/local/sbin/msfixit-firstboot-progress
 RemainAfterExit=yes
 Restart=on-failure
 RestartSec=30s
