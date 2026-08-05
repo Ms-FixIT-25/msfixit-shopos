@@ -1,0 +1,3 @@
+ShopOS signed app platform integration candidate
+Source branch: agent/shopos-store-install-request
+Purpose: trigger checksummed Raspberry Pi image build for QEMU and ARM64 validation.
