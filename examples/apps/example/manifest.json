@@ -1,0 +1,11 @@
+{
+  "schema": 1,
+  "id": "at.msfixit.shopos.example",
+  "name": "Example App",
+  "version": "1.0.0",
+  "core_api": ">=1.0 <2.0",
+  "edition": "professional",
+  "entitlements": ["example.use"],
+  "capabilities": ["navigation", "background-job"],
+  "entrypoints": {"admin": "/apps/example/"}
+}

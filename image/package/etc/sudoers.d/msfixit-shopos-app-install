@@ -1,0 +1,2 @@
+Defaults:www-data env_reset
+www-data ALL=(root) NOPASSWD: /usr/local/sbin/msfixit-app-install-helper install at.msfixit.shopos.*

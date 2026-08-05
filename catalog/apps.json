@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "apps": [
+    {
+      "id": "at.msfixit.shopos.commerce",
+      "name": "Commerce Suite",
+      "summary": "Produkte, Lager, Lieferanten und Bestellungen verwalten.",
+      "edition": "community",
+      "entitlement": "commerce.core",
+      "status": "available"
+    },
+    {
+      "id": "at.msfixit.shopos.marketplaces",
+      "name": "Marketplace Connect",
+      "summary": "Amazon, eBay und weitere Marktplätze anbinden.",
+      "edition": "professional",
+      "entitlement": "marketplaces.connect",
+      "status": "locked"
+    },
+    {
+      "id": "at.msfixit.shopos.assistant",
+      "name": "ShopOS Assistant",
+      "summary": "Geführte Diagnose, Empfehlungen und Automatisierungen.",
+      "edition": "professional",
+      "entitlement": "assistant.use",
+      "status": "locked"
+    }
+  ]
+}

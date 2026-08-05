@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://shopos.msfixit.at/schemas/app-manifest-v1.json",
+  "title": "ShopOS application manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "id", "name", "version", "core_api", "edition", "entitlements", "capabilities", "entrypoints"],
+  "properties": {
+    "schema": {"const": 1},
+    "id": {"type": "string", "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)+$", "maxLength": 128},
+    "name": {"type": "string", "minLength": 1, "maxLength": 80},
+    "version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?$"},
+    "core_api": {"type": "string", "minLength": 1, "maxLength": 64},
+    "edition": {"enum": ["community", "professional", "enterprise"]},
+    "entitlements": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"type": "string", "pattern": "^[a-z0-9]+(?:[.-][a-z0-9]+)*$", "maxLength": 128}
+    },
+    "capabilities": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"enum": ["navigation", "background-job", "notifications", "catalog-read", "catalog-write", "orders-read", "orders-write", "documents", "printing", "external-network"]}
+    },
+    "entrypoints": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "admin": {"type": "string", "pattern": "^/apps/[a-z0-9][a-z0-9/_-]*/$"}
+      }
+    }
+  }
+}
