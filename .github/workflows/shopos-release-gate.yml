@@ -2,14 +2,13 @@ name: ShopOS release gate
 
 on:
   pull_request:
-    branches:
-      - main
+    branches: [main]
     types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
 
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
+  pull-requests: read
 
 concurrency:
   group: shopos-release-${{ github.event.pull_request.number || github.ref }}
@@ -24,6 +23,8 @@ jobs:
     steps:
       - name: Check out candidate
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Install test dependencies
         run: |
@@ -50,13 +51,15 @@ jobs:
           done
 
   image:
-    name: Build and verify new Raspberry Pi image
+    name: Build and verify candidate image
     needs: test
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 180
     steps:
       - name: Check out tested candidate
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Reclaim runner disk space
         run: |
@@ -67,35 +70,20 @@ jobs:
       - name: Build fresh Raspberry Pi 4 USB image
         run: make image-rpi4-usb
 
-      - name: Verify image and checksum
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-          mapfile -t sums < <(find artifacts -maxdepth 1 -type f -name '*.sha256' -print)
-          if (( ${#sums[@]} != 1 )); then
-            echo "Expected exactly one image checksum, found ${#sums[@]}." >&2
-            exit 1
-          fi
-          (
-            cd artifacts
-            sha256sum --check "$(basename "${sums[0]}")"
-          )
-          test -s image/package/usr/share/msfixit-shopos/build-candidate.txt
-          printf 'SOURCE_COMMIT=%s\n' "$GITHUB_SHA" > artifacts/release-provenance.txt
-          printf 'WORKFLOW_RUN=%s\n' "$GITHUB_RUN_ID" >> artifacts/release-provenance.txt
-          printf 'BUILD_UTC=%s\n' "$(date -u +%FT%TZ)" >> artifacts/release-provenance.txt
+      - name: Verify candidate image
+        run: scripts/generate-release-metadata.sh artifacts candidate "$GITHUB_SHA" "$GITHUB_RUN_ID"
 
-      - name: Upload tested image
+      - name: Upload candidate image
         uses: actions/upload-artifact@v4
         with:
-          name: shopos-rpi4-usb-${{ github.sha }}
+          name: shopos-candidate-${{ github.event.pull_request.head.sha || github.sha }}
           path: artifacts/
           if-no-files-found: error
           compression-level: 0
-          retention-days: 14
+          retention-days: 7
 
   merge:
-    name: Merge tested image candidate to main
+    name: Merge verified candidate to main
     needs: [test, image]
     if: >-
       github.event_name == 'pull_request' &&
@@ -103,15 +91,18 @@ jobs:
       github.event.pull_request.head.repo.full_name == github.repository &&
       github.event.pull_request.base.ref == 'main'
     runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      pull-requests: write
     steps:
-      - name: Merge only the tested head commit
+      - name: Merge only the verified head commit
         env:
           GH_TOKEN: ${{ github.token }}
           PR_URL: ${{ github.event.pull_request.html_url }}
-          TESTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          VERIFIED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           set -Eeuo pipefail
           gh pr merge "$PR_URL" \
             --squash \
             --delete-branch \
-            --match-head-commit "$TESTED_HEAD_SHA"
+            --match-head-commit "$VERIFIED_HEAD_SHA"
