@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Narrow privileged bridge for the authenticated ShopOS Update Center."""
 from __future__ import annotations
-import json, os, pathlib, re, subprocess, sys, tempfile, urllib.parse, urllib.request
+import json, os, pathlib, re, subprocess, sys, tempfile, urllib.error, urllib.parse, urllib.request
 
 AGENT='/usr/local/sbin/msfixit-update-agent'; APP_HELPER='/usr/local/sbin/msfixit-app-install-helper'; UPDATE='/usr/local/sbin/msfixit-update'
 STATE=pathlib.Path('/var/lib/msfixit-shopos/update/state.json'); APPS=pathlib.Path('/var/lib/msfixit-shopos/apps'); INBOX=pathlib.Path('/var/lib/msfixit-shopos/app-inbox')
