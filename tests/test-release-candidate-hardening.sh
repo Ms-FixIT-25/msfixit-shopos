@@ -23,12 +23,29 @@ for file in "${required_files[@]}"; do
     test -s "$file" || fail "required release file missing or empty: $file"
 done
 
-# Every shipped shell entry point must parse cleanly.
+# Validate executable entry points with the interpreter declared by their
+# shebang. /usr/local/sbin intentionally contains both shell and PHP commands.
 while IFS= read -r -d '' file; do
-    bash -n "$file" || fail "shell syntax error: $file"
+    first_line="$(head -n1 "$file")"
+    case "$first_line" in
+        '#!'*bash*|'#!'*'/sh')
+            bash -n "$file" || fail "shell syntax error: $file"
+            ;;
+        '#!'*php*)
+            php -l "$file" >/dev/null || fail "PHP syntax error: $file"
+            ;;
+        '#!'*)
+            fail "unsupported executable interpreter in $file: $first_line"
+            ;;
+        *)
+            # Non-executable data/helper files under /usr/local are validated
+            # by their extension below where applicable.
+            ;;
+    esac
 done < <(find image/package/usr/local -type f -print0)
 
-# Every shipped PHP file must parse cleanly.
+# Every shipped PHP source file must parse cleanly, including web assets and
+# PHP entry points that are not executable in the source tree.
 while IFS= read -r -d '' file; do
     php -l "$file" >/dev/null || fail "PHP syntax error: $file"
 done < <(find image/package -type f -name '*.php' -print0)
