@@ -32,7 +32,9 @@ jobs:
           sudo apt-get install -y php-cli python3 openssl sqlite3 shellcheck
 
       - name: Run repository test suite
-        run: make check
+        run: |
+          bash -n scripts/generate-release-metadata.sh
+          make check
 
       - name: Run integrated platform tests
         shell: bash
@@ -71,7 +73,7 @@ jobs:
         run: make image-rpi4-usb
 
       - name: Verify candidate image
-        run: scripts/generate-release-metadata.sh artifacts candidate "$GITHUB_SHA" "$GITHUB_RUN_ID"
+        run: bash scripts/generate-release-metadata.sh artifacts candidate "$GITHUB_SHA" "$GITHUB_RUN_ID"
 
       - name: Upload candidate image
         uses: actions/upload-artifact@v4
