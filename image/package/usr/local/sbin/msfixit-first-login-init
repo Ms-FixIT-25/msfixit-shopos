@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+marker=/var/lib/msfixit-shopos/first-login-initialized
+credential_file=/run/msfixit-shopos/first-login.txt
+user=shopadmin
+
+[ -e "$marker" ] && exit 0
+id "$user" >/dev/null 2>&1 || { echo "Missing required user: $user" >&2; exit 1; }
+
+install -d -o root -g root -m 0700 "$(dirname "$marker")"
+install -d -o root -g root -m 0700 "$(dirname "$credential_file")"
+
+# Generate a console-only bootstrap password. It is never stored in the image,
+# repository, journal or persistent filesystem.
+password="$(tr -dc 'A-Za-z0-9' </dev/urandom | head -c 20)"
+printf '%s:%s\n' "$user" "$password" | chpasswd
+chage -d 0 "$user"
+
+{
+    printf 'Ms. FixIT ShopOS first login\n'
+    printf 'Username: %s\n' "$user"
+    printf 'One-time password: %s\n' "$password"
+    printf 'You must choose a new password immediately after login.\n'
+} > "$credential_file"
+chmod 0600 "$credential_file"
+cat "$credential_file" >/dev/console
+
+# Keep only the non-secret completion marker. /run is cleared on reboot.
+touch "$marker"
+chmod 0600 "$marker"
+unset password
