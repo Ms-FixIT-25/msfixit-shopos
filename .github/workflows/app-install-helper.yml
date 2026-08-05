@@ -1,0 +1,21 @@
+name: ShopOS app install helper
+
+on:
+  pull_request:
+    branches: [agent/shopos-signed-app-installer]
+    paths:
+      - image/package/usr/local/sbin/msfixit-app-install-helper
+      - tests/test-shopos-app-install-helper.sh
+      - .github/workflows/app-install-helper.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-privileged-helper:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate narrow privileged app helper
+        run: bash tests/test-shopos-app-install-helper.sh

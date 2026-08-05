@@ -16,11 +16,32 @@ log_result() {
     printf '%s action=%q argument=%q result=%q actor=www-data\n' "$(date --iso-8601=seconds)" "$action" "$argument" "$result" >> "$audit_log"
 }
 
+queue=/run/msfixit-shopos/devices
+mount_root=/media/shopos
+resolve_device_request() {
+    local id="$1" record
+    [[ "$id" =~ ^[a-f0-9]{24}$ ]] || return 1
+    record="$queue/$id.pending"
+    [ -r "$record" ] || return 1
+    DEVICE_B64=''; UUID_B64=''; LABEL_B64=''; FSTYPE_B64=''; SEEN_AT=''
+    # The queue format contains only fixed variable names and base64/timestamp values.
+    while IFS='=' read -r key value; do
+        case "$key" in
+            DEVICE_B64|UUID_B64|LABEL_B64|FSTYPE_B64|SEEN_AT) printf -v "$key" '%s' "$value" ;;
+            *) return 1 ;;
+        esac
+    done < "$record"
+    requested_device="$(printf '%s' "$DEVICE_B64" | base64 -d)"
+    requested_uuid="$(printf '%s' "$UUID_B64" | base64 -d)"
+    requested_label="$(printf '%s' "$LABEL_B64" | base64 -d)"
+    requested_fstype="$(printf '%s' "$FSTYPE_B64" | base64 -d)"
+    [ -b "$requested_device" ] || return 1
+    [ "$(blkid -o value -s TYPE "$requested_device" 2>/dev/null || true)" = "$requested_fstype" ] || return 1
+}
+
 case "$action" in
     cache-flush)
-        if command -v redis-cli >/dev/null 2>&1; then
-            redis-cli --no-auth-warning FLUSHDB >/dev/null
-        fi
+        if command -v redis-cli >/dev/null 2>&1; then redis-cli --no-auth-warning FLUSHDB >/dev/null; fi
         if command -v wp >/dev/null 2>&1 && [ -d /data/wordpress ]; then
             sudo -u www-data wp --path=/data/wordpress cache flush >/dev/null 2>&1 || true
         fi
@@ -28,18 +49,13 @@ case "$action" in
         ;;
     service-restart)
         case "$argument" in
-            nginx|mariadb|redis-server)
-                systemctl restart "${argument}.service"
-                ;;
+            nginx|mariadb|redis-server) systemctl restart "${argument}.service" ;;
             php-fpm)
                 unit="$(systemctl list-unit-files --type=service --no-legend 'php*-fpm.service' | awk 'NR==1{print $1}')"
                 [ -n "$unit" ] || { log_result unavailable; exit 3; }
                 systemctl restart "$unit"
                 ;;
-            *)
-                log_result rejected
-                exit 2
-                ;;
+            *) log_result rejected; exit 2 ;;
         esac
         log_result success
         ;;
@@ -55,14 +71,7 @@ case "$action" in
         log_result success
         ;;
     logs)
-        case "$argument" in
-            nginx|mariadb|redis-server|php-fpm|shopos)
-                ;;
-            *)
-                log_result rejected
-                exit 2
-                ;;
-        esac
+        case "$argument" in nginx|mariadb|redis-server|php-fpm|shopos) ;; *) log_result rejected; exit 2 ;; esac
         if [ "$argument" = shopos ]; then
             journalctl -n 200 --no-pager -u 'msfixit-*' 2>/dev/null || true
         elif [ "$argument" = php-fpm ]; then
@@ -72,8 +81,26 @@ case "$action" in
         fi | sed -E 's/(password|passwd|secret|token|api[_-]?key)=([^[:space:]]+)/\1=[REDACTED]/Ig' | tail -n 200
         log_result success
         ;;
-    *)
-        log_result rejected
-        exit 2
+    device-mount)
+        id="${argument%%:*}"; mode="${argument#*:}"
+        resolve_device_request "$id" || { log_result rejected; exit 2; }
+        case "$mode" in read-only|read-write) ;; *) log_result rejected; exit 2 ;; esac
+        name="${requested_label:-${requested_uuid:-$id}}"
+        safe_name="$(printf '%s' "$name" | tr -cs '[:alnum:]._-' '_' | cut -c1-48)"
+        [ -n "$safe_name" ] || safe_name="$id"
+        target="$mount_root/$safe_name"
+        install -d -o root -g www-data -m 0750 "$target"
+        options='nosuid,nodev,noexec'
+        [ "$mode" = read-only ] && options="$options,ro"
+        mount -o "$options" -- "$requested_device" "$target"
+        mv "$queue/$id.pending" "$queue/$id.mounted"
+        printf '%s\n' "$target"
+        log_result success
         ;;
+    device-ignore)
+        resolve_device_request "$argument" || { log_result rejected; exit 2; }
+        mv "$queue/$argument.pending" "$queue/$argument.ignored"
+        log_result success
+        ;;
+    *) log_result rejected; exit 2 ;;
 esac

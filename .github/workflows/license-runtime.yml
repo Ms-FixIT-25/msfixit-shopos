@@ -1,0 +1,21 @@
+name: ShopOS license runtime
+
+on:
+  pull_request:
+    branches: [agent/shopos-core-app-platform]
+    paths:
+      - scripts/shopos-license.py
+      - tests/test-shopos-license-runtime.sh
+      - .github/workflows/license-runtime.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-license-runtime:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate signed licenses and entitlements
+        run: bash tests/test-shopos-license-runtime.sh

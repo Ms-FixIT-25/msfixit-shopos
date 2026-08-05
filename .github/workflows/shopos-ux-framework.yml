@@ -1,0 +1,22 @@
+name: ShopOS UX framework
+
+on:
+  pull_request:
+    branches: [agent/shopos-integrated-image-candidate]
+    paths:
+      - image/package/usr/share/msfixit-shopos/admin-console/lib/ux.php
+      - image/package/usr/share/msfixit-shopos/admin-console/public/assets/shopos-ui.css
+      - tests/test-shopos-ux-framework.sh
+      - .github/workflows/shopos-ux-framework.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-ux-framework:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate wizard framework and accessible design system
+        run: bash tests/test-shopos-ux-framework.sh

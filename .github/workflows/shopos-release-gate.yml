@@ -1,0 +1,117 @@
+name: ShopOS release gate
+
+on:
+  pull_request:
+    branches:
+      - main
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: shopos-release-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test complete ShopOS tree
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out candidate
+        uses: actions/checkout@v4
+
+      - name: Install test dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y php-cli python3 openssl sqlite3 shellcheck
+
+      - name: Run repository test suite
+        run: make check
+
+      - name: Run integrated platform tests
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          shopt -s nullglob
+          tests=(tests/test-shopos-*.sh tests/test-guided-device-wizard.sh tests/test-admin-console-foundation.sh)
+          if (( ${#tests[@]} == 0 )); then
+            echo 'No integrated ShopOS tests found.' >&2
+            exit 1
+          fi
+          for test_file in "${tests[@]}"; do
+            echo "::group::$test_file"
+            bash "$test_file"
+            echo '::endgroup::'
+          done
+
+  image:
+    name: Build and verify new Raspberry Pi image
+    needs: test
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 180
+    steps:
+      - name: Check out tested candidate
+        uses: actions/checkout@v4
+
+      - name: Reclaim runner disk space
+        run: |
+          sudo rm -rf /opt/hostedtoolcache || true
+          sudo rm -rf /usr/local/lib/android || true
+          df -h
+
+      - name: Build fresh Raspberry Pi 4 USB image
+        run: make image-rpi4-usb
+
+      - name: Verify image and checksum
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mapfile -t sums < <(find artifacts -maxdepth 1 -type f -name '*.sha256' -print)
+          if (( ${#sums[@]} != 1 )); then
+            echo "Expected exactly one image checksum, found ${#sums[@]}." >&2
+            exit 1
+          fi
+          (
+            cd artifacts
+            sha256sum --check "$(basename "${sums[0]}")"
+          )
+          test -s image/package/usr/share/msfixit-shopos/build-candidate.txt
+          printf 'SOURCE_COMMIT=%s\n' "$GITHUB_SHA" > artifacts/release-provenance.txt
+          printf 'WORKFLOW_RUN=%s\n' "$GITHUB_RUN_ID" >> artifacts/release-provenance.txt
+          printf 'BUILD_UTC=%s\n' "$(date -u +%FT%TZ)" >> artifacts/release-provenance.txt
+
+      - name: Upload tested image
+        uses: actions/upload-artifact@v4
+        with:
+          name: shopos-rpi4-usb-${{ github.sha }}
+          path: artifacts/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+  merge:
+    name: Merge tested image candidate to main
+    needs: [test, image]
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.draft == false &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.base.ref == 'main'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Merge only the tested head commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          TESTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -Eeuo pipefail
+          gh pr merge "$PR_URL" \
+            --squash \
+            --delete-branch \
+            --match-head-commit "$TESTED_HEAD_SHA"

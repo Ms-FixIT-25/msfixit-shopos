@@ -1,0 +1,23 @@
+name: ShopOS first-boot OOBE
+
+on:
+  pull_request:
+    branches: [agent/shopos-ux-framework]
+    paths:
+      - image/package/usr/share/msfixit-shopos/admin-console/public/oobe.php
+      - image/package/usr/local/sbin/msfixit-oobe-apply
+      - image/package/etc/sudoers.d/msfixit-shopos-oobe
+      - tests/test-shopos-first-boot-oobe.sh
+      - .github/workflows/first-boot-oobe.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-first-boot-oobe:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate guided and safe first-boot setup
+        run: bash tests/test-shopos-first-boot-oobe.sh

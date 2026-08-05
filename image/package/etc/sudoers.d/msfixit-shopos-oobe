@@ -1,0 +1,2 @@
+Defaults:www-data !requiretty
+www-data ALL=(root) NOPASSWD: /usr/local/sbin/msfixit-oobe-apply /run/shopos-oobe-*
