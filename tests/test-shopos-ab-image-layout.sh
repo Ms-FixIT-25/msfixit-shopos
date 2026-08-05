@@ -13,6 +13,9 @@ grep -Fq 'SHOPOS_ROOT_B' "$layout"
 grep -Fq 'expected exactly boot and root partitions' "$layout"
 grep -Fq 'dd if="$root_a" of="$root_b"' "$layout"
 grep -Fq "root=LABEL=" "$selector"
+grep -Fq "tokens[roots[0]] = 'root=LABEL=SHOPOS_ROOT_A'" "$layout"
+grep -Fq 'initial_root=LABEL=SHOPOS_ROOT_A' "$layout"
+! grep -Fq '/dev/disk/by-slot/system' "$layout"
 ! grep -Eq '(shell=True|os\.system|subprocess\.)' "$selector"
 
 python3 - "$selector" <<'PY'
@@ -32,5 +35,5 @@ with tempfile.TemporaryDirectory() as tmp:
     assert 'PARTUUID=deadbeef-02' not in value
     module.select('A', cmdline)
     assert 'root=LABEL=SHOPOS_ROOT_A' in cmdline.read_text()
-print('PASS: A/B image layout contract and atomic kernel root selection are constrained and testable.')
+print('PASS: A/B image layout selects Slot A initially and supports atomic A/B kernel root switching.')
 PY

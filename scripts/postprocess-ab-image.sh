@@ -5,12 +5,19 @@ image="${1:?usage: postprocess-ab-image.sh RAW_IMAGE}"
 [ "$(id -u)" -eq 0 ] || { echo 'must run as root' >&2; exit 1; }
 [ -f "$image" ] && [ ! -L "$image" ] || { echo 'raw image must be a regular file' >&2; exit 1; }
 
-for cmd in losetup lsblk sfdisk blockdev e2label tune2fs partprobe udevadm dd sha256sum; do
+for cmd in losetup lsblk sfdisk blockdev e2label tune2fs partprobe udevadm dd sha256sum mount umount mountpoint python3; do
     command -v "$cmd" >/dev/null || { echo "missing command: $cmd" >&2; exit 1; }
 done
 
 loop=""
+boot_mount=""
 cleanup() {
+    if [ -n "$boot_mount" ] && mountpoint -q "$boot_mount"; then
+        umount "$boot_mount" 2>/dev/null || true
+    fi
+    if [ -n "$boot_mount" ]; then
+        rmdir "$boot_mount" 2>/dev/null || true
+    fi
     if [ -n "$loop" ]; then
         losetup -d "$loop" 2>/dev/null || true
     fi
@@ -33,6 +40,7 @@ loop=""
 truncate -s $(((old_sectors + align_sectors + root_size) * sector_size)) "$image"
 
 loop="$(losetup --find --show --partscan "$image")"
+boot_part="${loop}p1"
 root_a="${loop}p2"
 start_b=$((old_sectors + align_sectors))
 printf '%s,%s,L\n' "$start_b" "$root_size" | sfdisk --append --no-reread "$loop"
@@ -50,6 +58,36 @@ tune2fs -U random "$root_b" >/dev/null
 e2label "$root_a" | grep -Fxq SHOPOS_ROOT_A
 e2label "$root_b" | grep -Fxq SHOPOS_ROOT_B
 
+# rpi-image-gen writes its original single-slot root path into cmdline.txt.
+# Once the image is converted to ShopOS A/B that path no longer exists, so the
+# very first boot must explicitly select the newly labelled Slot A filesystem.
+boot_mount="$(mktemp -d)"
+mount "$boot_part" "$boot_mount"
+cmdline="$boot_mount/cmdline.txt"
+[ -f "$cmdline" ] && [ ! -L "$cmdline" ] || { echo 'boot cmdline.txt is missing or unsafe' >&2; exit 1; }
+python3 - "$cmdline" <<'PY'
+from pathlib import Path
+import os
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text(encoding='utf-8')
+if '\n' in text.rstrip('\n'):
+    raise SystemExit('kernel cmdline must contain exactly one line')
+tokens = text.strip().split()
+roots = [index for index, token in enumerate(tokens) if token.startswith('root=')]
+if len(roots) != 1:
+    raise SystemExit('kernel cmdline must contain exactly one root parameter')
+tokens[roots[0]] = 'root=LABEL=SHOPOS_ROOT_A'
+tmp = path.with_name('.cmdline.shopos.tmp')
+tmp.write_text(' '.join(tokens) + '\n', encoding='utf-8')
+os.replace(tmp, path)
+PY
+sync
+umount "$boot_mount"
+rmdir "$boot_mount"
+boot_mount=""
+
 cat > "${image}.ab-layout" <<EOF
 schema=1
 boot_partition=1
@@ -57,8 +95,9 @@ root_a_partition=2
 root_b_partition=3
 root_a_label=SHOPOS_ROOT_A
 root_b_label=SHOPOS_ROOT_B
+initial_root=LABEL=SHOPOS_ROOT_A
 root_partition_sectors=${root_size}
 EOF
 sha256sum "$image" > "${image}.sha256"
 
-echo "A/B layout created: $image"
+echo "A/B layout created with initial root SHOPOS_ROOT_A: $image"
