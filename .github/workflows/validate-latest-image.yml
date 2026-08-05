@@ -69,14 +69,30 @@ jobs:
           printf '%s  %s\n' "$SHOPOS_ARTIFACT_SHA256" vm/artifact.zip | sha256sum --check --strict
           unzip -q vm/artifact.zip -d vm
           cd vm
-          mapfile -t checksum_files < <(find . -type f -name '*.img.zst.sha256' -print)
-          test "${#checksum_files[@]}" -eq 1
-          checksum_file="${checksum_files[0]}"
-          image_archive="${checksum_file%.sha256}"
-          test -f "$image_archive"
-          checksum_dir="$(dirname "$checksum_file")"
-          checksum_name="$(basename "$checksum_file")"
-          (cd "$checksum_dir" && sha256sum --check "$checksum_name")
+
+          checksum_file=''
+          image_archive=''
+          expected_image_sha=''
+          valid_pairs=0
+          while IFS= read -r candidate_checksum; do
+            candidate_dir="$(dirname "$candidate_checksum")"
+            candidate_entry="$(awk 'NF >= 2 {print $2; exit}' "$candidate_checksum")"
+            candidate_entry="${candidate_entry#\*}"
+            candidate_sha="$(awk 'NF >= 2 {print $1; exit}' "$candidate_checksum")"
+            candidate_archive="$candidate_dir/$candidate_entry"
+            if [ ! -f "$candidate_archive" ]; then
+              candidate_archive="$candidate_dir/$(basename "${candidate_checksum%.sha256}")"
+            fi
+            if [ -f "$candidate_archive" ] && [[ "$candidate_sha" =~ ^[0-9a-fA-F]{64}$ ]]; then
+              checksum_file="$candidate_checksum"
+              image_archive="$candidate_archive"
+              expected_image_sha="$candidate_sha"
+              valid_pairs=$((valid_pairs + 1))
+            fi
+          done < <(find . -type f -name '*.img.zst.sha256' -print)
+
+          test "$valid_pairs" -eq 1
+          printf '%s  %s\n' "$expected_image_sha" "$image_archive" | sha256sum --check --strict
           unzstd --no-progress "$image_archive" -o shopos-test.img
           rm -f artifact.zip "$image_archive"
           truncate -s 16G shopos-test.img
