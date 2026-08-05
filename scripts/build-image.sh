@@ -39,7 +39,7 @@ fi
 
 if [ "${SHOPOS_SKIP_BUILD_DEPS:-0}" != 1 ]; then
     sudo apt-get update
-    sudo apt-get install -y fdisk e2fsprogs util-linux xz-utils
+    sudo apt-get install -y fdisk e2fsprogs util-linux xz-utils zip
     sudo chmod o+x "$HOME"
     (cd "$rig_dir" && sudo ./install_deps.sh)
 fi
@@ -67,15 +67,34 @@ sudo bash "${root}/scripts/postprocess-ab-image.sh" "$raw"
 rm -rf "$artifacts_dir"
 install -d -m 0755 "$artifacts_dir"
 output="$artifacts_dir/${image_name}.img.xz"
+windows_output="$artifacts_dir/${image_name}.img.zip"
+windows_raw="$work/windows/${image_name}.img"
+
 xz --threads=0 --check=crc64 --compress --stdout "$raw" > "$output"
+
+# A/B post-processing grows the image after its initial creation. Some Windows
+# extractors preserve the resulting zero ranges as sparse holes. Raspberry Pi
+# Imager 2.x then appears to use the allocated size instead of the logical size
+# for its progress denominator and can display more than 200 percent. Build a
+# deliberately dense copy and wrap it in ZIP64 so Windows extraction yields a
+# conventional, fully allocated IMG file with a stable 0-100 percent display.
+install -d -m 0755 "$(dirname "$windows_raw")"
+cp --sparse=never "$raw" "$windows_raw"
+(
+    cd "$(dirname "$windows_raw")"
+    zip -9 -q "$windows_output" "$(basename "$windows_raw")"
+)
+
 cp "${raw}.ab-layout" "$artifacts_dir/${image_name}.ab-layout"
 (
     cd "$artifacts_dir"
     sha256sum "$(basename "$output")" > "$(basename "$output").sha256"
+    sha256sum "$(basename "$windows_output")" > "$(basename "$windows_output").sha256"
 )
 
-printf 'Device:      %s\n' "$device"
-printf 'Storage:     %s\n' "$storage"
-printf 'A/B image:   %s\n' "$output"
-printf 'Layout:      %s\n' "$artifacts_dir/${image_name}.ab-layout"
-printf 'Checksum:    %s\n' "$output.sha256"
+printf 'Device:        %s\n' "$device"
+printf 'Storage:       %s\n' "$storage"
+printf 'A/B image:     %s\n' "$output"
+printf 'Windows image: %s\n' "$windows_output"
+printf 'Layout:        %s\n' "$artifacts_dir/${image_name}.ab-layout"
+printf 'Checksums:     %s, %s\n' "$output.sha256" "$windows_output.sha256"
