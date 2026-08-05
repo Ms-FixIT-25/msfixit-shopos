@@ -1,0 +1,173 @@
+#!/usr/bin/env python3
+"""Constrained ShopOS A/B slot writer and boot selector."""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import pathlib
+import stat
+import sys
+import tempfile
+from typing import Any
+
+CONFIG = pathlib.Path('/etc/msfixit-shopos/update-slots.json')
+ALLOWED_KEYS = {'schema', 'slots', 'boot_selection', 'allowed_boot_root'}
+ALLOWED_SLOTS = {'A', 'B'}
+
+
+class SlotError(RuntimeError):
+    pass
+
+
+def load_config(path: pathlib.Path) -> dict[str, Any]:
+    try:
+        cfg = json.loads(path.read_text(encoding='utf-8'))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise SlotError('slot configuration is unavailable or invalid') from exc
+    if not isinstance(cfg, dict) or set(cfg) != ALLOWED_KEYS or cfg.get('schema') != 1:
+        raise SlotError('slot configuration does not match the strict schema')
+    slots = cfg.get('slots')
+    if not isinstance(slots, dict) or set(slots) != ALLOWED_SLOTS:
+        raise SlotError('exactly slots A and B must be configured')
+    for slot, value in slots.items():
+        if not isinstance(value, str) or value != f'/dev/disk/by-partlabel/SHOPOS_ROOT_{slot}':
+            raise SlotError('slot devices must use the fixed ShopOS partition labels')
+    boot_root = pathlib.Path(str(cfg.get('allowed_boot_root')))
+    boot_file = pathlib.Path(str(cfg.get('boot_selection')))
+    if boot_root != pathlib.Path('/boot/firmware') or boot_file.parent != boot_root:
+        raise SlotError('boot selection path is outside the fixed boot root')
+    return cfg
+
+
+def mounted_sources() -> set[str]:
+    sources: set[str] = set()
+    try:
+        for line in pathlib.Path('/proc/self/mountinfo').read_text(encoding='utf-8').splitlines():
+            fields = line.split()
+            if '-' in fields:
+                sep = fields.index('-')
+                if len(fields) > sep + 2:
+                    sources.add(os.path.realpath(fields[sep + 2]))
+    except OSError as exc:
+        raise SlotError('cannot inspect mounted filesystems') from exc
+    return sources
+
+
+def resolve_target(cfg: dict[str, Any], slot: str) -> pathlib.Path:
+    if slot not in ALLOWED_SLOTS:
+        raise SlotError('slot must be A or B')
+    configured = pathlib.Path(cfg['slots'][slot])
+    try:
+        resolved = pathlib.Path(os.path.realpath(configured))
+        mode = resolved.stat().st_mode
+    except OSError as exc:
+        raise SlotError(f'slot {slot} device is unavailable') from exc
+    test_mode = os.environ.get('SHOPOS_SLOT_WRITER_TEST') == '1'
+    if not stat.S_ISBLK(mode) and not (test_mode and stat.S_ISREG(mode)):
+        raise SlotError('slot target is not a block device')
+    if os.path.realpath(resolved) in mounted_sources():
+        raise SlotError('refusing to overwrite a mounted slot')
+    return resolved
+
+
+def hash_file(path: pathlib.Path) -> tuple[str, int]:
+    digest = hashlib.sha256()
+    size = 0
+    with path.open('rb') as handle:
+        for chunk in iter(lambda: handle.read(4 * 1024 * 1024), b''):
+            digest.update(chunk)
+            size += len(chunk)
+    return digest.hexdigest(), size
+
+
+def write_slot(cfg: dict[str, Any], slot: str, image: pathlib.Path, expected_hash: str, expected_size: int) -> None:
+    if not image.is_file() or image.is_symlink():
+        raise SlotError('image must be a regular non-symlink file')
+    digest, size = hash_file(image)
+    if digest != expected_hash or size != expected_size:
+        raise SlotError('image hash or size does not match the verified manifest')
+    target = resolve_target(cfg, slot)
+    with image.open('rb') as source, target.open('r+b', buffering=0) as destination:
+        destination.seek(0)
+        for chunk in iter(lambda: source.read(4 * 1024 * 1024), b''):
+            destination.write(chunk)
+        destination.flush()
+        os.fsync(destination.fileno())
+    verify_hash, verify_size = hash_file_region(target, expected_size)
+    if verify_hash != expected_hash or verify_size != expected_size:
+        raise SlotError('written slot verification failed')
+
+
+def hash_file_region(path: pathlib.Path, length: int) -> tuple[str, int]:
+    digest = hashlib.sha256()
+    remaining = length
+    size = 0
+    with path.open('rb', buffering=0) as handle:
+        while remaining:
+            chunk = handle.read(min(4 * 1024 * 1024, remaining))
+            if not chunk:
+                break
+            digest.update(chunk)
+            size += len(chunk)
+            remaining -= len(chunk)
+    return digest.hexdigest(), size
+
+
+def select_slot(cfg: dict[str, Any], slot: str) -> None:
+    if slot not in ALLOWED_SLOTS:
+        raise SlotError('slot must be A or B')
+    boot_file = pathlib.Path(cfg['boot_selection'])
+    boot_file.parent.mkdir(parents=True, exist_ok=True)
+    data = f'SHOPOS_SLOT={slot}\nSHOPOS_ROOT_LABEL=SHOPOS_ROOT_{slot}\n'.encode()
+    fd, tmp = tempfile.mkstemp(prefix='.shopos-slot.', dir=boot_file.parent)
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, 'wb') as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp, boot_file)
+        dir_fd = os.open(boot_file.parent, os.O_DIRECTORY)
+        try:
+            os.fsync(dir_fd)
+        finally:
+            os.close(dir_fd)
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--config', type=pathlib.Path, default=CONFIG)
+    sub = parser.add_subparsers(dest='command', required=True)
+    sub.add_parser('validate-config')
+    write = sub.add_parser('write')
+    write.add_argument('slot', choices=sorted(ALLOWED_SLOTS))
+    write.add_argument('image', type=pathlib.Path)
+    write.add_argument('sha256')
+    write.add_argument('size', type=int)
+    select = sub.add_parser('select')
+    select.add_argument('slot', choices=sorted(ALLOWED_SLOTS))
+    args = parser.parse_args()
+    try:
+        cfg = load_config(args.config)
+        if args.command == 'write':
+            if len(args.sha256) != 64 or any(c not in '0123456789abcdef' for c in args.sha256):
+                raise SlotError('invalid SHA-256')
+            if args.size < 1:
+                raise SlotError('invalid image size')
+            write_slot(cfg, args.slot, args.image, args.sha256, args.size)
+        elif args.command == 'select':
+            select_slot(cfg, args.slot)
+        print(json.dumps({'ok': True, 'command': args.command}, sort_keys=True))
+        return 0
+    except (SlotError, OSError) as exc:
+        print(f'ERROR: {exc}', file=sys.stderr)
+        return 1
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())
