@@ -1,0 +1,22 @@
+[Unit]
+Description=Synchronize ShopOS A/B trial boot and rollback selection
+DefaultDependencies=no
+After=local-fs.target
+Before=msfixit-firstboot.service nginx.service mariadb.service redis-server.service
+ConditionPathExists=/etc/msfixit-shopos/update-slots.json
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/msfixit-update-boot-sync
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=full
+ReadWritePaths=/var/lib/msfixit-shopos/update /boot/firmware
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+
+[Install]
+WantedBy=multi-user.target
