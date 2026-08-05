@@ -4,6 +4,13 @@ set -u
 readonly state_file=/run/msfixit-shopos/firstboot-state
 readonly ready_marker=/data/.shopos-ready
 readonly log_file=/var/log/msfixit-firstboot.log
+readonly default_columns=80
+readonly default_rows=24
+readonly box_width=54
+readonly content_width=$((box_width - 2))
+
+screen_initialized=0
+last_frame_key=""
 
 cleanup() {
     printf '\033[0m\033[?25h'
@@ -19,15 +26,56 @@ repeat_char() {
     printf '%s' "$output"
 }
 
+terminal_size() {
+    local size rows columns
+    size="$(stty size 2>/dev/null || true)"
+    read -r rows columns <<< "$size"
+    [[ "$rows" =~ ^[0-9]+$ ]] || rows=$default_rows
+    [[ "$columns" =~ ^[0-9]+$ ]] || columns=$default_columns
+    (( rows >= 20 )) || rows=20
+    (( columns >= 60 )) || columns=60
+    printf '%s %s' "$rows" "$columns"
+}
+
+clip_text() {
+    local text="$1" width="$2"
+    if (( ${#text} > width )); then
+        if (( width > 3 )); then
+            printf '%s...' "${text:0:width-3}"
+        else
+            printf '%s' "${text:0:width}"
+        fi
+    else
+        printf '%s' "$text"
+    fi
+}
+
+center_text() {
+    local text width left right
+    text="$(clip_text "$1" "$2")"
+    width="$2"
+    left=$(((width - ${#text}) / 2))
+    right=$((width - ${#text} - left))
+    printf '%*s%s%*s' "$left" '' "$text" "$right" ''
+}
+
+left_text() {
+    local text width
+    text="$(clip_text "$1" "$2")"
+    width="$2"
+    printf '%-*s' "$width" "$text"
+}
+
 progress_bar() {
-    local progress="$1" width=42 filled empty
+    local progress="$1" width="$2" filled empty
     [[ "$progress" =~ ^[0-9]+$ ]] || progress=0
     (( progress > 100 )) && progress=100
+    (( progress < 0 )) && progress=0
     filled=$((progress * width / 100))
     empty=$((width - filled))
     printf '['
-    repeat_char '■' "$filled"
-    repeat_char '·' "$empty"
+    repeat_char '#' "$filled"
+    repeat_char '-' "$empty"
     printf '] %3d%%' "$progress"
 }
 
@@ -48,53 +96,85 @@ credentials_path() {
     printf '%s' '/boot/firmware/SHOPOS-CREDENTIALS.txt'
 }
 
-draw_screen() {
-    local state="$1" progress="$2" title="$3" detail="$4" ip
-    ip="$(first_ip)"
+append_at() {
+    local -n target="$1"
+    local row="$2" column="$3" text="$4"
+    target+="$(printf '\033[%d;%dH%s' "$row" "$column" "$text")"
+}
 
-    printf '\033[2J\033[H\033[?25l'
-    printf '\033[48;2;10;25;48m\033[38;2;255;255;255m'
-    printf '\n\n'
-    printf '                 ╭──────────────────────────────────────────────╮\n'
-    printf '                 │                                              │\n'
-    printf '                 │              \033[1;38;2;36;184;189mMS. FIXIT\033[0;48;2;10;25;48m              │\n'
-    printf '                 │                \033[1;38;2;237;63;145mSHOPOS\033[0;48;2;10;25;48m                │\n'
-    printf '                 │                                              │\n'
-    printf '                 │       IT gelöst. Einfach. Fix. Günstig.      │\n'
-    printf '                 ╰──────────────────────────────────────────────╯\n\n'
-    printf '                    \033[1m%-54s\033[0;48;2;10;25;48m\n' "$title"
-    printf '                    %-54s\n\n' "$detail"
-    printf '                    '
-    if [ "$state" = failed ]; then
-        printf '\033[38;2;255;115;115m'
-    elif [ "$state" = ready ]; then
-        printf '\033[38;2;36;184;189m'
-    else
-        printf '\033[38;2;237;63;145m'
+draw_screen() {
+    local state="$1" progress="$2" title="$3" detail="$4"
+    local ip rows columns left top frame frame_key border bar bar_width row
+    ip="$(first_ip)"
+    read -r rows columns <<< "$(terminal_size)"
+
+    left=$(((columns - box_width) / 2 + 1))
+    (( left > 0 )) || left=1
+    top=$(((rows - 18) / 2 + 1))
+    (( top > 0 )) || top=1
+
+    frame_key="${rows}|${columns}|${state}|${progress}|${title}|${detail}|${ip}"
+    if [ "$frame_key" = "$last_frame_key" ]; then
+        return 0
     fi
-    progress_bar "$progress"
-    printf '\033[0;48;2;10;25;48m\n\n'
-    printf '                    Gerät:  %-44s\n' "$(hostname)"
-    printf '                    LAN:    %-44s\n' "$ip"
+    last_frame_key="$frame_key"
+
+    border="+$(repeat_char '-' "$content_width")+"
+    bar_width=$((content_width - 8))
+    (( bar_width >= 12 )) || bar_width=12
+    bar="$(progress_bar "$progress" "$bar_width")"
+
+    frame=''
+    if (( screen_initialized == 0 )); then
+        frame+='\033[2J\033[H\033[?25l\033[48;2;10;25;48m\033[38;2;255;255;255m'
+        screen_initialized=1
+    else
+        frame+='\033[?25l\033[48;2;10;25;48m\033[38;2;255;255;255m'
+    fi
+
+    row=$top
+    append_at frame "$row" "$left" "$border"; ((row++))
+    append_at frame "$row" "$left" "|$(center_text '' "$content_width")|"; ((row++))
+    append_at frame "$row" "$left" "|\033[1;38;2;36;184;189m$(center_text 'MS. FIXIT' "$content_width")\033[0;48;2;10;25;48m|"; ((row++))
+    append_at frame "$row" "$left" "|\033[1;38;2;237;63;145m$(center_text 'SHOPOS' "$content_width")\033[0;48;2;10;25;48m|"; ((row++))
+    append_at frame "$row" "$left" "|$(center_text '' "$content_width")|"; ((row++))
+    append_at frame "$row" "$left" "|$(center_text 'IT gelöst. Einfach. Fix. Günstig.' "$content_width")|"; ((row++))
+    append_at frame "$row" "$left" "$border"; ((row+=2))
+
+    append_at frame "$row" "$left" "\033[1m$(center_text "$title" "$box_width")\033[0;48;2;10;25;48m"; ((row++))
+    append_at frame "$row" "$left" "$(center_text "$detail" "$box_width")"; ((row+=2))
+
+    case "$state" in
+        failed) frame+='\033[38;2;255;115;115m' ;;
+        ready) frame+='\033[38;2;36;184;189m' ;;
+        *) frame+='\033[38;2;237;63;145m' ;;
+    esac
+    append_at frame "$row" "$left" "$(center_text "$bar" "$box_width")"
+    frame+='\033[0;48;2;10;25;48m'
+    ((row+=2))
+
+    append_at frame "$row" "$left" "$(left_text "Gerät:  $(hostname)" "$box_width")"; ((row++))
+    append_at frame "$row" "$left" "$(left_text "LAN:    $ip" "$box_width")"; ((row+=2))
 
     case "$state" in
         ready)
-            printf '\n                    \033[1;38;2;36;184;189mShopOS ist vollständig eingerichtet.\033[0;48;2;10;25;48m\n'
-            printf '                    Shop:    http://%s/\n' "$ip"
-            printf '                    Zugang:  %s\n' "$(credentials_path)"
-            printf '\n                    Zugangsdaten sicher speichern und die Datei danach löschen.\n'
+            append_at frame "$row" "$left" "\033[1;38;2;36;184;189m$(center_text 'ShopOS ist vollständig eingerichtet.' "$box_width")\033[0;48;2;10;25;48m"; ((row++))
+            append_at frame "$row" "$left" "$(left_text "Shop:    http://${ip}/" "$box_width")"; ((row++))
+            append_at frame "$row" "$left" "$(left_text "Zugang:  $(credentials_path)" "$box_width")"
             ;;
         failed)
-            printf '\n                    \033[1;38;2;255;115;115mDie automatische Einrichtung wurde unterbrochen.\033[0;48;2;10;25;48m\n'
-            printf '                    Protokoll: %s\n' "$log_file"
-            printf '                    Diagnose:  sudo systemctl status msfixit-firstboot\n'
+            append_at frame "$row" "$left" "\033[1;38;2;255;115;115m$(center_text 'Die automatische Einrichtung wurde unterbrochen.' "$box_width")\033[0;48;2;10;25;48m"; ((row++))
+            append_at frame "$row" "$left" "$(left_text "Protokoll: $log_file" "$box_width")"; ((row++))
+            append_at frame "$row" "$left" "$(left_text 'Diagnose: sudo systemctl status msfixit-firstboot' "$box_width")"
             ;;
         *)
-            printf '\n                    Der erste Start kann einige Minuten dauern.\n'
-            printf '                    Bitte das Gerät währenddessen nicht ausschalten.\n'
+            append_at frame "$row" "$left" "$(center_text 'Der erste Start kann einige Minuten dauern.' "$box_width")"; ((row++))
+            append_at frame "$row" "$left" "$(center_text 'Bitte das Gerät währenddessen nicht ausschalten.' "$box_width")"
             ;;
     esac
-    printf '\033[0m'
+
+    frame+='\033[0m'
+    printf '%b' "$frame"
 }
 
 state=running
