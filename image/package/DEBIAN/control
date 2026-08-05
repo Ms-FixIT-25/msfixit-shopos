@@ -4,11 +4,12 @@ Section: admin
 Priority: optional
 Architecture: arm64
 Maintainer: Ms. FixIT <stefaniekilzer@gmail.com>
-Depends: nginx, mariadb-server, redis-server, php-fpm, php-cli, php-mysql, php-curl, php-gd, php-intl, php-mbstring, php-xml, php-zip, php-bcmath, php-imagick, php-redis, php-tcpdf, cups-client, curl, ca-certificates, jq, unzip, rsync, nftables, openssl, openssh-client, sshpass, logrotate, sudo, plymouth, plymouth-themes, initramfs-tools, fonts-dejavu-core
+Depends: nginx, mariadb-server, redis-server, php-fpm, php-cli, php-mysql, php-curl, php-gd, php-intl, php-mbstring, php-xml, php-zip, php-bcmath, php-imagick, php-redis, php-tcpdf, cups-client, curl, ca-certificates, jq, unzip, rsync, nftables, openssl, openssh-client, sshpass, logrotate, sudo, plymouth, plymouth-themes, initramfs-tools, fonts-dejavu-core, chromium, xserver-xorg-core, xserver-xorg-video-all, xinit, x11-xserver-utils
 Description: Ms. FixIT ShopOS flash-ready Austrian commerce appliance
  Installs a branded Raspberry Pi appliance operating system with a quiet
- Plymouth boot, guided first-start display, local WordPress and WooCommerce
- payloads, web, database, cache, firewall, Cloudflare Tunnel, article master,
- immutable invoicing, dunning, ProSaldo handoff, fulfillment, print queues,
- privacy-gated service requests, fail-closed Austrian/DACH compliance controls,
- guarded ALSO Austria connectors, product discovery and customer help pages.
+ Plymouth boot, guided first-start display, local graphical ShopOS kiosk,
+ WordPress and WooCommerce payloads, web, database, cache, firewall,
+ Cloudflare Tunnel, article master, immutable invoicing, dunning, ProSaldo
+ handoff, fulfillment, print queues, privacy-gated service requests,
+ fail-closed Austrian/DACH compliance controls, guarded ALSO Austria
+ connectors, product discovery and customer help pages.
