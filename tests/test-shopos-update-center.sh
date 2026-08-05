@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+root="$(cd "$(dirname "$0")/.." && pwd)"
+helper="$root/image/package/usr/local/sbin/msfixit-update-center"
+gui="$root/image/package/usr/share/msfixit-shopos/admin-console/public/updates.php"
+sudoers="$root/image/package/etc/sudoers.d/msfixit-shopos-update-center"
+nginx="$root/image/package/etc/nginx/snippets/msfixit-admin-console.conf"
+python3 -m py_compile "$helper"
+if command -v php >/dev/null 2>&1; then php -l "$gui"; fi
+grep -Fq "session_name('SHOPOSADMIN')" "$gui"
+grep -Fq "hash_equals(csrf()" "$gui"
+grep -Fq "['sudo','-n','/usr/local/sbin/msfixit-update-center']" "$gui"
+grep -Fq "['check-system','start-system-update','reboot','update-app','update-all-apps']" "$gui"
+grep -Fq "bypass_shell" "$gui"
+! grep -Eq 'shell_exec|passthru|popen\(' "$gui"
+grep -Fq "APP_RE=re.compile" "$helper"
+grep -Fq "systemd-run" "$helper"
+grep -Fq "msfixit-app-install-helper" "$helper"
+grep -Fq "update-app at.msfixit.shopos.*" "$sudoers"
+grep -Fq "location = /admin/updates" "$nginx"
+grep -Fq "updates.php" "$nginx"
+echo 'ShopOS Update Center contract passed.'
