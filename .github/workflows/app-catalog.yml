@@ -1,0 +1,22 @@
+name: ShopOS app catalog
+
+on:
+  pull_request:
+    branches: [agent/shopos-license-runtime]
+    paths:
+      - catalog/**
+      - scripts/shopos-app-catalog.py
+      - tests/test-shopos-app-catalog.sh
+      - .github/workflows/app-catalog.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-app-catalog:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate catalog and entitlement states
+        run: bash tests/test-shopos-app-catalog.sh
