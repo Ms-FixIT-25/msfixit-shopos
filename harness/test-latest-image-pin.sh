@@ -12,9 +12,14 @@ grep -Fq "SHOPOS_SOURCE_SHA: 5a799d79dba7015fd8a18f974a4cc6079ae24dfa" "$workflo
 grep -Fq 'artifact_head_sha="$(gh api' "$workflow"
 grep -Fq 'test "$artifact_head_sha" = "$SHOPOS_SOURCE_SHA"' "$workflow"
 grep -Fq 'sha256sum --check --strict' "$workflow"
-grep -Fq 'sha256sum --check msfixit-shopos-rpi4-usb.img.zst.sha256' "$workflow"
+grep -Fq "find . -type f -name '*.img.zst.sha256'" "$workflow"
+grep -Fq 'test "${#checksum_files[@]}" -eq 1' "$workflow"
+grep -Fq 'image_archive="${checksum_file%.sha256}"' "$workflow"
+grep -Fq 'test -f "$image_archive"' "$workflow"
+grep -Fq 'sha256sum --check "$checksum_name"' "$workflow"
+grep -Fq 'unzstd --no-progress "$image_archive" -o shopos-test.img' "$workflow"
 grep -Fq 'runs-on: ${{ matrix.runner }}' "$workflow"
 grep -Fq 'runner: ubuntu-26.04' "$workflow"
 grep -Fq 'runner: ubuntu-26.04-arm' "$workflow"
 
-printf 'PASS: release-candidate harness pins artifact ID, ZIP digest, source commit and both runner architectures.\n'
+printf 'PASS: release-candidate harness pins provenance and discovers exactly one checksummed image archive on both runner architectures.\n'
