@@ -31,6 +31,24 @@ assert_contains 'ModuleName=script' image/package/usr/share/plymouth/themes/msfi
 assert_contains 'MS. FIXIT' image/package/usr/share/plymouth/themes/msfixit-shopos/msfixit-shopos.script
 assert_contains 'SHOPOS' image/package/usr/share/plymouth/themes/msfixit-shopos/msfixit-shopos.script
 
+assert_contains 'terminal_size()' image/package/usr/local/sbin/msfixit-boot-console
+assert_contains 'left=$(((columns - box_width) / 2 + 1))' image/package/usr/local/sbin/msfixit-boot-console
+assert_contains 'top=$(((rows - 18) / 2 + 1))' image/package/usr/local/sbin/msfixit-boot-console
+assert_contains 'if [ "$frame_key" = "$last_frame_key" ]' image/package/usr/local/sbin/msfixit-boot-console
+assert_contains "border=\"+\$(repeat_char '-' \"\$content_width\")+\"" image/package/usr/local/sbin/msfixit-boot-console
+assert_contains "repeat_char '#'" image/package/usr/local/sbin/msfixit-boot-console
+
+clear_count="$(grep -Foc '\033[2J' image/package/usr/local/sbin/msfixit-boot-console)"
+if [ "$clear_count" -ne 1 ]; then
+    echo "Boot console must clear the terminal exactly once, found ${clear_count}." >&2
+    exit 1
+fi
+
+if grep -Fq '                 ╭' image/package/usr/local/sbin/msfixit-boot-console; then
+    echo 'Boot console must not use fixed-column positioning.' >&2
+    exit 1
+fi
+
 assert_contains 'plymouth-set-default-theme -R msfixit-shopos' image/package/DEBIAN/postinst
 assert_contains 'quiet splash loglevel=3' image/package/DEBIAN/postinst
 assert_contains 'systemctl enable msfixit-boot-console.service' image/package/DEBIAN/postinst
