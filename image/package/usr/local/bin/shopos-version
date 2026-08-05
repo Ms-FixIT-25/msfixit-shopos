@@ -1,12 +1,51 @@
 #!/usr/bin/env bash
-set -u
+set -Eeuo pipefail
 
 readonly info=/usr/share/msfixit-shopos/build-info.txt
 
-echo "Ms. FixIT ShopOS"
-echo "=================="
-if [ -r "$info" ]; then
-    sed -n -E '/^(SHOPOS_VERSION|BUILD_UTC|WORDPRESS_VERSION|WOOCOMMERCE_VERSION|REDIS_CACHE_VERSION|STOREFRONT_VERSION|CLOUDFLARED_VERSION|WP_CLI_VERSION)=/p' "$info"
-else
-    echo "Build information is unavailable."
-fi
+show_version() {
+    echo "Ms. FixIT ShopOS"
+    echo "=================="
+    if [ -r "$info" ]; then
+        sed -n -E '/^(SHOPOS_VERSION|BUILD_UTC|WORDPRESS_VERSION|WOOCOMMERCE_VERSION|REDIS_CACHE_VERSION|STOREFRONT_VERSION|CLOUDFLARED_VERSION|WP_CLI_VERSION)=/p' "$info"
+    else
+        echo "Build information is unavailable."
+    fi
+}
+
+show_unicorn() {
+    cat <<'UNICORN'
+
+                 /\
+                /  \
+          /\   / /\ \   /\
+         /  \_/ /  \ \_/  \
+        /                 \
+       /   ◉           ◉   \
+      /         ___         \
+     /_________/___\_________\
+              /_____\
+
+UNICORN_MODE=stable
+No unicorns were harmed while compiling this appliance.
+The horn is not a dependency. It is a feature flag.
+UNICORN
+}
+
+case "${1:-}" in
+    '')
+        show_version
+        ;;
+    --unicorn)
+        show_version
+        show_unicorn
+        ;;
+    --help|-h)
+        printf 'Usage: shopos-version [--unicorn]\n'
+        ;;
+    *)
+        printf 'Unknown option: %s\n' "$1" >&2
+        printf 'Usage: shopos-version [--unicorn]\n' >&2
+        exit 2
+        ;;
+esac
