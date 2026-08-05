@@ -1,0 +1,239 @@
+#!/usr/bin/env python3
+"""Download and install signed ShopOS rootfs updates from GitHub Releases."""
+from __future__ import annotations
+
+import argparse
+import hashlib
+import json
+import os
+import pathlib
+import subprocess
+import sys
+import tempfile
+import urllib.error
+import urllib.parse
+import urllib.request
+from typing import Any
+
+CONFIG = pathlib.Path('/etc/msfixit-shopos/update-source.json')
+STATE = pathlib.Path('/var/lib/msfixit-shopos/update/state.json')
+UPDATE = pathlib.Path('/usr/local/sbin/msfixit-update')
+WRITER = pathlib.Path('/usr/local/sbin/msfixit-slot-writer')
+SELECTOR = pathlib.Path('/usr/local/sbin/msfixit-boot-selector')
+ALLOWED_CONFIG_KEYS = {'schema', 'repository', 'channel', 'manifest_asset', 'auto_apply', 'reboot_after_apply'}
+ALLOWED_HOSTS = {'api.github.com', 'github.com', 'objects.githubusercontent.com', 'release-assets.githubusercontent.com'}
+MAX_MANIFEST = 256 * 1024
+MAX_IMAGE = 16 * 1024 * 1024 * 1024
+
+
+class AgentError(RuntimeError):
+    pass
+
+
+def load_json(path: pathlib.Path) -> dict[str, Any]:
+    try:
+        value = json.loads(path.read_text(encoding='utf-8'))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise AgentError(f'cannot read valid JSON: {path}') from exc
+    if not isinstance(value, dict):
+        raise AgentError('JSON document must be an object')
+    return value
+
+
+def load_config(path: pathlib.Path) -> dict[str, Any]:
+    cfg = load_json(path)
+    if set(cfg) != ALLOWED_CONFIG_KEYS or cfg.get('schema') != 1:
+        raise AgentError('update source configuration does not match strict schema')
+    repo = cfg.get('repository')
+    if repo != 'Ms-FixIT-25/msfixit-shopos':
+        raise AgentError('unexpected update repository')
+    if cfg.get('channel') not in {'stable', 'testing'}:
+        raise AgentError('unsupported update channel')
+    if cfg.get('manifest_asset') != 'shopos-update-manifest.json':
+        raise AgentError('unexpected manifest asset name')
+    if not isinstance(cfg.get('auto_apply'), bool) or not isinstance(cfg.get('reboot_after_apply'), bool):
+        raise AgentError('invalid update booleans')
+    return cfg
+
+
+def request_json(url: str, limit: int = MAX_MANIFEST) -> dict[str, Any]:
+    data = download_bytes(url, limit)
+    try:
+        value = json.loads(data)
+    except json.JSONDecodeError as exc:
+        raise AgentError('GitHub response is not valid JSON') from exc
+    if not isinstance(value, dict):
+        raise AgentError('GitHub response must be an object')
+    return value
+
+
+def validate_url(url: str) -> None:
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme != 'https' or parsed.hostname not in ALLOWED_HOSTS or parsed.username or parsed.password:
+        raise AgentError('download URL is outside the allowed GitHub HTTPS hosts')
+
+
+def download_bytes(url: str, limit: int) -> bytes:
+    validate_url(url)
+    request = urllib.request.Request(url, headers={'Accept': 'application/vnd.github+json', 'User-Agent': 'ShopOS-Update/1'})
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            final_url = response.geturl()
+            validate_url(final_url)
+            length = response.headers.get('Content-Length')
+            if length is not None and int(length) > limit:
+                raise AgentError('download exceeds size limit')
+            data = response.read(limit + 1)
+    except (urllib.error.URLError, TimeoutError, ValueError) as exc:
+        raise AgentError('GitHub download failed') from exc
+    if len(data) > limit:
+        raise AgentError('download exceeds size limit')
+    return data
+
+
+def download_file(url: str, destination: pathlib.Path, expected_size: int, expected_hash: str) -> None:
+    if expected_size < 1 or expected_size > MAX_IMAGE:
+        raise AgentError('signed image size is outside allowed range')
+    validate_url(url)
+    request = urllib.request.Request(url, headers={'Accept': 'application/octet-stream', 'User-Agent': 'ShopOS-Update/1'})
+    digest = hashlib.sha256()
+    written = 0
+    try:
+        with urllib.request.urlopen(request, timeout=60) as response, destination.open('xb') as output:
+            validate_url(response.geturl())
+            while True:
+                chunk = response.read(4 * 1024 * 1024)
+                if not chunk:
+                    break
+                written += len(chunk)
+                if written > expected_size:
+                    raise AgentError('download is larger than signed size')
+                digest.update(chunk)
+                output.write(chunk)
+            output.flush()
+            os.fsync(output.fileno())
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        raise AgentError('rootfs download failed') from exc
+    if written != expected_size or digest.hexdigest() != expected_hash:
+        raise AgentError('download does not match signed size and SHA-256')
+
+
+def run(command: list[str], capture: bool = False) -> str:
+    result = subprocess.run(command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE if capture else subprocess.DEVNULL,
+                            stderr=subprocess.PIPE, text=True, check=False, timeout=1800)
+    if result.returncode != 0:
+        message = result.stderr.strip() or 'command failed'
+        raise AgentError(message)
+    return result.stdout.strip() if capture else ''
+
+
+def latest_release(cfg: dict[str, Any]) -> dict[str, Any]:
+    repo = cfg['repository']
+    if cfg['channel'] == 'stable':
+        url = f'https://api.github.com/repos/{repo}/releases/latest'
+    else:
+        url = f'https://api.github.com/repos/{repo}/releases?per_page=20'
+        raise AgentError('testing channel requires an explicit prerelease selector and is not enabled yet')
+    release = request_json(url)
+    if release.get('draft') or release.get('prerelease'):
+        raise AgentError('latest release is not a stable published release')
+    return release
+
+
+def find_asset(release: dict[str, Any], name: str) -> str:
+    assets = release.get('assets')
+    if not isinstance(assets, list):
+        raise AgentError('release assets are unavailable')
+    matches = [a for a in assets if isinstance(a, dict) and a.get('name') == name]
+    if len(matches) != 1 or not isinstance(matches[0].get('browser_download_url'), str):
+        raise AgentError(f'exactly one {name} asset is required')
+    return matches[0]['browser_download_url']
+
+
+def verified_manifest(cfg: dict[str, Any], work: pathlib.Path) -> dict[str, Any]:
+    release = latest_release(cfg)
+    manifest_url = find_asset(release, cfg['manifest_asset'])
+    manifest_path = work / cfg['manifest_asset']
+    manifest_path.write_bytes(download_bytes(manifest_url, MAX_MANIFEST))
+    payload = json.loads(run([str(UPDATE), '--state', str(STATE), 'verify', str(manifest_path)], capture=True))
+    if not isinstance(payload, dict):
+        raise AgentError('verified manifest payload is invalid')
+    if payload.get('image_url') != find_asset(release, 'shopos-rootfs.ext4.xz'):
+        raise AgentError('signed rootfs URL does not match the release asset')
+    return {'release': release, 'manifest_path': manifest_path, 'payload': payload}
+
+
+def status_state() -> dict[str, Any]:
+    value = json.loads(run([str(UPDATE), '--state', str(STATE), 'status'], capture=True))
+    if not isinstance(value, dict):
+        raise AgentError('update state is invalid')
+    return value
+
+
+def check(cfg: dict[str, Any]) -> dict[str, Any]:
+    with tempfile.TemporaryDirectory(prefix='shopos-update-check-') as temp:
+        verified = verified_manifest(cfg, pathlib.Path(temp))
+        state = status_state()
+        payload = verified['payload']
+        return {
+            'available': payload['sequence'] > state['installed_sequence'],
+            'version': payload['version'],
+            'sequence': payload['sequence'],
+            'installed_sequence': state['installed_sequence'],
+            'release': verified['release'].get('html_url'),
+        }
+
+
+def apply(cfg: dict[str, Any], reboot: bool) -> dict[str, Any]:
+    with tempfile.TemporaryDirectory(prefix='shopos-update-apply-', dir='/var/lib/msfixit-shopos/update') as temp:
+        work = pathlib.Path(temp)
+        verified = verified_manifest(cfg, work)
+        payload = verified['payload']
+        state = status_state()
+        if payload['sequence'] <= state['installed_sequence']:
+            return {'updated': False, 'reason': 'already-current', 'sequence': state['installed_sequence']}
+        compressed = work / 'shopos-rootfs.ext4.xz'
+        download_file(payload['image_url'], compressed, payload['image_size'], payload['image_sha256'])
+        rootfs = work / 'shopos-rootfs.ext4'
+        run(['xz', '--decompress', '--keep', '--threads=0', str(compressed)])
+        root_hash = payload.get('rootfs_sha256')
+        root_size = payload.get('rootfs_size')
+        if not isinstance(root_hash, str) or not isinstance(root_size, int):
+            raise AgentError('manifest lacks verified uncompressed rootfs identity')
+        run([str(UPDATE), '--state', str(STATE), 'stage', str(verified['manifest_path'])])
+        target = status_state()['target_slot']
+        run([str(WRITER), 'write', target, str(rootfs), root_hash, str(root_size)])
+        run([str(UPDATE), '--state', str(STATE), 'activate-trial'])
+        run([str(SELECTOR), target])
+        result = {'updated': True, 'version': payload['version'], 'sequence': payload['sequence'], 'target_slot': target}
+        if reboot:
+            subprocess.Popen(['/usr/bin/systemctl', 'reboot'], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return result
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--config', type=pathlib.Path, default=CONFIG)
+    sub = parser.add_subparsers(dest='command', required=True)
+    sub.add_parser('check')
+    apply_parser = sub.add_parser('apply')
+    apply_parser.add_argument('--no-reboot', action='store_true')
+    sub.add_parser('run')
+    args = parser.parse_args()
+    try:
+        cfg = load_config(args.config)
+        if args.command == 'check':
+            result = check(cfg)
+        elif args.command == 'apply':
+            result = apply(cfg, cfg['reboot_after_apply'] and not args.no_reboot)
+        else:
+            result = apply(cfg, cfg['reboot_after_apply']) if cfg['auto_apply'] else check(cfg)
+        print(json.dumps(result, sort_keys=True))
+        return 0
+    except (AgentError, OSError, json.JSONDecodeError, subprocess.SubprocessError) as exc:
+        print(f'ERROR: {exc}', file=sys.stderr)
+        return 1
+
+
+if __name__ == '__main__':
+    raise SystemExit(main())
