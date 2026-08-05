@@ -1,0 +1,100 @@
+#!/usr/bin/env python3
+"""Fail-closed ShopOS A/B update manifest verifier and slot state machine."""
+from __future__ import annotations
+import argparse, base64, hashlib, json, os, pathlib, subprocess, sys, tempfile
+from typing import Any
+ALLOWED_PAYLOAD_KEYS={"schema","version","sequence","image_url","image_sha256","image_size","target","minimum_sequence","issued_at","expires_at"}
+ALLOWED_ENVELOPE_KEYS={"payload","signature"}; ALLOWED_STATES={"idle","staged","trial","confirmed","rollback"}; ALLOWED_SLOTS={"A","B"}
+class UpdateError(RuntimeError): pass
+def canonical_json(v:Any)->bytes:return json.dumps(v,sort_keys=True,separators=(",",":"),ensure_ascii=False).encode()
+def load_json(p:pathlib.Path)->dict[str,Any]:
+ try:v=json.loads(p.read_text())
+ except (OSError,json.JSONDecodeError) as e:raise UpdateError(f"cannot read valid JSON: {p}") from e
+ if not isinstance(v,dict):raise UpdateError("JSON document must be an object")
+ return v
+def validate_payload(p:dict[str,Any])->None:
+ if set(p)!=ALLOWED_PAYLOAD_KEYS or p.get("schema")!=1:raise UpdateError("manifest payload fields do not match the strict schema")
+ if not isinstance(p["version"],str) or not p["version"]:raise UpdateError("invalid version")
+ if not isinstance(p["sequence"],int) or p["sequence"]<1:raise UpdateError("invalid sequence")
+ if not isinstance(p["minimum_sequence"],int) or not 0<=p["minimum_sequence"]<=p["sequence"]:raise UpdateError("invalid minimum sequence")
+ if p["target"]!="rpi4-usb":raise UpdateError("manifest target is not supported")
+ d=p["image_sha256"]
+ if not isinstance(d,str) or len(d)!=64 or any(c not in "0123456789abcdef" for c in d):raise UpdateError("invalid image SHA-256")
+ if not isinstance(p["image_size"],int) or p["image_size"]<1:raise UpdateError("invalid image size")
+ if not isinstance(p["image_url"],str) or not p["image_url"].startswith("https://"):raise UpdateError("image URL must use HTTPS")
+ for k in ("issued_at","expires_at"):
+  if not isinstance(p[k],str) or len(p[k])<20:raise UpdateError(f"invalid {k}")
+def verify_signature(payload:dict[str,Any],sig64:str,key:pathlib.Path)->None:
+ try:sig=base64.b64decode(sig64,validate=True)
+ except Exception as e:raise UpdateError("signature is not valid base64") from e
+ if len(sig)!=64 or not key.is_file() or key.is_symlink():raise UpdateError("trusted update key or signature is invalid")
+ with tempfile.TemporaryDirectory(prefix="shopos-update-") as t:
+  q=pathlib.Path(t); pp=q/"payload.json"; sp=q/"signature.bin"; pp.write_bytes(canonical_json(payload)); sp.write_bytes(sig)
+  r=subprocess.run(["openssl","pkeyutl","-verify","-pubin","-inkey",str(key),"-rawin","-in",str(pp),"-sigfile",str(sp)],stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,check=False,timeout=15)
+ if r.returncode:raise UpdateError("manifest signature verification failed")
+def verify_manifest(path:pathlib.Path,key:pathlib.Path)->dict[str,Any]:
+ e=load_json(path)
+ if set(e)!=ALLOWED_ENVELOPE_KEYS or not isinstance(e.get("payload"),dict) or not isinstance(e.get("signature"),str):raise UpdateError("invalid manifest envelope")
+ validate_payload(e["payload"]);verify_signature(e["payload"],e["signature"],key);return e["payload"]
+def default_state()->dict[str,Any]:return {"schema":1,"state":"idle","active_slot":"A","previous_slot":None,"target_slot":None,"installed_sequence":0,"pending_sequence":None,"boot_attempts":0,"max_boot_attempts":3}
+def validate_state(s:dict[str,Any])->None:
+ if set(s)!=set(default_state()) or s.get("schema")!=1 or s.get("state") not in ALLOWED_STATES or s.get("active_slot") not in ALLOWED_SLOTS:raise UpdateError("invalid update state")
+ for k in ("previous_slot","target_slot"):
+  if s[k] is not None and s[k] not in ALLOWED_SLOTS:raise UpdateError("invalid slot")
+ if not isinstance(s["installed_sequence"],int) or s["installed_sequence"]<0:raise UpdateError("invalid installed sequence")
+ if s["pending_sequence"] is not None and (not isinstance(s["pending_sequence"],int) or s["pending_sequence"]<1):raise UpdateError("invalid pending sequence")
+ if not isinstance(s["boot_attempts"],int) or s["boot_attempts"]<0 or not isinstance(s["max_boot_attempts"],int) or not 1<=s["max_boot_attempts"]<=10:raise UpdateError("invalid boot attempts")
+def load_state(p:pathlib.Path)->dict[str,Any]:
+ if not p.exists():return default_state()
+ s=load_json(p);validate_state(s);return s
+def atomic_write(p:pathlib.Path,v:dict[str,Any])->None:
+ p.parent.mkdir(mode=0o700,parents=True,exist_ok=True);fd,tmp=tempfile.mkstemp(prefix=f".{p.name}.",dir=p.parent)
+ try:
+  os.fchmod(fd,0o600)
+  with os.fdopen(fd,"wb") as h:h.write(canonical_json(v)+b"\n");h.flush();os.fsync(h.fileno())
+  os.replace(tmp,p);d=os.open(p.parent,os.O_DIRECTORY);os.fsync(d);os.close(d)
+ finally:
+  if os.path.exists(tmp):os.unlink(tmp)
+def inactive_slot(a:str)->str:return "B" if a=="A" else "A"
+def hash_image(p:pathlib.Path)->tuple[str,int]:
+ h=hashlib.sha256();n=0
+ with p.open("rb") as f:
+  for b in iter(lambda:f.read(1024*1024),b""):h.update(b);n+=len(b)
+ return h.hexdigest(),n
+def main()->int:
+ ap=argparse.ArgumentParser();ap.add_argument("--state",type=pathlib.Path,default=pathlib.Path("/var/lib/msfixit-shopos/update/state.json"));ap.add_argument("--public-key",type=pathlib.Path,default=pathlib.Path("/usr/share/msfixit-shopos/update/update-signing-public.pem"));sub=ap.add_subparsers(dest="command",required=True)
+ v=sub.add_parser("verify");v.add_argument("manifest",type=pathlib.Path);v.add_argument("--image",type=pathlib.Path);st=sub.add_parser("stage");st.add_argument("manifest",type=pathlib.Path)
+ for c in ("activate-trial","record-boot","confirm","reset-rollback","status"):sub.add_parser(c)
+ a=ap.parse_args()
+ try:
+  if a.command=="verify":
+   p=verify_manifest(a.manifest,a.public_key)
+   if a.image:
+    d,n=hash_image(a.image)
+    if d!=p["image_sha256"] or n!=p["image_size"]:raise UpdateError("image digest or size does not match the signed manifest")
+   print(json.dumps(p,sort_keys=True));return 0
+  s=load_state(a.state)
+  if a.command=="stage":
+   p=verify_manifest(a.manifest,a.public_key)
+   if s["state"] not in {"idle","confirmed"}:raise UpdateError("another update transaction is active")
+   if p["sequence"]<=s["installed_sequence"] or s["installed_sequence"]<p["minimum_sequence"]:raise UpdateError("downgrade, replay or unsupported migration")
+   s.update(state="staged",previous_slot=s["active_slot"],target_slot=inactive_slot(s["active_slot"]),pending_sequence=p["sequence"],boot_attempts=0)
+  elif a.command=="activate-trial":
+   if s["state"]!="staged" or s["target_slot"] is None:raise UpdateError("no staged update")
+   s.update(active_slot=s["target_slot"],state="trial",boot_attempts=0)
+  elif a.command=="record-boot":
+   if s["state"]=="trial":
+    s["boot_attempts"]+=1
+    if s["boot_attempts"]>=s["max_boot_attempts"]:
+     if s["previous_slot"] is None:raise UpdateError("rollback slot unavailable")
+     s.update(active_slot=s["previous_slot"],state="rollback")
+  elif a.command=="confirm":
+   if s["state"]!="trial" or s["pending_sequence"] is None:raise UpdateError("no trial update")
+   s.update(state="confirmed",installed_sequence=s["pending_sequence"],previous_slot=None,target_slot=None,pending_sequence=None,boot_attempts=0)
+  elif a.command=="reset-rollback":
+   if s["state"]!="rollback":raise UpdateError("system is not in rollback state")
+   s.update(state="idle",previous_slot=None,target_slot=None,pending_sequence=None,boot_attempts=0)
+  elif a.command=="status":print(json.dumps(s,sort_keys=True));return 0
+  validate_state(s);atomic_write(a.state,s);print(json.dumps(s,sort_keys=True));return 0
+ except (UpdateError,OSError,subprocess.SubprocessError) as e:print(f"ERROR: {e}",file=sys.stderr);return 1
+if __name__=="__main__":raise SystemExit(main())
