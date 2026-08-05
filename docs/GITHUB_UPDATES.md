@@ -1,39 +1,57 @@
-# ShopOS updates from GitHub
+# ShopOS Update Center
 
-ShopOS checks the latest stable GitHub Release once per day. It never runs `git pull` in the live appliance and never replaces files in the active root filesystem.
+ShopOS provides a graphical Update Center at `/admin/updates`. It is available through the authenticated local Control Center and linked directly from the ShopOS Store.
 
-## Trust and update flow
+## System updates
 
-1. Fetch the latest published, non-prerelease release from `Ms-FixIT-25/msfixit-shopos`.
-2. Require exactly one `shopos-update-manifest.json` and one `shopos-rootfs.ext4.xz` asset.
-3. Verify the manifest with the pinned Ed25519 public key at `/usr/share/msfixit-shopos/update/update-signing-public.pem`.
-4. Require the signed URL, compressed size and SHA-256 to match the downloaded release asset.
-5. Decompress and hash the root filesystem locally.
-6. Write it only to the inactive `SHOPOS_ROOT_A` or `SHOPOS_ROOT_B` partition.
-7. Read the complete written region back and verify it.
-8. Mark the target slot as a trial, switch the real Raspberry Pi kernel command line and reboot.
-9. Confirm a healthy trial or automatically return to the previous slot after the configured failed boot limit.
+The operator can manually:
 
-## Commands
+- search the stable GitHub Release for a newer ShopOS version;
+- start download and installation from the browser;
+- see whether the background update job is active;
+- inspect the active A/B slot and transaction state;
+- restart the appliance when a trial boot is ready.
 
-```bash
-sudo msfixit-update-agent check
-sudo msfixit-update-agent apply
-sudo msfixit-update-agent apply --no-reboot
-systemctl status msfixit-update-agent.timer
-journalctl -u msfixit-update-agent.service
+The browser never downloads or writes an image itself. A narrow root helper starts the existing signed update agent as a fixed systemd job. The agent verifies the Ed25519-signed manifest, downloads the fixed rootfs asset, checks signed size and SHA-256, writes only the inactive slot, verifies the written bytes and activates a rollback-capable trial boot.
+
+## App updates
+
+The same page searches the latest stable GitHub Release for `.shopos` packages matching apps that are already installed. Downloaded packages enter the fixed app inbox. Installation still passes through the transactional app installer, which verifies the package signature and manifest before replacing an app. Updates can be installed individually or together.
+
+A release app asset must be named exactly after its app identifier:
+
+```text
+at.msfixit.shopos.APP_ID.shopos
 ```
 
-The default configuration checks for updates but does not install them automatically:
+The Update Center ignores packages outside the ShopOS namespace and packages for apps that are not installed.
+
+## Privilege boundary
+
+The web user can invoke only these operations:
+
+- `status`
+- `check-system`
+- `check-apps`
+- `start-system-update`
+- `reboot`
+- `update-app APP_ID`
+- `update-all-apps`
+
+The helper validates every app identifier, uses fixed repository and filesystem paths, accepts only allowlisted GitHub HTTPS hosts and never evaluates a browser-supplied shell command.
+
+## Automatic checks
+
+The daily timer remains available. The default configuration checks for updates but does not install system updates automatically:
 
 ```json
 "auto_apply": false
 ```
 
-Set it to `true` only after physical update, rollback and power-loss validation has passed.
+Automatic application should be enabled only after physical update, rollback and power-loss validation.
 
 ## Release-side requirement
 
-A usable release must publish the separate root filesystem asset and a signed manifest. The private signing key must exist only as a protected GitHub Actions secret. It must never be committed to the repository or copied onto a ShopOS device. The corresponding public key is embedded in the ShopOS image.
+A usable system release must publish `shopos-update-manifest.json` and `shopos-rootfs.ext4.xz`. The private signing key belongs only in a protected GitHub Actions secret and must never be committed or copied to a ShopOS device. The corresponding public key is embedded in the image.
 
-Until that public key and the signed release publisher are provisioned, the systemd service is fail-closed through `ConditionPathExists` and no network update is applied.
+Until the public key and signed release publisher are provisioned, system updates remain fail-closed. App packages are likewise installed only after their existing signature verification succeeds.
