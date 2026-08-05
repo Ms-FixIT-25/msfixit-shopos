@@ -1,0 +1,24 @@
+name: ShopOS platform core
+
+on:
+  pull_request:
+    branches: [agent/guided-install-device-wizard]
+    paths:
+      - docs/SHOPOS_PLATFORM.md
+      - schemas/shopos-app-manifest-v1.schema.json
+      - scripts/validate-shopos-app.py
+      - examples/apps/**
+      - tests/test-shopos-platform-core.sh
+      - .github/workflows/platform-core.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-platform-contract:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate Core/App platform contract
+        run: bash tests/test-shopos-platform-core.sh
