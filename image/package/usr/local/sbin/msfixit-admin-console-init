@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+config_dir=/etc/msfixit-shopos
+config_file="$config_dir/admin-console.php"
+password_file=/boot/firmware/shopos.env
+
+install -d -o root -g www-data -m 0750 "$config_dir"
+
+if [ -s "$config_file" ]; then
+    exit 0
+fi
+
+password=''
+if [ -r "$password_file" ]; then
+    password="$(sed -n 's/^OS_ADMIN_PASSWORD=//p' "$password_file" | tail -n1)"
+fi
+
+if [ -z "$password" ]; then
+    printf 'Admin console remains disabled: OS_ADMIN_PASSWORD is unavailable.\n' >&2
+    exit 0
+fi
+
+hash="$(php -r 'echo password_hash($argv[1], PASSWORD_DEFAULT);' "$password")"
+tmp="$(mktemp "$config_dir/admin-console.php.XXXXXX")"
+trap 'rm -f "$tmp"' EXIT
+printf "<?php\nreturn ['password_hash' => '%s'];\n" "$hash" > "$tmp"
+chown root:www-data "$tmp"
+chmod 0640 "$tmp"
+mv "$tmp" "$config_file"
+trap - EXIT
+printf 'Admin console credentials initialized.\n'
