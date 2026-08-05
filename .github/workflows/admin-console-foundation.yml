@@ -2,7 +2,7 @@ name: Admin console foundation
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, agent/admin-console-phase2]
     paths:
       - image/package/usr/share/msfixit-shopos/admin-console/**
       - image/package/usr/local/sbin/msfixit-admin-console-init
@@ -24,7 +24,7 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
-      - name: Validate Phase 1 security foundation
+      - name: Validate authentication, security and product GUI
         run: bash tests/test-admin-console-foundation.sh
-      - name: Validate Phase 2 controlled operations
+      - name: Validate controlled operations
         run: bash tests/test-admin-console-phase2.sh
