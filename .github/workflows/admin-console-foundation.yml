@@ -6,10 +6,13 @@ on:
     paths:
       - image/package/usr/share/msfixit-shopos/admin-console/**
       - image/package/usr/local/sbin/msfixit-admin-console-init
+      - image/package/usr/local/sbin/msfixit-admin-action
+      - image/package/etc/sudoers.d/msfixit-admin-console
       - image/package/etc/systemd/system/msfixit-admin-console-init.service
       - image/package/etc/nginx/snippets/msfixit-admin-console.conf
       - image/package/etc/nginx/sites-available/msfixit-shopos.conf
       - tests/test-admin-console-foundation.sh
+      - tests/test-admin-console-phase2.sh
       - .github/workflows/admin-console-foundation.yml
   workflow_dispatch:
 
@@ -23,3 +26,5 @@ jobs:
       - uses: actions/checkout@v7
       - name: Validate Phase 1 security foundation
         run: bash tests/test-admin-console-foundation.sh
+      - name: Validate Phase 2 controlled operations
+        run: bash tests/test-admin-console-phase2.sh

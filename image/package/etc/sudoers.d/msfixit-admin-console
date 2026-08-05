@@ -1,0 +1,12 @@
+Defaults:www-data !requiretty
+www-data ALL=(root) NOPASSWD: /usr/local/sbin/msfixit-admin-action cache-flush
+www-data ALL=(root) NOPASSWD: /usr/local/sbin/msfixit-admin-action service-restart nginx
+www-data ALL=(root) NOPASSWD: /usr/local/sbin/msfixit-admin-action service-restart mariadb
+www-data ALL=(root) NOPASSWD: /usr/local/sbin/msfixit-admin-action service-restart redis-server
+www-data ALL=(root) NOPASSWD: /usr/local/sbin/msfixit-admin-action service-restart php-fpm
+www-data ALL=(root) NOPASSWD: /usr/local/sbin/msfixit-admin-action backup-create
+www-data ALL=(root) NOPASSWD: /usr/local/sbin/msfixit-admin-action logs nginx
+www-data ALL=(root) NOPASSWD: /usr/local/sbin/msfixit-admin-action logs mariadb
+www-data ALL=(root) NOPASSWD: /usr/local/sbin/msfixit-admin-action logs redis-server
+www-data ALL=(root) NOPASSWD: /usr/local/sbin/msfixit-admin-action logs php-fpm
+www-data ALL=(root) NOPASSWD: /usr/local/sbin/msfixit-admin-action logs shopos
