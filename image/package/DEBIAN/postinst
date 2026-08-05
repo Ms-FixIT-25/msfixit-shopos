@@ -8,8 +8,8 @@ install -d -m 0755 /run/msfixit-shopos
 install -d -m 0755 /srv/www
 install -d -m 0755 /etc/nftables.d
 install -d -m 0755 /etc/plymouth
-chmod 0755 /usr/local/sbin/msfixit-update /usr/local/sbin/msfixit-slot-writer /usr/local/sbin/msfixit-update-boot-sync
-chmod 0640 /etc/msfixit-shopos/update-slots.json
+chmod 0755 /usr/local/sbin/msfixit-update /usr/local/sbin/msfixit-update-agent /usr/local/sbin/msfixit-slot-writer /usr/local/sbin/msfixit-update-boot-sync /usr/local/sbin/msfixit-boot-selector
+chmod 0640 /etc/msfixit-shopos/update-slots.json /etc/msfixit-shopos/update-source.json
 
 # Keep Debian's package-owned nftables.conf and load the ShopOS rules from a
 # separate include file to avoid package ownership conflicts.
@@ -17,8 +17,6 @@ if ! grep -Fq 'include "/etc/nftables.d/*.nft"' /etc/nftables.conf; then
     printf '\ninclude "/etc/nftables.d/*.nft"\n' >> /etc/nftables.conf
 fi
 
-# Generate a Plymouth-safe PNG from the checksum-verified ShopOS artwork that
-# is already embedded in the package. The original artwork remains unchanged.
 brand_source=/usr/share/msfixit-shopos/branding/msfixit-brand-full.webp
 plymouth_logo=/usr/share/plymouth/themes/msfixit-shopos/logo.png
 if [ -r "$brand_source" ]; then
@@ -40,8 +38,6 @@ ShowDelay=0
 DeviceTimeout=8
 EOF_PLYMOUTH
 
-# Add only quiet-display options and preserve the existing one-line Raspberry
-# Pi kernel command line, root device and hardware-specific parameters.
 for cmdline in /boot/firmware/cmdline.txt /boot/cmdline.txt; do
     [ -f "$cmdline" ] || continue
     current="$(cat "$cmdline")"
@@ -60,8 +56,6 @@ elif command -v update-initramfs >/dev/null 2>&1; then
     update-initramfs -u
 fi
 
-# The first-boot unit configures the persistent data tree before the
-# database, cache and web services are started for the first time.
 systemctl disable nginx.service 2>/dev/null || true
 systemctl disable mariadb.service 2>/dev/null || true
 systemctl disable redis-server.service 2>/dev/null || true
@@ -72,6 +66,7 @@ done
 
 systemctl enable nftables.service 2>/dev/null || true
 systemctl enable msfixit-update-boot-sync.service 2>/dev/null || true
+systemctl enable msfixit-update-agent.timer 2>/dev/null || true
 systemctl enable msfixit-firstboot.service 2>/dev/null || true
 systemctl enable msfixit-brand-shop.service 2>/dev/null || true
 systemctl enable msfixit-boot-console.service 2>/dev/null || true
