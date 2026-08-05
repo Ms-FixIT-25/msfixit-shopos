@@ -10,17 +10,23 @@ dropin="$root/image/package/etc/systemd/system/getty@tty1.service.d/shopos-first
 bash -n "$init"
 bash -n "$wifi"
 
-grep -Fq 'user=shopadmin' "$init"
-grep -Fq 'chpasswd' "$init"
-grep -Fq 'chage -d 0' "$init"
-grep -Fq '/dev/console' "$init"
-grep -Fq "od -An -N12 -tx1 /dev/urandom" "$init"
+grep -Fq 'exec </dev/tty1 >/dev/tty1 2>&1' "$init"
+grep -Fq 'Benutzername [${default_user}]' "$init"
+grep -Fq 'Passwort wiederholen' "$init"
+grep -Fq 'mindestens 12 Zeichen' "$init"
+grep -Fq 'useradd --create-home' "$init"
+grep -Fq 'usermod --lock "$default_user"' "$init"
+grep -Fq 'WLAN einrichten?' "$init"
+grep -Fq 'Automatisch mit der vorkonfigurierten SSID verbinden' "$init"
+grep -Fq 'Anderes WLAN manuell auswählen' "$init"
+grep -Fq 'Überspringen' "$init"
+grep -Fq 'nmcli --ask device wifi connect "$manual_ssid"' "$init"
 grep -Fq 'ExecStartPre=/bin/bash /usr/local/sbin/msfixit-first-login-init' "$dropin"
 grep -Fxq 'SHOPOS_WIFI_SSID=Skynet' "$ssid"
 grep -Fq 'nmcli --ask device wifi connect "$ssid"' "$wifi"
 
 if grep -Fq 'ConditionPathExists=' "$dropin"; then
-    echo 'The tty1 getty must not be disabled after first-login initialization.' >&2
+    echo 'The tty1 getty must remain available after setup.' >&2
     exit 1
 fi
 
@@ -29,14 +35,14 @@ if grep -Eiq '(password|passwd|psk|secret)[[:space:]]*=' "$ssid"; then
     exit 1
 fi
 
-if grep -Fq 'SHOPOS_WIFI_PASSWORD' "$wifi" "$ssid"; then
-    echo 'Wi-Fi password variable must not exist in the repository.' >&2
+if grep -Fq 'SHOPOS_WIFI_PASSWORD' "$init" "$wifi" "$ssid"; then
+    echo 'Wi-Fi password variables must not exist in the repository.' >&2
     exit 1
 fi
 
-if grep -Fq 'credential_file=' "$init"; then
-    echo 'The one-time password must not be written to a file.' >&2
+if grep -Eq 'One-time password|chage -d 0|/dev/urandom' "$init"; then
+    echo 'The obsolete generated bootstrap-password flow is still present.' >&2
     exit 1
 fi
 
-printf 'PASS: console-only one-time login and password-free Wi-Fi SSID bootstrap checks.\n'
+printf 'PASS: interactive user creation and optional password-free Wi-Fi bootstrap checks.\n'
