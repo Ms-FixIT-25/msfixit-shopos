@@ -1,0 +1,98 @@
+#!/usr/bin/env python3
+"""Narrow privileged bridge for the authenticated ShopOS Update Center."""
+from __future__ import annotations
+import json, os, pathlib, re, subprocess, sys, tempfile, urllib.error, urllib.parse, urllib.request
+
+AGENT='/usr/local/sbin/msfixit-update-agent'; APP_HELPER='/usr/local/sbin/msfixit-app-install-helper'; UPDATE='/usr/local/sbin/msfixit-update'
+STATE=pathlib.Path('/var/lib/msfixit-shopos/update/state.json'); APPS=pathlib.Path('/var/lib/msfixit-shopos/apps'); INBOX=pathlib.Path('/var/lib/msfixit-shopos/app-inbox')
+APP_RE=re.compile(r'^at\.msfixit\.shopos\.[a-z0-9]+(?:[.-][a-z0-9]+)*$'); UNIT='msfixit-update-manual.service'
+RELEASE_API='https://api.github.com/repos/Ms-FixIT-25/msfixit-shopos/releases/latest'
+ALLOWED_HOSTS={'api.github.com','github.com','objects.githubusercontent.com','release-assets.githubusercontent.com'}; MAX_APP=512*1024*1024
+class CenterError(RuntimeError): pass
+
+def run(args:list[str],timeout:int=60)->str:
+ r=subprocess.run(args,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,check=False,timeout=timeout)
+ if r.returncode: raise CenterError(r.stderr.strip() or r.stdout.strip() or 'Aktion fehlgeschlagen')
+ return r.stdout.strip()
+def valid_url(url:str)->None:
+ p=urllib.parse.urlparse(url)
+ if p.scheme!='https' or p.hostname not in ALLOWED_HOSTS or p.username or p.password: raise CenterError('Downloadadresse ist nicht erlaubt.')
+def fetch_json(url:str)->dict:
+ valid_url(url)
+ with urllib.request.urlopen(urllib.request.Request(url,headers={'Accept':'application/vnd.github+json','User-Agent':'ShopOS-Update-Center/1'}),timeout=30) as response:
+  valid_url(response.geturl()); data=response.read(1024*1024+1)
+ if len(data)>1024*1024: raise CenterError('Release-Metadaten sind zu groß.')
+ value=json.loads(data)
+ if not isinstance(value,dict): raise CenterError('Ungültige Release-Metadaten.')
+ return value
+def download(url:str,destination:pathlib.Path)->None:
+ valid_url(url); destination.parent.mkdir(mode=0o700,parents=True,exist_ok=True)
+ request=urllib.request.Request(url,headers={'Accept':'application/octet-stream','User-Agent':'ShopOS-Update-Center/1'})
+ fd,tmp=tempfile.mkstemp(prefix='app-',suffix='.shopos',dir=destination.parent)
+ try:
+  total=0
+  with os.fdopen(fd,'wb') as output, urllib.request.urlopen(request,timeout=60) as response:
+   valid_url(response.geturl())
+   while True:
+    chunk=response.read(1024*1024)
+    if not chunk: break
+    total+=len(chunk)
+    if total>MAX_APP: raise CenterError('App-Paket überschreitet das Größenlimit.')
+    output.write(chunk)
+   output.flush(); os.fsync(output.fileno())
+  os.chmod(tmp,0o600); os.replace(tmp,destination)
+ finally:
+  if os.path.exists(tmp): os.unlink(tmp)
+def system_state()->dict:
+ try: state=json.loads(run([UPDATE,'--state',str(STATE),'status']))
+ except Exception: state={'state':'unknown','active_slot':'unknown','installed_sequence':0}
+ try: active=run(['systemctl','show',UNIT,'--property=ActiveState','--value']).strip() or 'inactive'; result=run(['systemctl','show',UNIT,'--property=Result','--value']).strip() or 'unknown'
+ except CenterError: active='inactive'; result='unknown'
+ return {'transaction':state,'job':{'active_state':active,'result':result},'reboot_required':state.get('state')=='trial'}
+def apps()->list[dict]:
+ ids=set()
+ if APPS.is_dir(): ids.update(p.name for p in APPS.iterdir() if p.is_dir() and APP_RE.fullmatch(p.name))
+ if INBOX.is_dir(): ids.update(p.name[:-7] for p in INBOX.glob('*.shopos') if APP_RE.fullmatch(p.name[:-7]))
+ out=[]
+ for app_id in sorted(ids):
+  manifest=APPS/app_id/'.shopos-manifest.json'; version='installiert'
+  if manifest.is_file() and not manifest.is_symlink():
+   try: version=str(json.loads(manifest.read_text()).get('version') or version)
+   except Exception: pass
+  out.append({'id':app_id,'installed':(APPS/app_id).is_dir(),'installed_version':version,'update_package_ready':(INBOX/f'{app_id}.shopos').is_file()})
+ return out
+def check_apps()->dict:
+ release=fetch_json(RELEASE_API)
+ if release.get('draft') or release.get('prerelease'): raise CenterError('Kein stabiles App-Release verfügbar.')
+ installed={a['id'] for a in apps() if a['installed']}; found=[]
+ assets=release.get('assets')
+ if not isinstance(assets,list): raise CenterError('Release-Assets fehlen.')
+ for asset in assets:
+  if not isinstance(asset,dict): continue
+  name=asset.get('name'); url=asset.get('browser_download_url')
+  if not isinstance(name,str) or not name.endswith('.shopos') or not isinstance(url,str): continue
+  app_id=name[:-7]
+  if app_id not in installed or not APP_RE.fullmatch(app_id): continue
+  download(url,INBOX/name); found.append(app_id)
+ return {'packages_downloaded':sorted(found)}
+def main()->int:
+ try:
+  command=sys.argv[1] if len(sys.argv)>1 else ''
+  if command=='status': print(json.dumps({'system':system_state(),'apps':apps()},sort_keys=True)); return 0
+  if command=='check-system': print(run([AGENT,'check'],120)); return 0
+  if command=='check-apps': print(json.dumps(check_apps(),sort_keys=True)); return 0
+  if command=='start-system-update':
+   if system_state()['job']['active_state'] in {'activating','active','reloading'}: raise CenterError('Ein Systemupdate läuft bereits.')
+   run(['systemd-run','--unit='+UNIT,'--collect','--property=Type=exec',AGENT,'apply','--no-reboot']); print(json.dumps({'started':True})); return 0
+  if command=='reboot': run(['systemctl','reboot']); return 0
+  if command=='update-app':
+   if len(sys.argv)!=3 or not APP_RE.fullmatch(sys.argv[2]): raise CenterError('Ungültige App-ID.')
+   print(run([APP_HELPER,'install',sys.argv[2]],600)); return 0
+  if command=='update-all-apps':
+   ready=[a['id'] for a in apps() if a['update_package_ready']]; results=[]
+   for app_id in ready: results.append({'id':app_id,'result':run([APP_HELPER,'install',app_id],600)})
+   print(json.dumps({'updated':results},sort_keys=True)); return 0
+  raise CenterError('Nicht erlaubte Update-Center-Aktion.')
+ except (CenterError,OSError,subprocess.SubprocessError,json.JSONDecodeError,urllib.error.URLError) as exc:
+  print(f'ERROR: {exc}',file=sys.stderr); return 1
+if __name__=='__main__': raise SystemExit(main())

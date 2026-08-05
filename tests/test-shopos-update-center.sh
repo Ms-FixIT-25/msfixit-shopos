@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+root="$(cd "$(dirname "$0")/.." && pwd)"
+helper="$root/image/package/usr/local/sbin/msfixit-update-center"
+gui="$root/image/package/usr/share/msfixit-shopos/admin-console/public/updates.php"
+store="$root/image/package/usr/share/msfixit-shopos/admin-console/public/store.php"
+sudoers="$root/image/package/etc/sudoers.d/msfixit-shopos-update-center"
+nginx="$root/image/package/etc/nginx/snippets/msfixit-admin-console.conf"
+python3 -m py_compile "$helper"
+if command -v php >/dev/null 2>&1; then php -l "$gui"; php -l "$store"; fi
+grep -Fq "session_name('SHOPOSADMIN')" "$gui"
+grep -Fq "hash_equals(csrf()" "$gui"
+grep -Fq "['sudo','-n','/usr/local/sbin/msfixit-update-center']" "$gui"
+grep -Fq "['check-system','check-apps','start-system-update','reboot','update-app','update-all-apps']" "$gui"
+grep -Fq "bypass_shell" "$gui"
+! grep -Eq 'shell_exec|passthru|popen\(' "$gui"
+grep -Fq "APP_RE=re.compile" "$helper"
+grep -Fq "import json, os, pathlib, re, subprocess, sys, tempfile, urllib.error" "$helper"
+grep -Fq "systemd-run" "$helper"
+grep -Fq "RELEASE_API='https://api.github.com/repos/Ms-FixIT-25/msfixit-shopos/releases/latest'" "$helper"
+grep -Fq "ALLOWED_HOSTS=" "$helper"
+grep -Fq "msfixit-app-install-helper" "$helper"
+grep -Fq "check-apps" "$sudoers"
+grep -Fq "update-app at.msfixit.shopos.*" "$sudoers"
+grep -Fq "location = /admin/updates" "$nginx"
+grep -Fq "updates.php" "$nginx"
+grep -Fq 'href="/admin/updates"' "$store"
+echo 'ShopOS Update Center contract passed.'
