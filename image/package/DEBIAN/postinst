@@ -3,10 +3,13 @@ set -eu
 
 install -d -m 0750 /etc/msfixit-shopos
 install -d -m 0755 /var/lib/msfixit-shopos
+install -d -m 0700 /var/lib/msfixit-shopos/update
 install -d -m 0755 /run/msfixit-shopos
 install -d -m 0755 /srv/www
 install -d -m 0755 /etc/nftables.d
 install -d -m 0755 /etc/plymouth
+chmod 0755 /usr/local/sbin/msfixit-update /usr/local/sbin/msfixit-slot-writer /usr/local/sbin/msfixit-update-boot-sync
+chmod 0640 /etc/msfixit-shopos/update-slots.json
 
 # Keep Debian's package-owned nftables.conf and load the ShopOS rules from a
 # separate include file to avoid package ownership conflicts.
@@ -68,6 +71,7 @@ for unit in /lib/systemd/system/php*-fpm.service; do
 done
 
 systemctl enable nftables.service 2>/dev/null || true
+systemctl enable msfixit-update-boot-sync.service 2>/dev/null || true
 systemctl enable msfixit-firstboot.service 2>/dev/null || true
 systemctl enable msfixit-brand-shop.service 2>/dev/null || true
 systemctl enable msfixit-boot-console.service 2>/dev/null || true
