@@ -7,11 +7,14 @@ grep -Fq "SHOPOS_ROOT_A" "$root/image/package/etc/msfixit-shopos/update-slots.js
 grep -Fq "SHOPOS_ROOT_B" "$root/image/package/etc/msfixit-shopos/update-slots.json"
 ! grep -Eq '(shell=True|os\.system|subprocess\.(run|Popen))' "$writer"
 python3 - "$writer" <<'PY'
-import hashlib, importlib.util, os, pathlib, tempfile
+import hashlib, importlib.util, importlib.machinery, os, pathlib, tempfile
 path = pathlib.Path(__import__('sys').argv[1])
-spec = importlib.util.spec_from_file_location('slot_writer', path)
+loader = importlib.machinery.SourceFileLoader('slot_writer', str(path))
+spec = importlib.util.spec_from_loader(loader.name, loader)
+if spec is None:
+    raise RuntimeError('could not create slot-writer module specification')
 module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(module)
+loader.exec_module(module)
 with tempfile.TemporaryDirectory() as tmp:
     root = pathlib.Path(tmp)
     image = root / 'image.bin'
