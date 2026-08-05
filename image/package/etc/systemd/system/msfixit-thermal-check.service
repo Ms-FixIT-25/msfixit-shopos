@@ -1,0 +1,8 @@
+[Unit]
+Description=Ms. FixIT ShopOS thermal check
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/msfixit-thermal-check
+Nice=10
+CPUWeight=1
