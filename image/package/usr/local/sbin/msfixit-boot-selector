@@ -1,0 +1,54 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+import argparse, os, pathlib, tempfile
+
+ALLOWED = {'A': 'SHOPOS_ROOT_A', 'B': 'SHOPOS_ROOT_B'}
+BOOT_ROOT = pathlib.Path('/boot/firmware')
+CMDLINE = BOOT_ROOT / 'cmdline.txt'
+
+class BootError(RuntimeError):
+    pass
+
+def select(slot: str, cmdline: pathlib.Path = CMDLINE) -> None:
+    if slot not in ALLOWED:
+        raise BootError('slot must be A or B')
+    test = os.environ.get('SHOPOS_BOOT_SELECTOR_TEST') == '1'
+    if not test and (cmdline != CMDLINE or cmdline.parent != BOOT_ROOT):
+        raise BootError('cmdline path is outside the fixed boot root')
+    if not cmdline.is_file() or cmdline.is_symlink():
+        raise BootError('kernel cmdline is unavailable or unsafe')
+    text = cmdline.read_text(encoding='utf-8')
+    if '\n' in text.rstrip('\n'):
+        raise BootError('kernel cmdline must contain exactly one line')
+    tokens = text.strip().split()
+    root_indexes = [i for i, token in enumerate(tokens) if token.startswith('root=')]
+    if len(root_indexes) != 1:
+        raise BootError('kernel cmdline must contain exactly one root parameter')
+    tokens[root_indexes[0]] = f'root=LABEL={ALLOWED[slot]}'
+    data = (' '.join(tokens) + '\n').encode()
+    fd, tmp = tempfile.mkstemp(prefix='.cmdline.', dir=cmdline.parent)
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, 'wb') as handle:
+            handle.write(data); handle.flush(); os.fsync(handle.fileno())
+        os.replace(tmp, cmdline)
+        dfd = os.open(cmdline.parent, os.O_DIRECTORY)
+        try: os.fsync(dfd)
+        finally: os.close(dfd)
+    finally:
+        if os.path.exists(tmp): os.unlink(tmp)
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument('slot', choices=sorted(ALLOWED))
+    parser.add_argument('--cmdline', type=pathlib.Path, default=CMDLINE)
+    args = parser.parse_args()
+    try:
+        select(args.slot, args.cmdline)
+        return 0
+    except (BootError, OSError) as exc:
+        print(f'ERROR: {exc}', file=__import__('sys').stderr)
+        return 1
+
+if __name__ == '__main__':
+    raise SystemExit(main())

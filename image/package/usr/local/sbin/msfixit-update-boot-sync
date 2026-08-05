@@ -2,7 +2,9 @@
 set -eu
 update=/usr/local/sbin/msfixit-update
 writer=/usr/local/sbin/msfixit-slot-writer
+selector=/usr/local/sbin/msfixit-boot-selector
 state=/var/lib/msfixit-shopos/update/state.json
 /usr/bin/python3 "$update" --state "$state" record-boot >/dev/null
 slot="$(/usr/bin/python3 "$update" --state "$state" status | /usr/bin/python3 -c 'import json,sys; s=json.load(sys.stdin); a=s.get("active_slot"); assert a in ("A","B"); print(a)')"
 /usr/bin/python3 "$writer" select "$slot" >/dev/null
+/usr/bin/python3 "$selector" "$slot" >/dev/null
