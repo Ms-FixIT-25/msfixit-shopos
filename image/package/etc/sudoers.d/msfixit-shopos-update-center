@@ -1,0 +1,7 @@
+Defaults:www-data secure_path=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+www-data ALL=(root) NOPASSWD: /usr/local/sbin/msfixit-update-center status
+www-data ALL=(root) NOPASSWD: /usr/local/sbin/msfixit-update-center check-system
+www-data ALL=(root) NOPASSWD: /usr/local/sbin/msfixit-update-center start-system-update
+www-data ALL=(root) NOPASSWD: /usr/local/sbin/msfixit-update-center reboot
+www-data ALL=(root) NOPASSWD: /usr/local/sbin/msfixit-update-center update-app at.msfixit.shopos.*
+www-data ALL=(root) NOPASSWD: /usr/local/sbin/msfixit-update-center update-all-apps
