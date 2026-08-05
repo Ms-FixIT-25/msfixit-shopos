@@ -180,20 +180,49 @@ jobs:
           title="Ms. FixIT ShopOS ${version}"
           notes_file="$(mktemp)"
 
-          cat > "$notes_file" <<EOF
-          Flash-ready Raspberry Pi 4 Model B USB-SSD image for Ms. FixIT ShopOS.
+          cat > "$notes_file" <<'EOF'
+          ## ShopOS einmal installieren – danach über das Update Center warten
 
-          Included downloads:
-          - compressed Raspberry Pi 4B ShopOS image
-          - portable SHA-256 checksum
+          Dieses Release enthält das vollständige, startfähige ShopOS-Image für einen Raspberry Pi 4 Model B. Das Image wird einmalig auf die SD-Karte oder ein USB-SSD-Laufwerk geschrieben. Normale spätere ShopOS- und App-Aktualisierungen sollen anschließend direkt im lokalen **ShopOS Control Center** erfolgen, ohne das Speichermedium erneut an einen PC anschließen zu müssen.
 
-          This build defaults to a small Austria-only cable pop-up pilot. It includes a searchable customer help center, cable-selection assistant, FRITZ!Box and WLAN guidance, repair preparation, ordering and service information, and evidence-based partner programme profiles.
+          ### Erstinstallation
 
-          FRITZ! and iFixit programme claims remain hidden until the exact membership status, validity and evidence have been checked. Partner logos require a separate rights record and HTTPS asset URL. Membership is never presented as certification unless the verified programme evidence explicitly supports that wording.
+          1. Das komprimierte Raspberry-Pi-Image herunterladen.
+          2. Die SHA-256-Prüfsumme kontrollieren.
+          3. Das Image mit Raspberry Pi Imager, Balena Etcher oder einem vergleichbaren Werkzeug auf das Zielmedium schreiben.
+          4. Medium in den Raspberry Pi einsetzen und den Einrichtungsassistenten abschließen.
+          5. Danach das **Update Center** im ShopOS Control Center verwenden.
 
-          The image also includes guarded ALSO Austria commercial catalogue staging plus a separate licensed ALSO/1WorldSync content connector for descriptions, selling points, specifications, multiple remote product images, manufacturer documents, data sheets and accessory relations.
+          ### Aktualisierung ohne erneutes Flashen
 
-          Linked ALSO media remains remote-only and is not cached on the appliance. Content must match a verified account package and pass review before it can be applied to a WooCommerce draft. Products are never auto-published and supplier orders are never sent automatically in pilot mode.
+          ShopOS besitzt zwei getrennte Root-Systembereiche. Ein Systemupdate wird ausschließlich in den gerade inaktiven Bereich geschrieben, vollständig geprüft und beim nächsten Neustart testweise aktiviert. Startet die neue Version wiederholt nicht erfolgreich, schaltet ShopOS automatisch auf den vorherigen funktionierenden Bereich zurück.
+
+          Im Update Center können Administratoren:
+
+          - manuell nach ShopOS-Systemupdates suchen,
+          - Download und Installation starten,
+          - aktiven A/B-Slot und Updatezustand sehen,
+          - einen erforderlichen Neustart auslösen,
+          - nach App-Updates suchen,
+          - Apps einzeln oder gesammelt aktualisieren.
+
+          System- und App-Updates werden nur nach erfolgreicher Signatur-, Größen- und SHA-256-Prüfung übernommen. Das laufende aktive Root-System wird während der Installation nicht überschrieben.
+
+          ### Enthaltene Downloads
+
+          - `msfixit-shopos-rpi4-usb.img.zst` – vollständiges Image für die einmalige Erstinstallation
+          - `msfixit-shopos-rpi4-usb.img.zst.sha256` – portable SHA-256-Prüfsumme
+          - Update-Artefakte und signierte Manifeste, sobald sie für diese Version veröffentlicht werden
+
+          ### Wichtiger Hinweis
+
+          Das Update Center ersetzt das erneute Flashen bei normalen Softwareänderungen. Ein physisch defektes Speichermedium oder ein vollständig zerstörtes Dateisystem kann trotzdem einen Austausch beziehungsweise eine Neuinstallation erforderlich machen. Geschäftsdaten und Backups sollten daher dauerhaft auf einem zuverlässigen USB-SSD-Laufwerk und zusätzlich extern gesichert werden.
+
+          ### Enthaltene ShopOS-Funktionen
+
+          Dieses Image enthält unter anderem WooCommerce, das lokale ShopOS Control Center, Kunden- und Servicebereiche, den österreichischen Pilotbetrieb, ALSO-Katalog- und Inhaltsintegration, Office- und Fulfillment-Funktionen, DACH-Compliance-Prüfungen sowie das neue grafische Update Center für System und Apps.
+
+          Partnerprogramm-Aussagen, Logos, Zahlungsarten, Versand-, Steuer- und öffentliche Markteinstellungen bleiben kontrolliert deaktiviert, bis die jeweiligen Nachweise und realen Geschäftsdaten geprüft und freigegeben wurden.
           EOF
 
           if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
