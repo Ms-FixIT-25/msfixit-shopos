@@ -69,9 +69,16 @@ jobs:
           printf '%s  %s\n' "$SHOPOS_ARTIFACT_SHA256" vm/artifact.zip | sha256sum --check --strict
           unzip -q vm/artifact.zip -d vm
           cd vm
-          sha256sum --check msfixit-shopos-rpi4-usb.img.zst.sha256
-          unzstd --no-progress msfixit-shopos-rpi4-usb.img.zst -o shopos-test.img
-          rm -f artifact.zip msfixit-shopos-rpi4-usb.img.zst
+          mapfile -t checksum_files < <(find . -type f -name '*.img.zst.sha256' -print)
+          test "${#checksum_files[@]}" -eq 1
+          checksum_file="${checksum_files[0]}"
+          image_archive="${checksum_file%.sha256}"
+          test -f "$image_archive"
+          checksum_dir="$(dirname "$checksum_file")"
+          checksum_name="$(basename "$checksum_file")"
+          (cd "$checksum_dir" && sha256sum --check "$checksum_name")
+          unzstd --no-progress "$image_archive" -o shopos-test.img
+          rm -f artifact.zip "$image_archive"
           truncate -s 16G shopos-test.img
 
       - name: Prepare offline QEMU guest
