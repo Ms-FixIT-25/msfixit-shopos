@@ -1,0 +1,62 @@
+name: Build production ShopOS release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: shopos-production-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build exact main commit
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 180
+    steps:
+      - name: Check out exact main commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Verify checked-out source identity
+        run: test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+
+      - name: Install validation dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y php-cli python3 openssl sqlite3 shellcheck
+
+      - name: Run complete test suite again on main
+        run: |
+          bash -n scripts/generate-release-metadata.sh
+          make check
+          shopt -s nullglob
+          tests=(tests/test-shopos-*.sh tests/test-guided-device-wizard.sh tests/test-admin-console-foundation.sh)
+          for test_file in "${tests[@]}"; do bash "$test_file"; done
+
+      - name: Reclaim runner disk space
+        run: |
+          sudo rm -rf /opt/hostedtoolcache || true
+          sudo rm -rf /usr/local/lib/android || true
+          df -h
+
+      - name: Build production Raspberry Pi 4 USB image
+        run: make image-rpi4-usb
+
+      - name: Generate verified production metadata and SBOM
+        run: bash scripts/generate-release-metadata.sh artifacts production "$GITHUB_SHA" "$GITHUB_RUN_ID"
+
+      - name: Upload immutable production artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: shopos-production-${{ github.sha }}
+          path: artifacts/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 90
