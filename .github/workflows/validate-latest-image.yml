@@ -1,0 +1,121 @@
+name: Validate latest checksummed ShopOS image
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - tests/prepare-qemu-image.sh
+      - tests/run-qemu-smoke.sh
+      - tests/test-latest-image-pin.sh
+      - .github/workflows/validate-latest-image.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  validate-pin:
+    name: Validate image provenance pin
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check pinned artifact contract
+        run: bash tests/test-latest-image-pin.sh
+
+  qemu:
+    name: ${{ matrix.label }}
+    needs: validate-pin
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: QEMU acceptance on x86_64 host
+            runner: ubuntu-26.04
+          - label: QEMU acceptance on ARM64 host
+            runner: ubuntu-26.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 50
+    env:
+      SHOPOS_ARTIFACT_ID: '8919865233'
+      SHOPOS_ARTIFACT_SHA256: dd4d684f1059d4d2b2c561780735c271574d273d3c31eb5b6c2e9966027662a5
+      SHOPOS_SOURCE_SHA: 615c0e7ee4941d5f34c8fcac9b051b1e16443871
+
+    steps:
+      - name: Check out test harness
+        uses: actions/checkout@v7
+
+      - name: Install QEMU and image tools
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          sudo apt-get -o Acquire::Retries=3 update
+          sudo apt-get -o Acquire::Retries=3 install --yes qemu-system-arm qemu-utils zstd unzip curl util-linux
+          qemu-system-aarch64 --version
+          qemu-system-aarch64 -machine help | grep '^raspi4b '
+          bash tests/test-latest-image-pin.sh
+          bash tests/run-qemu-smoke.sh --self-test
+
+      - name: Download and verify exact Raspberry Pi image
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          artifact_head_sha="$(gh api "/repos/${GITHUB_REPOSITORY}/actions/artifacts/${SHOPOS_ARTIFACT_ID}" --jq '.workflow_run.head_sha')"
+          test "$artifact_head_sha" = "$SHOPOS_SOURCE_SHA"
+          mkdir -p vm
+          gh api "/repos/${GITHUB_REPOSITORY}/actions/artifacts/${SHOPOS_ARTIFACT_ID}/zip" > vm/artifact.zip
+          printf '%s  %s\n' "$SHOPOS_ARTIFACT_SHA256" vm/artifact.zip | sha256sum --check --strict
+          unzip -q vm/artifact.zip -d vm
+          cd vm
+          sha256sum --check msfixit-shopos-rpi4-usb.img.zst.sha256
+          unzstd --no-progress msfixit-shopos-rpi4-usb.img.zst -o shopos-test.img
+          rm -f artifact.zip msfixit-shopos-rpi4-usb.img.zst
+          truncate -s 16G shopos-test.img
+
+      - name: Prepare offline QEMU guest
+        shell: bash
+        run: sudo bash tests/prepare-qemu-image.sh vm/shopos-test.img
+
+      - name: Boot, initialize and validate ShopOS
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          sudo bash -x tests/run-qemu-smoke.sh vm/shopos-test.img vm 2>&1 | tee vm/harness.log
+
+      - name: Prepare evidence
+        if: always()
+        shell: bash
+        run: |
+          if sudo test -f vm/qemu-console.full.log && ! sudo test -f vm/qemu-console.log; then
+            sudo cp vm/qemu-console.full.log vm/qemu-console.log || true
+          fi
+          if ! sudo test -f vm/qemu-exit.txt; then
+            printf 'QEMU_EXIT=workflow-ended-before-harness-finalization\n' | sudo tee vm/qemu-exit.txt >/dev/null
+          fi
+          sudo chown -R "$USER:$USER" vm 2>/dev/null || true
+
+      - name: Upload validation evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: latest-shopos-${{ matrix.runner }}-evidence
+          path: |
+            vm/harness.log
+            vm/qemu-version.txt
+            vm/qemu-console.log
+            vm/qemu-console.full.log
+            vm/qemu-exit.txt
+            vm/partition-identifiers.txt
+            vm/fstab.before
+            vm/fstab.after
+            vm/initramfs-selection.txt
+            vm/kernel-command-line.txt
+            vm/msfixit-vm-smoke.log
+            vm/msfixit-vm-smoke.result
+            vm/msfixit-firstboot.log
+            vm/guest-journal.log
+            vm/guest-filesystem-state.txt
+          if-no-files-found: warn
+          retention-days: 14
