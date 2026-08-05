@@ -10,6 +10,8 @@ id "$user" >/dev/null 2>&1 || { echo "Missing required user: $user" >&2; exit 1;
 
 install -d -o root -g root -m 0700 "$(dirname "$marker")"
 install -d -o root -g root -m 0700 "$(dirname "$credential_file")"
+chmod 0755 /usr/local/sbin/msfixit-wifi-connect 2>/dev/null || true
+chmod 0644 /etc/msfixit-shopos/wifi.env 2>/dev/null || true
 
 # Generate a console-only bootstrap password. It is never stored in the image,
 # repository, journal or persistent filesystem.
@@ -22,6 +24,7 @@ chage -d 0 "$user"
     printf 'Username: %s\n' "$user"
     printf 'One-time password: %s\n' "$password"
     printf 'You must choose a new password immediately after login.\n'
+    printf 'Wi-Fi target is preselected. After login run: sudo msfixit-wifi-connect\n'
 } > "$credential_file"
 chmod 0600 "$credential_file"
 cat "$credential_file" >/dev/console
