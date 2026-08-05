@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+umask 077
+device="${1:-}"
+queue=/run/msfixit-shopos/devices
+
+case "$device" in
+  /dev/sd[a-z][0-9]*|/dev/mmcblk[0-9]p[0-9]*|/dev/nvme[0-9]n[0-9]p[0-9]*) ;;
+  *) exit 0 ;;
+esac
+
+[ -b "$device" ] || exit 0
+# Never offer the active root or boot filesystems.
+root_source="$(findmnt -n -o SOURCE / 2>/dev/null || true)"
+boot_source="$(findmnt -n -o SOURCE /boot/firmware 2>/dev/null || true)"
+[ "$device" != "$root_source" ] || exit 0
+[ "$device" != "$boot_source" ] || exit 0
+
+fstype="$(blkid -o value -s TYPE "$device" 2>/dev/null || true)"
+[ -n "$fstype" ] || exit 0
+case "$fstype" in ext2|ext3|ext4|vfat|exfat|ntfs|ntfs3|xfs|btrfs) ;; *) exit 0 ;; esac
+
+uuid="$(blkid -o value -s UUID "$device" 2>/dev/null || true)"
+label="$(blkid -o value -s LABEL "$device" 2>/dev/null || true)"
+id="$(printf '%s' "${uuid:-$device}" | sha256sum | cut -c1-24)"
+install -d -o root -g www-data -m 0750 "$queue"
+tmp="$(mktemp "$queue/.device.XXXXXX")"
+printf 'DEVICE_B64=%s\nUUID_B64=%s\nLABEL_B64=%s\nFSTYPE_B64=%s\nSEEN_AT=%s\n' \
+  "$(printf '%s' "$device" | base64 -w0)" \
+  "$(printf '%s' "$uuid" | base64 -w0)" \
+  "$(printf '%s' "$label" | base64 -w0)" \
+  "$(printf '%s' "$fstype" | base64 -w0)" \
+  "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$tmp"
+chown root:www-data "$tmp"
+chmod 0640 "$tmp"
+mv "$tmp" "$queue/$id.pending"
+logger -t msfixit-device -- "removable-device-detected id=$id device=$device filesystem=$fstype"
