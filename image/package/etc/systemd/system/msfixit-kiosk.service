@@ -1,0 +1,27 @@
+[Unit]
+Description=Ms. FixIT ShopOS local graphical interface
+After=network-online.target nginx.service msfixit-brand-shop.service
+Wants=network-online.target
+ConditionPathExists=/usr/bin/chromium
+
+[Service]
+Type=simple
+User=shopos-kiosk
+Group=shopos-kiosk
+SupplementaryGroups=video render input
+Environment=HOME=/var/lib/msfixit-shopos/kiosk
+Environment=XDG_RUNTIME_DIR=/run/msfixit-shopos-kiosk
+RuntimeDirectory=msfixit-shopos-kiosk
+RuntimeDirectoryMode=0700
+TTYPath=/dev/tty7
+StandardInput=tty-force
+StandardOutput=journal
+StandardError=journal
+PAMName=login
+ExecStart=/usr/bin/xinit /usr/local/sbin/msfixit-kiosk-session -- :0 vt7 -keeptty -nolisten tcp
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=10
+
+[Install]
+WantedBy=graphical.target
