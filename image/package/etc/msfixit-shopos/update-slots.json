@@ -1,0 +1,9 @@
+{
+  "schema": 1,
+  "slots": {
+    "A": "/dev/disk/by-partlabel/SHOPOS_ROOT_A",
+    "B": "/dev/disk/by-partlabel/SHOPOS_ROOT_B"
+  },
+  "boot_selection": "/boot/firmware/shopos-slot.env",
+  "allowed_boot_root": "/boot/firmware"
+}
