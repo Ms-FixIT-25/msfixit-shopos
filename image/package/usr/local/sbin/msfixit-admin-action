@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+umask 077
+action="${1:-}"
+argument="${2:-}"
+audit_log=/var/log/msfixit-shopos/admin-audit.log
+install -d -o root -g adm -m 0750 "$(dirname "$audit_log")"
+touch "$audit_log"
+chown root:adm "$audit_log"
+chmod 0640 "$audit_log"
+
+log_result() {
+    local result="$1"
+    logger -t msfixit-admin -- "action=$action argument=$argument result=$result actor=www-data"
+    printf '%s action=%q argument=%q result=%q actor=www-data\n' "$(date --iso-8601=seconds)" "$action" "$argument" "$result" >> "$audit_log"
+}
+
+case "$action" in
+    cache-flush)
+        if command -v redis-cli >/dev/null 2>&1; then
+            redis-cli --no-auth-warning FLUSHDB >/dev/null
+        fi
+        if command -v wp >/dev/null 2>&1 && [ -d /data/wordpress ]; then
+            sudo -u www-data wp --path=/data/wordpress cache flush >/dev/null 2>&1 || true
+        fi
+        log_result success
+        ;;
+    service-restart)
+        case "$argument" in
+            nginx|mariadb|redis-server)
+                systemctl restart "${argument}.service"
+                ;;
+            php-fpm)
+                unit="$(systemctl list-unit-files --type=service --no-legend 'php*-fpm.service' | awk 'NR==1{print $1}')"
+                [ -n "$unit" ] || { log_result unavailable; exit 3; }
+                systemctl restart "$unit"
+                ;;
+            *)
+                log_result rejected
+                exit 2
+                ;;
+        esac
+        log_result success
+        ;;
+    backup-create)
+        target=/data/backups
+        install -d -o root -g www-data -m 0750 "$target"
+        stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+        archive="$target/shopos-$stamp.tar.zst"
+        tar --zstd -cpf "$archive" --one-file-system --exclude='/data/backups' /data/wordpress /etc/msfixit-shopos
+        chown root:www-data "$archive"
+        chmod 0640 "$archive"
+        printf '%s\n' "$archive"
+        log_result success
+        ;;
+    logs)
+        case "$argument" in
+            nginx|mariadb|redis-server|php-fpm|shopos)
+                ;;
+            *)
+                log_result rejected
+                exit 2
+                ;;
+        esac
+        if [ "$argument" = shopos ]; then
+            journalctl -n 200 --no-pager -u 'msfixit-*' 2>/dev/null || true
+        elif [ "$argument" = php-fpm ]; then
+            journalctl -n 200 --no-pager -u 'php*-fpm.service' 2>/dev/null || true
+        else
+            journalctl -n 200 --no-pager -u "${argument}.service" 2>/dev/null || true
+        fi | sed -E 's/(password|passwd|secret|token|api[_-]?key)=([^[:space:]]+)/\1=[REDACTED]/Ig' | tail -n 200
+        log_result success
+        ;;
+    *)
+        log_result rejected
+        exit 2
+        ;;
+esac
