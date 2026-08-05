@@ -24,7 +24,7 @@ A release app asset must be named exactly after its app identifier:
 at.msfixit.shopos.APP_ID.shopos
 ```
 
-The Update Center ignores packages outside the ShopOS namespace and packages for apps that are not installed.
+The Update Center ignores packages outside the ShopOS namespace and packages for apps that are not installed. Finding a package does not trust or install it: the signed app installer remains the final authority.
 
 ## Privilege boundary
 
@@ -52,6 +52,6 @@ Automatic application should be enabled only after physical update, rollback and
 
 ## Release-side requirement
 
-A usable system release must publish `shopos-update-manifest.json` and `shopos-rootfs.ext4.xz`. The private signing key belongs only in a protected GitHub Actions secret and must never be committed or copied to a ShopOS device. The corresponding public key is embedded in the image.
+A usable system release must publish `shopos-update-manifest.json` and `shopos-rootfs.ext4.xz`. App updates are published as signed `.shopos` assets in the same stable release. The private signing keys belong only in protected GitHub Actions secrets and must never be committed or copied to a ShopOS device. The corresponding public keys are embedded in the image.
 
-Until the public key and signed release publisher are provisioned, system updates remain fail-closed. App packages are likewise installed only after their existing signature verification succeeds.
+Until the public system-update key and signed release publisher are provisioned, system updates remain fail-closed. App packages are likewise installed only after their existing signature verification succeeds.
