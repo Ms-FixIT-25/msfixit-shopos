@@ -41,7 +41,7 @@ udevadm settle
 root_b="${loop}p3"
 [ -b "$root_b" ] || { echo 'root B partition was not created' >&2; exit 1; }
 
-dd if="$root_a" of="$root_b" bs=16M conv=fsync,status=progress
+dd if="$root_a" of="$root_b" bs=16M conv=fsync status=progress
 sync
 e2label "$root_a" SHOPOS_ROOT_A
 e2label "$root_b" SHOPOS_ROOT_B
