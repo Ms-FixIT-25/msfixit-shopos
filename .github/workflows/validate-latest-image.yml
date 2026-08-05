@@ -37,9 +37,9 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 50
     env:
-      SHOPOS_ARTIFACT_ID: '8929701044'
-      SHOPOS_ARTIFACT_SHA256: e245e520a6ca5212242f74f881dad9dae455782df18bce11b3fd7011576cc3de
-      SHOPOS_SOURCE_SHA: 0d15ea1de82d84917192974c2d316e10e29f39be
+      SHOPOS_ARTIFACT_ID: '8932620732'
+      SHOPOS_ARTIFACT_SHA256: 1bad705f7bbbaa99279274b72dd778106b8445f3d95d66e61cf39a2faeffb818
+      SHOPOS_SOURCE_SHA: 5d7df3843469c864a3fb3534dd2ceca8c7feaa9f
 
     steps:
       - name: Check out test harness
