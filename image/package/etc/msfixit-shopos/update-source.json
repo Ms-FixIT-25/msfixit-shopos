@@ -1,0 +1,8 @@
+{
+  "schema": 1,
+  "repository": "Ms-FixIT-25/msfixit-shopos",
+  "channel": "stable",
+  "manifest_asset": "shopos-update-manifest.json",
+  "auto_apply": false,
+  "reboot_after_apply": true
+}
