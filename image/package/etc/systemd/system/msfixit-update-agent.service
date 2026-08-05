@@ -1,0 +1,29 @@
+[Unit]
+Description=ShopOS signed GitHub update check
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/usr/share/msfixit-shopos/update/update-signing-public.pem
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/msfixit-update-agent run
+User=root
+Group=root
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictAddressFamilies=AF_INET AF_INET6
+ReadWritePaths=/var/lib/msfixit-shopos/update /boot/firmware
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target
