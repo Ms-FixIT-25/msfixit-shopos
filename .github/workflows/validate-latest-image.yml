@@ -50,7 +50,7 @@ jobs:
         run: |
           set -Eeuo pipefail
           sudo apt-get -o Acquire::Retries=3 update
-          sudo apt-get -o Acquire::Retries=3 install --yes qemu-system-arm qemu-utils zstd unzip curl util-linux
+          sudo apt-get -o Acquire::Retries=3 install --yes qemu-system-arm qemu-utils zstd xz-utils gzip unzip curl util-linux
           qemu-system-aarch64 --version
           qemu-system-aarch64 -machine help | grep '^raspi4b '
           bash harness/test-latest-image-pin.sh
@@ -83,17 +83,26 @@ jobs:
             if [ ! -f "$candidate_archive" ]; then
               candidate_archive="$candidate_dir/$(basename "${candidate_checksum%.sha256}")"
             fi
+            case "$candidate_archive" in
+              *.img.zst|*.img.xz|*.img.gz) ;;
+              *) continue ;;
+            esac
             if [ -f "$candidate_archive" ] && [[ "$candidate_sha" =~ ^[0-9a-fA-F]{64}$ ]]; then
               checksum_file="$candidate_checksum"
               image_archive="$candidate_archive"
               expected_image_sha="$candidate_sha"
               valid_pairs=$((valid_pairs + 1))
             fi
-          done < <(find . -type f -name '*.img.zst.sha256' -print)
+          done < <(find . -type f \( -name '*.img.zst.sha256' -o -name '*.img.xz.sha256' -o -name '*.img.gz.sha256' \) -print)
 
           test "$valid_pairs" -eq 1
           printf '%s  %s\n' "$expected_image_sha" "$image_archive" | sha256sum --check --strict
-          unzstd --no-progress "$image_archive" -o shopos-test.img
+          case "$image_archive" in
+            *.img.zst) unzstd --no-progress "$image_archive" -o shopos-test.img ;;
+            *.img.xz) xz --decompress --stdout "$image_archive" > shopos-test.img ;;
+            *.img.gz) gzip --decompress --stdout "$image_archive" > shopos-test.img ;;
+            *) echo "Unsupported image compression: $image_archive" >&2; exit 1 ;;
+          esac
           rm -f artifact.zip "$image_archive"
           truncate -s 16G shopos-test.img
 
