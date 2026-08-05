@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+trap 'printf "Phase 2 regression test failed at line %s: %s\n" "$LINENO" "$BASH_COMMAND" >&2' ERR
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 app="$root/image/package/usr/share/msfixit-shopos/admin-console/public/index.php"
@@ -14,7 +15,7 @@ assert_contains() {
     local file="$2"
     if ! grep -Fq -- "$needle" "$file"; then
         printf 'Missing expected text in %s: %s\n' "$file" "$needle" >&2
-        exit 1
+        return 1
     fi
 }
 
@@ -33,7 +34,7 @@ assert_contains "log_result rejected" "$helper"
 assert_contains "[REDACTED]" "$helper"
 assert_contains "tail -n 200" "$helper"
 
-if grep -Eq 'www-data ALL=\(root\) NOPASSWD: ALL' "$sudoers"; then
+if grep -Eq '^www-data ALL=\(root\) NOPASSWD:[[:space:]]+ALL([[:space:]]|$)' "$sudoers"; then
     echo "Unrestricted sudo rule detected." >&2
     exit 1
 fi
