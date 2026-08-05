@@ -11,13 +11,18 @@ bash -n "$init"
 bash -n "$wifi"
 
 grep -Fq 'user=shopadmin' "$init"
-grep -Fq "chpasswd" "$init"
+grep -Fq 'chpasswd' "$init"
 grep -Fq 'chage -d 0' "$init"
 grep -Fq '/dev/console' "$init"
-grep -Fq 'ConditionPathExists=!/var/lib/msfixit-shopos/first-login-initialized' "$dropin"
+grep -Fq "od -An -N12 -tx1 /dev/urandom" "$init"
 grep -Fq 'ExecStartPre=/bin/bash /usr/local/sbin/msfixit-first-login-init' "$dropin"
 grep -Fxq 'SHOPOS_WIFI_SSID=Skynet' "$ssid"
 grep -Fq 'nmcli --ask device wifi connect "$ssid"' "$wifi"
+
+if grep -Fq 'ConditionPathExists=' "$dropin"; then
+    echo 'The tty1 getty must not be disabled after first-login initialization.' >&2
+    exit 1
+fi
 
 if grep -Eiq '(password|passwd|psk|secret)[[:space:]]*=' "$ssid"; then
     echo 'Wi-Fi secret must not be stored in the image configuration.' >&2
@@ -26,6 +31,11 @@ fi
 
 if grep -Fq 'SHOPOS_WIFI_PASSWORD' "$wifi" "$ssid"; then
     echo 'Wi-Fi password variable must not exist in the repository.' >&2
+    exit 1
+fi
+
+if grep -Fq 'credential_file=' "$init"; then
+    echo 'The one-time password must not be written to a file.' >&2
     exit 1
 fi
 
