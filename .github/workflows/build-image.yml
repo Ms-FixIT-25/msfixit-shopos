@@ -185,13 +185,42 @@ jobs:
 
           Dieses Release enthält das vollständige, startfähige ShopOS-Image für einen Raspberry Pi 4 Model B. Das Image wird einmalig auf die SD-Karte oder ein USB-SSD-Laufwerk geschrieben. Normale spätere ShopOS- und App-Aktualisierungen sollen anschließend direkt im lokalen **ShopOS Control Center** erfolgen, ohne das Speichermedium erneut an einen PC anschließen zu müssen.
 
-          ### Erstinstallation
+          ### Welcher Download ist richtig?
 
-          1. Das komprimierte Raspberry-Pi-Image herunterladen.
-          2. Die SHA-256-Prüfsumme kontrollieren.
-          3. Das Image mit Raspberry Pi Imager, Balena Etcher oder einem vergleichbaren Werkzeug auf das Zielmedium schreiben.
-          4. Medium in den Raspberry Pi einsetzen und den Einrichtungsassistenten abschließen.
-          5. Danach das **Update Center** im ShopOS Control Center verwenden.
+          | Betriebssystem | Empfohlene Datei | Verwendung |
+          |---|---|---|
+          | Windows 10/11 | `msfixit-shopos-rpi4-usb.img.zip` | ZIP vollständig entpacken und die enthaltene `.img` mit Raspberry Pi Imager schreiben |
+          | macOS | `msfixit-shopos-rpi4-usb.img.zip` | ZIP im Finder vollständig entpacken und die enthaltene `.img` mit Raspberry Pi Imager schreiben |
+          | Linux | `msfixit-shopos-rpi4-usb.img.xz` | Direkt mit Raspberry Pi Imager verwenden oder zuerst mit `xz` entpacken |
+
+          Das ZIP-Paket ist die empfohlene Desktop-Version für Windows und macOS. Das enthaltene Image wird vollständig materialisiert und besitzt nach dem Entpacken keine Sparse-Lücken. Dadurch soll Raspberry Pi Imager den Schreibfortschritt korrekt von 0 bis 100 Prozent anzeigen.
+
+          Ein separates DMG wird bewusst nicht angeboten: Raspberry Pi Imager benötigt ein unverändertes Rohabbild im `.img`-Format. Ein DMG würde keinen technischen Vorteil bringen und nur ein weiteres großes, inhaltlich identisches Release-Asset erzeugen.
+
+          ### Installation unter Windows
+
+          1. `msfixit-shopos-rpi4-usb.img.zip` und die zugehörige `.sha256`-Datei herunterladen.
+          2. Das ZIP vollständig über **Alle extrahieren** entpacken. Die IMG-Datei nicht direkt aus dem ZIP öffnen.
+          3. Raspberry Pi Imager starten und **Eigenes Image verwenden** auswählen.
+          4. Die entpackte `.img`-Datei und anschließend das Zielmedium auswählen.
+          5. Schreiben und Verifizieren vollständig abschließen lassen.
+
+          ### Installation unter macOS
+
+          1. `msfixit-shopos-rpi4-usb.img.zip` und die zugehörige `.sha256`-Datei herunterladen.
+          2. Das ZIP per Doppelklick im Finder vollständig entpacken.
+          3. Raspberry Pi Imager starten und **Use custom** beziehungsweise **Eigenes Image verwenden** auswählen.
+          4. Die entpackte `.img`-Datei und anschließend das Zielmedium auswählen.
+          5. Das angeforderte macOS-Administratorkennwort bestätigen und die Verifikation vollständig abwarten.
+
+          ### Installation unter Linux
+
+          1. `msfixit-shopos-rpi4-usb.img.xz` und die zugehörige `.sha256`-Datei herunterladen.
+          2. Die Prüfsumme kontrollieren.
+          3. Das XZ-Image direkt mit Raspberry Pi Imager verwenden oder zuerst entpacken.
+          4. Schreiben und Verifizieren vollständig abschließen lassen.
+
+          Danach das Medium in den Raspberry Pi einsetzen, den Einrichtungsassistenten abschließen und künftige System- sowie App-Aktualisierungen im **ShopOS Update Center** durchführen.
 
           ### Aktualisierung ohne erneutes Flashen
 
@@ -210,9 +239,14 @@ jobs:
 
           ### Enthaltene Downloads
 
-          - `msfixit-shopos-rpi4-usb.img.zst` – vollständiges Image für die einmalige Erstinstallation
-          - `msfixit-shopos-rpi4-usb.img.zst.sha256` – portable SHA-256-Prüfsumme
+          - `msfixit-shopos-rpi4-usb.img.zip` – empfohlene Desktop-Version für Windows und macOS
+          - `msfixit-shopos-rpi4-usb.img.zip.sha256` – SHA-256-Prüfsumme des Desktop-Pakets
+          - `msfixit-shopos-rpi4-usb.img.xz` – kompakte Version für Linux und fortgeschrittene Nutzung
+          - `msfixit-shopos-rpi4-usb.img.xz.sha256` – SHA-256-Prüfsumme der XZ-Version
+          - `msfixit-shopos-rpi4-usb.ab-layout` – dokumentiertes A/B-Partitionslayout
           - Update-Artefakte und signierte Manifeste, sobald sie für diese Version veröffentlicht werden
+
+          Eine ausführliche Anleitung mit Hinweisen zu Windows, macOS, Linux, Prüfsummen und Fortschrittsanzeigen befindet sich in `docs/INSTALL_IMAGE.md`.
 
           ### Wichtiger Hinweis
 
