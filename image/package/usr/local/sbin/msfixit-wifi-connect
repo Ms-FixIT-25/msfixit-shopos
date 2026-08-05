@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+config=/etc/msfixit-shopos/wifi.env
+[ -r "$config" ] || { echo "Missing Wi-Fi configuration: $config" >&2; exit 1; }
+# shellcheck disable=SC1090
+. "$config"
+ssid="${SHOPOS_WIFI_SSID:-}"
+[ -n "$ssid" ] || { echo "SHOPOS_WIFI_SSID is empty." >&2; exit 1; }
+
+command -v nmcli >/dev/null 2>&1 || { echo "NetworkManager nmcli is unavailable." >&2; exit 1; }
+nmcli radio wifi on
+exec nmcli --ask device wifi connect "$ssid"

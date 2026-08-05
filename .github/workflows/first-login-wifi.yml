@@ -1,0 +1,24 @@
+name: First login and Wi-Fi bootstrap
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - image/package/usr/local/sbin/msfixit-first-login-init
+      - image/package/usr/local/sbin/msfixit-wifi-connect
+      - image/package/etc/msfixit-shopos/wifi.env
+      - image/package/etc/systemd/system/getty@tty1.service.d/shopos-first-login.conf
+      - tests/test-first-login-wifi.sh
+      - .github/workflows/first-login-wifi.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate first login and Wi-Fi bootstrap
+        run: bash tests/test-first-login-wifi.sh

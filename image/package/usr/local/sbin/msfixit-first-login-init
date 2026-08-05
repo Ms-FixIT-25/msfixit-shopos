@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+marker=/var/lib/msfixit-shopos/first-setup-complete
+default_user=shopadmin
+config=/etc/msfixit-shopos/wifi.env
+
+[ -e "$marker" ] && exit 0
+
+exec </dev/tty1 >/dev/tty1 2>&1
+clear
+printf '\nMs. FixIT ShopOS Ersteinrichtung\n'
+printf '================================\n\n'
+
+while true; do
+    read -r -p "Benutzername [${default_user}]: " username
+    username="${username:-$default_user}"
+    if [[ "$username" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]; then
+        if [ "$username" = "$default_user" ] || ! id "$username" >/dev/null 2>&1; then
+            break
+        fi
+        printf 'Dieser Benutzer existiert bereits.\n'
+    else
+        printf 'Bitte nur Kleinbuchstaben, Zahlen, Unterstrich und Bindestrich verwenden.\n'
+    fi
+done
+
+while true; do
+    read -r -s -p 'Passwort: ' password_one
+    printf '\n'
+    read -r -s -p 'Passwort wiederholen: ' password_two
+    printf '\n'
+    if [ "$password_one" != "$password_two" ]; then
+        printf 'Die Passwörter stimmen nicht überein.\n'
+        continue
+    fi
+    if [ "${#password_one}" -lt 12 ]; then
+        printf 'Das Passwort muss mindestens 12 Zeichen lang sein.\n'
+        continue
+    fi
+    break
+done
+
+if [ "$username" = "$default_user" ]; then
+    id "$default_user" >/dev/null 2>&1 || useradd --create-home --shell /bin/bash "$default_user"
+    usermod -aG sudo,adm,users "$default_user"
+else
+    useradd --create-home --shell /bin/bash --groups sudo,adm,users "$username"
+    if id "$default_user" >/dev/null 2>&1; then
+        usermod --lock "$default_user"
+    fi
+fi
+printf '%s:%s\n' "$username" "$password_one" | chpasswd
+unset password_one password_two
+
+install -d -o root -g root -m 0755 /etc/msfixit-shopos
+printf '%s\n' "$username" > /etc/msfixit-shopos/admin-user
+chmod 0644 /etc/msfixit-shopos/admin-user
+
+printf '\nBenutzer %s wurde eingerichtet.\n\n' "$username"
+printf 'WLAN einrichten?\n'
+printf '  [A] Automatisch mit der vorkonfigurierten SSID verbinden\n'
+printf '  [M] Anderes WLAN manuell auswählen\n'
+printf '  [S] Überspringen\n'
+read -r -p 'Auswahl [A/M/S]: ' wifi_choice
+wifi_choice="${wifi_choice:-A}"
+
+case "${wifi_choice,,}" in
+    a)
+        if command -v nmcli >/dev/null 2>&1; then
+            /usr/local/sbin/msfixit-wifi-connect || printf 'WLAN konnte nicht verbunden werden. Die Einrichtung kann später wiederholt werden.\n'
+        else
+            printf 'NetworkManager ist nicht verfügbar. WLAN wird übersprungen.\n'
+        fi
+        ;;
+    m)
+        if command -v nmcli >/dev/null 2>&1; then
+            nmcli radio wifi on
+            nmcli device wifi rescan >/dev/null 2>&1 || true
+            nmcli --fields SSID,SIGNAL,SECURITY device wifi list || true
+            read -r -p 'SSID: ' manual_ssid
+            if [ -n "$manual_ssid" ]; then
+                nmcli --ask device wifi connect "$manual_ssid" || printf 'WLAN konnte nicht verbunden werden.\n'
+            fi
+        else
+            printf 'NetworkManager ist nicht verfügbar. WLAN wird übersprungen.\n'
+        fi
+        ;;
+    s)
+        printf 'WLAN-Einrichtung übersprungen. Später: sudo msfixit-wifi-connect\n'
+        ;;
+    *)
+        printf 'Unbekannte Auswahl. WLAN-Einrichtung übersprungen.\n'
+        ;;
+esac
+
+install -d -o root -g root -m 0700 "$(dirname "$marker")"
+touch "$marker"
+chmod 0600 "$marker"
+
+printf '\nErsteinrichtung abgeschlossen. Du kannst dich jetzt als %s anmelden.\n\n' "$username"

@@ -1,0 +1,15 @@
+[Unit]
+Description=Initialize ShopOS first-login credentials
+After=local-fs.target
+Before=getty@tty1.service
+ConditionPathExists=!/var/lib/msfixit-shopos/first-login-initialized
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/msfixit-first-login-init
+StandardOutput=journal
+StandardError=journal
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
