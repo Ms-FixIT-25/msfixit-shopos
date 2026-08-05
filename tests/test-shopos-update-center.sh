@@ -15,6 +15,7 @@ grep -Fq "['check-system','check-apps','start-system-update','reboot','update-ap
 grep -Fq "bypass_shell" "$gui"
 ! grep -Eq 'shell_exec|passthru|popen\(' "$gui"
 grep -Fq "APP_RE=re.compile" "$helper"
+grep -Fq "import json, os, pathlib, re, subprocess, sys, tempfile, urllib.error" "$helper"
 grep -Fq "systemd-run" "$helper"
 grep -Fq "RELEASE_API='https://api.github.com/repos/Ms-FixIT-25/msfixit-shopos/releases/latest'" "$helper"
 grep -Fq "ALLOWED_HOSTS=" "$helper"
