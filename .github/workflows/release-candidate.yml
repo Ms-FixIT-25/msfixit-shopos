@@ -1,0 +1,95 @@
+name: ShopOS release candidate
+
+on:
+  push:
+    branches: [agent/product-hardening-release-candidate]
+    paths:
+      - image/**
+      - scripts/**
+      - tests/**
+      - docs/**
+      - Makefile
+      - .github/workflows/release-candidate.yml
+  pull_request:
+    paths:
+      - image/**
+      - scripts/**
+      - tests/**
+      - docs/**
+      - Makefile
+      - .github/workflows/release-candidate.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: shopos-release-candidate-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  hardening:
+    name: Validate release hardening
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out ShopOS
+        uses: actions/checkout@v7
+      - name: Validate consolidated release invariants
+        run: bash tests/test-release-candidate-hardening.sh
+      - name: Run repository checks
+        run: make check
+      - name: Validate first-boot regression coverage
+        run: bash tests/test-firstboot-storage-permissions.sh
+      - name: Validate admin console regression coverage
+        run: bash tests/test-admin-console-foundation.sh
+      - name: Validate platform contract
+        run: |
+          if [ -x tests/test-shopos-platform-core.sh ]; then
+            bash tests/test-shopos-platform-core.sh
+          elif [ -f tests/test-shopos-platform-core.sh ]; then
+            bash tests/test-shopos-platform-core.sh
+          else
+            printf 'Platform regression test not present on this branch.\n' >&2
+            exit 1
+          fi
+
+  build-image:
+    name: Build checksummed Raspberry Pi 4 image
+    needs: hardening
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 180
+    steps:
+      - name: Check out ShopOS
+        uses: actions/checkout@v7
+      - name: Build flash image
+        run: bash scripts/build-image.sh rpi4 usb
+      - name: Verify generated checksums
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          shopt -s nullglob
+          sums=(artifacts/*.sha256)
+          [ "${#sums[@]}" -gt 0 ]
+          for sum in "${sums[@]}"; do
+            (cd "$(dirname "$sum")" && sha256sum --check "$(basename "$sum")")
+          done
+      - name: Write build provenance
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          {
+            printf 'repository=%s\n' "$GITHUB_REPOSITORY"
+            printf 'source_sha=%s\n' "$GITHUB_SHA"
+            printf 'workflow_run_id=%s\n' "$GITHUB_RUN_ID"
+            printf 'workflow_run_attempt=%s\n' "$GITHUB_RUN_ATTEMPT"
+            printf 'target=rpi4-usb\n'
+            printf 'built_at=%s\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } > artifacts/BUILD-PROVENANCE.txt
+      - name: Upload release-candidate image
+        uses: actions/upload-artifact@v7
+        with:
+          name: msfixit-shopos-rpi4-usb-release-candidate
+          path: artifacts/*
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
