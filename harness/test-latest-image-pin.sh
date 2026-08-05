@@ -6,9 +6,9 @@ workflow="${1:-.github/workflows/validate-latest-image.yml}"
 bash -n tests/prepare-qemu-image.sh
 bash -n tests/run-qemu-smoke.sh
 
-grep -Fq "SHOPOS_ARTIFACT_ID: '8940765456'" "$workflow"
-grep -Fq "SHOPOS_ARTIFACT_SHA256: de3cf9160ef0ed99c4e2ba487c474d97f8448aea560781ac9aab525a476192ef" "$workflow"
-grep -Fq "SHOPOS_SOURCE_SHA: 50f303325c91f54eacf42ad8b52f8be009ad0de1" "$workflow"
+grep -Fq "SHOPOS_ARTIFACT_ID: '8943848343'" "$workflow"
+grep -Fq "SHOPOS_ARTIFACT_SHA256: e37a02234ebf12f905681ff39787959f500130046f18b3e2dfccf1e5758959ee" "$workflow"
+grep -Fq "SHOPOS_SOURCE_SHA: 5a799d79dba7015fd8a18f974a4cc6079ae24dfa" "$workflow"
 grep -Fq 'artifact_head_sha="$(gh api' "$workflow"
 grep -Fq 'test "$artifact_head_sha" = "$SHOPOS_SOURCE_SHA"' "$workflow"
 grep -Fq 'sha256sum --check --strict' "$workflow"
