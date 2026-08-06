@@ -46,10 +46,22 @@ fi
 
 grep -Fq -- '--method PATCH' "$syncer"
 grep -Fq 'releases/assets/' "$syncer"
+grep -Fq 'rewrite_checksum_asset' "$syncer"
+grep -Fq 'verify_checksum_asset' "$syncer"
+grep -Fq 'printf '\''%s  %s\n'\'' "${digest,,}" "$target_payload"' "$syncer"
 grep -Fq 'windows-macos.zip' "$syncer"
 grep -Fq 'linux.img.xz' "$syncer"
-if grep -Eq 'gh release download|curl .*releases/download' "$syncer"; then
-    echo 'Release assets must be renamed server-side instead of downloaded and uploaded again.' >&2
+grep -Fq 'Only tiny checksum files are downloaded and replaced' "$syncer"
+if grep -Fq -- '--pattern "$desktop_asset"' "$syncer"; then
+    echo 'The multi-gigabyte Desktop ZIP must not be downloaded during renaming.' >&2
+    exit 1
+fi
+if grep -Fq -- '--pattern "$linux_asset"' "$syncer"; then
+    echo 'The multi-gigabyte Linux image must not be downloaded during renaming.' >&2
+    exit 1
+fi
+if grep -Eq 'curl .*releases/download' "$syncer"; then
+    echo 'Release images must not be copied through curl.' >&2
     exit 1
 fi
 
@@ -59,4 +71,4 @@ grep -Fq 'scripts/sync-release-assets.sh' "$workflow"
 grep -Fq 'msfixit-shopos-<VERSION>-rpi4-usb-windows-macos.zip' "$docs"
 grep -Fq 'msfixit-shopos-<VERSION>-rpi4-usb-linux.img.xz' "$docs"
 
-printf 'PASS: release assets and documentation use exact versioned, platform-specific names.\n'
+printf 'PASS: release assets, checksums and documentation use exact versioned platform names.\n'
