@@ -1,0 +1,12 @@
+[mysqld]
+# Final Raspberry Pi appliance limits. The zz prefix deliberately loads this
+# file after first-boot's functional 99-shopos.cnf so later provisioning cannot
+# silently restore workstation-sized connection and cache defaults.
+innodb_buffer_pool_size=192M
+innodb_log_buffer_size=16M
+max_connections=40
+table_open_cache=400
+table_definition_cache=400
+thread_cache_size=8
+performance_schema=OFF
+skip_name_resolve=ON
