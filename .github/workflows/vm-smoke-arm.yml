@@ -16,7 +16,7 @@ permissions:
 jobs:
   qemu-smoke-arm:
     name: Boot and initialize on an ARM64 runner
-    runs-on: ubuntu-26.04-arm
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 50
     steps:
       - name: Check out test harness
