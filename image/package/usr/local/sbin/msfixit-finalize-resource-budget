@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+/usr/local/sbin/msfixit-apply-resource-budget
+
+restart_if_active() {
+    local unit="$1"
+    if systemctl is-active --quiet "$unit"; then
+        systemctl restart "$unit"
+    fi
+}
+
+restart_if_active mariadb.service
+restart_if_active redis-server.service
+
+php_service="$(systemctl list-unit-files --type=service --no-legend 'php*-fpm.service' 2>/dev/null | awk 'NR==1 {print $1}')"
+if [ -n "$php_service" ]; then
+    restart_if_active "$php_service"
+fi
+
+logger -p daemon.info -t msfixit-resource-budget \
+    'Raspberry Pi PHP, Redis and MariaDB resource limits are enforced.'
