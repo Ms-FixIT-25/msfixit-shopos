@@ -1,0 +1,33 @@
+name: Raspberry Pi resource budget
+
+on:
+  push:
+    branches:
+      - perf/raspberry-pi-thermal-budget
+  pull_request:
+    paths:
+      - image/package/DEBIAN/postinst
+      - image/package/etc/mysql/mariadb.conf.d/60-shopos-pi-budget.cnf
+      - image/package/etc/systemd/system/msfixit-kiosk.service
+      - image/package/etc/systemd/system/msfixit-thermal-check.service
+      - image/package/etc/systemd/system/msfixit-thermal-check.timer
+      - image/package/usr/local/sbin/msfixit-apply-resource-budget
+      - image/package/usr/local/sbin/msfixit-kiosk-session
+      - image/package/usr/local/sbin/msfixit-thermal-check
+      - tests/test-pi-resource-budget.sh
+      - .github/workflows/pi-resource-budget.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-resource-budget:
+    name: Validate Raspberry Pi thermal and resource budget
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+      - name: Run focused regression test
+        run: bash tests/test-pi-resource-budget.sh
