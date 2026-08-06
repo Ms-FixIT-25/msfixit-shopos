@@ -34,6 +34,7 @@ grep -Fq 'restart_if_active mariadb.service' "$finalizer"
 grep -Fq 'restart_if_active redis-server.service' "$finalizer"
 grep -Fq "'php*-fpm.service'" "$finalizer"
 grep -Fq 'After=local-fs.target msfixit-firstboot.service' "$budget_service"
+grep -Fq 'Before=msfixit-brand-shop.service' "$budget_service"
 grep -Fq 'ExecStart=/usr/local/sbin/msfixit-finalize-resource-budget' "$budget_service"
 grep -Fq 'systemctl enable msfixit-resource-budget.service' "$postinst"
 
@@ -46,4 +47,4 @@ if grep -Eq 'over_voltage|arm_freq|force_turbo' "$root/image/package" -R; then
     exit 1
 fi
 
-printf 'PASS: ShopOS enforces bounded kiosk, PHP, Redis and final-precedence MariaDB limits on every boot.\n'
+printf 'PASS: ShopOS enforces bounded kiosk, PHP, Redis and final-precedence MariaDB limits before branding on every boot.\n'
