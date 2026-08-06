@@ -19,7 +19,9 @@ end
 ' "${workflows[@]}"
 
 if command -v actionlint >/dev/null 2>&1; then
-    actionlint -color
+    # SC2317 is a ShellCheck false positive for trap-invoked helper functions.
+    # All actual syntax, runner-label and GitHub Actions errors remain fatal.
+    actionlint -color -ignore 'SC2317:'
 else
     echo 'actionlint is required for GitHub Actions semantic validation.' >&2
     exit 1
