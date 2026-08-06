@@ -4,6 +4,7 @@ set -Eeuo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 kiosk="$root/image/package/usr/local/sbin/msfixit-kiosk-session"
 service="$root/image/package/etc/systemd/system/msfixit-kiosk.service"
+brand_service="$root/image/package/etc/systemd/system/msfixit-brand-shop.service"
 budget="$root/image/package/usr/local/sbin/msfixit-apply-resource-budget"
 finalizer="$root/image/package/usr/local/sbin/msfixit-finalize-resource-budget"
 budget_service="$root/image/package/etc/systemd/system/msfixit-resource-budget.service"
@@ -37,6 +38,8 @@ grep -Fq 'After=local-fs.target msfixit-firstboot.service' "$budget_service"
 grep -Fq 'Before=msfixit-brand-shop.service' "$budget_service"
 grep -Fq 'ExecStart=/usr/local/sbin/msfixit-finalize-resource-budget' "$budget_service"
 grep -Fq 'systemctl enable msfixit-resource-budget.service' "$postinst"
+grep -Fq 'Requires=msfixit-resource-budget.service' "$brand_service"
+grep -Fq 'After=network-online.target msfixit-firstboot.service msfixit-resource-budget.service' "$brand_service"
 
 grep -Fq 'degrees >= 78' "$thermal"
 grep -Fq 'OnUnitActiveSec=2min' "$timer"
@@ -47,4 +50,4 @@ if grep -Eq 'over_voltage|arm_freq|force_turbo' "$root/image/package" -R; then
     exit 1
 fi
 
-printf 'PASS: ShopOS enforces bounded kiosk, PHP, Redis and final-precedence MariaDB limits before branding on every boot.\n'
+printf 'PASS: ShopOS readiness requires bounded kiosk, PHP, Redis and final-precedence MariaDB limits.\n'
