@@ -26,14 +26,14 @@ jobs:
           set -Eeuo pipefail
           ruby -e 'require "yaml"; Dir[".github/workflows/*.{yml,yaml}"].sort.each { |f| YAML.parse_file(f); puts "PASS YAML: #{f}" }'
 
-      - name: Validate shell syntax
+      - name: Validate script syntax
         shell: bash
         run: |
           set -Eeuo pipefail
           bash -n scripts/build-image.sh
           bash -n scripts/postprocess-ab-image.sh
-          bash -n image/package/usr/local/sbin/msfixit-update-agent
-          bash -n image/package/usr/local/sbin/msfixit-update-center
+          python3 -m py_compile image/package/usr/local/sbin/msfixit-update-agent
+          python3 -m py_compile image/package/usr/local/sbin/msfixit-update-center
           bash -n image/package/usr/local/sbin/msfixit-boot-console
           bash -n image/package/usr/local/sbin/msfixit-kiosk-session
           bash -n image/package/usr/local/sbin/msfixit-first-login-init
