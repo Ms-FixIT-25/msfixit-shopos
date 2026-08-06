@@ -56,7 +56,7 @@ jobs:
     name: Build and verify candidate image
     needs: test
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 180
+    timeout-minutes: 120
     steps:
       - name: Check out tested candidate
         uses: actions/checkout@v4
@@ -68,6 +68,9 @@ jobs:
           sudo rm -rf /usr/local/lib/android || true
           df -h
       - name: Build fresh Raspberry Pi 4 USB image
+        env:
+          SHOPOS_BUILD_DESKTOP_ZIP: "0"
+          SHOPOS_XZ_LEVEL: "1"
         run: make image-rpi4-usb
       - name: Verify candidate image
         run: bash scripts/generate-release-metadata.sh artifacts candidate "$GITHUB_SHA" "$GITHUB_RUN_ID"
