@@ -68,6 +68,12 @@ fi
 
 grep -Fq 'workflows: ["Build ShopOS image"]' "$workflow"
 grep -Fq "head_branch == 'main'" "$workflow"
+grep -Fq 'repos/${GITHUB_REPOSITORY}/releases?per_page=100' "$workflow"
+grep -Fq '.target_commitish == $sha' "$workflow"
+if grep -Fq 'targetCommitish' "$workflow"; then
+    echo 'gh release list does not expose targetCommitish; use the releases API field target_commitish.' >&2
+    exit 1
+fi
 grep -Fq 'scripts/sync-release-assets.sh' "$workflow"
 grep -Fq 'msfixit-shopos-<VERSION>-rpi4-usb-windows-macos.zip' "$docs"
 grep -Fq 'msfixit-shopos-<VERSION>-rpi4-usb-linux.img.xz' "$docs"
