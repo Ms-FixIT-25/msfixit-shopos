@@ -35,6 +35,8 @@ jobs:
         run: |
           bash -n scripts/generate-release-metadata.sh
           bash -n scripts/install-qemu-raspi4.sh
+          bash -n tests/normalize-qemu-sd-size.sh
+          bash tests/normalize-qemu-sd-size.sh --self-test
           make check
 
       - name: Run integrated platform tests
@@ -124,6 +126,8 @@ jobs:
           qemu-system-aarch64 -machine help | tee vm/qemu-machines.txt
           grep -Eq '^[[:space:]]*raspi4b([[:space:]]|$)' vm/qemu-machines.txt
           bash -n tests/prepare-qemu-image.sh
+          bash -n tests/normalize-qemu-sd-size.sh
+          bash tests/normalize-qemu-sd-size.sh --self-test
           bash tests/run-qemu-smoke.sh --self-test
 
       - name: Download the candidate from this workflow
@@ -149,6 +153,8 @@ jobs:
           xz --decompress --stdout "$image_xz" > vm/shopos-test.img
           test -s vm/shopos-test.img
           printf 'Candidate raw image size: %s bytes\n' "$(stat -c '%s' vm/shopos-test.img)"
+          bash tests/normalize-qemu-sd-size.sh vm/shopos-test.img | tee vm/qemu-disk-size.txt
+          test "$(stat -c '%s' vm/shopos-test.img)" = 68719476736
           df -h .
 
       - name: Prepare offline QEMU guest
@@ -180,6 +186,7 @@ jobs:
             vm/harness.log
             vm/qemu-version.txt
             vm/qemu-machines.txt
+            vm/qemu-disk-size.txt
             vm/qemu-console.log
             vm/qemu-exit.txt
             vm/partition-identifiers.txt
