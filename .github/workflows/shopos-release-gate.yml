@@ -81,18 +81,10 @@ jobs:
           retention-days: 7
 
   qemu:
-    name: Boot candidate on ${{ matrix.host }}
+    name: Boot candidate on ARM64
     needs: image
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - host: x86_64
-            runner: ubuntu-24.04
-          - host: ARM64
-            runner: ubuntu-24.04-arm
-    runs-on: ${{ matrix.runner }}
-    timeout-minutes: 100
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 70
     steps:
       - name: Check out the exact tested candidate
         uses: actions/checkout@v4
@@ -172,12 +164,13 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: shopos-candidate-qemu-evidence-${{ matrix.host }}-${{ github.event.pull_request.head.sha || github.sha }}
+          name: shopos-candidate-qemu-evidence-ARM64-${{ github.event.pull_request.head.sha || github.sha }}
           path: |
             vm/harness.log
             vm/qemu-version.txt
             vm/qemu-machines.txt
             vm/qemu-disk-size.txt
+            vm/qemu-acceleration.txt
             vm/qemu-console.log
             vm/qemu-exit.txt
             vm/partition-identifiers.txt
