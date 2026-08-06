@@ -28,6 +28,7 @@ jobs:
           bash -n scripts/build-image.sh
           bash -n scripts/postprocess-ab-image.sh
           bash -n scripts/install-qemu-raspi4.sh
+          bash -n tests/normalize-qemu-sd-size.sh
           bash -n tests/prepare-qemu-image.sh
           bash -n tests/run-qemu-smoke.sh
           python3 -m py_compile image/package/usr/local/sbin/msfixit-update-agent
@@ -73,7 +74,9 @@ jobs:
           grep -Fq 'sha512sum --check --strict' scripts/install-qemu-raspi4.sh
           grep -Fq 'needs: [test, image, qemu]' .github/workflows/shopos-release-gate.yml
           grep -Fq 'actions/download-artifact@v4' .github/workflows/shopos-release-gate.yml
+          grep -Fq 'normalize-qemu-sd-size.sh vm/shopos-test.img' .github/workflows/shopos-release-gate.yml
           grep -Fq 'vm/shopos-test.img' .github/workflows/shopos-release-gate.yml
+          bash tests/normalize-qemu-sd-size.sh --self-test
           bash tests/run-qemu-smoke.sh --self-test
 
       - name: Verify integrated feature files
@@ -84,4 +87,5 @@ jobs:
           test -s image/package/usr/local/sbin/msfixit-wifi-connect
           test -s image/package/usr/local/sbin/msfixit-thermal-check
           test -s scripts/install-qemu-raspi4.sh
+          test -s tests/normalize-qemu-sd-size.sh
           echo 'PASS: combined ShopOS platform and release-gate contracts are valid.'
