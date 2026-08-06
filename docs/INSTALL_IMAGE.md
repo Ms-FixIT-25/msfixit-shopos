@@ -4,15 +4,17 @@ ShopOS wird einmalig auf eine SD-Karte oder vorzugsweise eine USB-SSD geschriebe
 
 ## Download auswählen
 
+Jedes Release trägt seine ShopOS-Version direkt im Dateinamen. Ersetze `<VERSION>` in den Beispielen durch die Version der geöffneten Release-Seite, etwa `0.15.1`.
+
 | Betriebssystem | Empfohlene Datei | Verwendung |
 |---|---|---|
-| Windows 10/11 | `msfixit-shopos-rpi4-usb.img.zip` | ZIP vollständig entpacken und die enthaltene `.img` mit Raspberry Pi Imager schreiben |
-| macOS | `msfixit-shopos-rpi4-usb.img.zip` | ZIP im Finder vollständig entpacken und die enthaltene `.img` mit Raspberry Pi Imager schreiben |
-| Linux | `msfixit-shopos-rpi4-usb.img.xz` | Direkt mit Raspberry Pi Imager verwenden oder zuerst mit `xz` entpacken |
+| Windows 10/11 | `msfixit-shopos-<VERSION>-rpi4-usb-windows-macos.zip` | ZIP vollständig entpacken und die enthaltene versionierte `.img` mit Raspberry Pi Imager schreiben |
+| macOS | `msfixit-shopos-<VERSION>-rpi4-usb-windows-macos.zip` | ZIP im Finder vollständig entpacken und die enthaltene versionierte `.img` mit Raspberry Pi Imager schreiben |
+| Linux | `msfixit-shopos-<VERSION>-rpi4-usb-linux.img.xz` | Direkt mit Raspberry Pi Imager verwenden oder zuerst mit `xz` entpacken |
 
-Das ZIP-Paket ist die grafische Desktop-Version für Windows und macOS. Das enthaltene Image wird vor dem Verpacken vollständig materialisiert und enthält nach dem Entpacken keine Sparse-Lücken. Dadurch soll Raspberry Pi Imager den Schreibfortschritt korrekt von 0 bis 100 Prozent anzeigen.
+Das gemeinsame Windows/macOS-ZIP ist eindeutig als Desktop-Paket bezeichnet. Ein zweites, inhaltlich identisches Gigabyte-Paket nur mit anderem macOS-Namen wird bewusst nicht erzeugt. Das enthaltene Image wird vollständig materialisiert und enthält nach dem Entpacken keine Sparse-Lücken. Dadurch soll Raspberry Pi Imager den Schreibfortschritt korrekt von 0 bis 100 Prozent anzeigen.
 
-Ein separates DMG wird bewusst nicht angeboten: DMG ist ein macOS-Containerformat, während Raspberry Pi Imager für ShopOS das unveränderte Rohabbild im `.img`-Format benötigt. Ein DMG würde keinen technischen Vorteil bringen und nur ein weiteres großes, inhaltlich identisches Release-Asset erzeugen.
+Ein separates DMG wird bewusst nicht angeboten: DMG ist ein macOS-Containerformat, während Raspberry Pi Imager für ShopOS das unveränderte Rohabbild im `.img`-Format benötigt. Ein DMG würde keinen technischen Vorteil bringen.
 
 ## Voraussetzungen
 
@@ -24,21 +26,21 @@ Ein separates DMG wird bewusst nicht angeboten: DMG ist ein macOS-Containerforma
 
 ## Installation unter Windows
 
-1. `msfixit-shopos-rpi4-usb.img.zip` und `msfixit-shopos-rpi4-usb.img.zip.sha256` herunterladen.
+1. `msfixit-shopos-<VERSION>-rpi4-usb-windows-macos.zip` und die gleichnamige `.sha256`-Datei herunterladen.
 2. Das ZIP über **Alle extrahieren** vollständig entpacken.
 3. Die `.img` nicht direkt aus 7-Zip, WinRAR oder dem ZIP-Ordner öffnen.
 4. Raspberry Pi Imager starten und Raspberry Pi 4 als Modell auswählen.
-5. **Eigenes Image verwenden** wählen und die entpackte `.img` auswählen.
+5. **Eigenes Image verwenden** wählen und `msfixit-shopos-<VERSION>-rpi4-usb.img` auswählen.
 6. Das richtige Zielmedium auswählen.
 7. Schreiben starten und die anschließende Verifikation vollständig abwarten.
 
 ## Installation unter macOS
 
-1. `msfixit-shopos-rpi4-usb.img.zip` und `msfixit-shopos-rpi4-usb.img.zip.sha256` herunterladen.
+1. `msfixit-shopos-<VERSION>-rpi4-usb-windows-macos.zip` und die gleichnamige `.sha256`-Datei herunterladen.
 2. Das ZIP per Doppelklick im Finder vollständig entpacken.
 3. Raspberry Pi Imager starten und Raspberry Pi 4 als Modell auswählen.
 4. **Use custom** beziehungsweise **Eigenes Image verwenden** wählen.
-5. Die entpackte `.img` und danach das richtige Zielmedium auswählen.
+5. `msfixit-shopos-<VERSION>-rpi4-usb.img` und danach das richtige Zielmedium auswählen.
 6. Das von macOS angeforderte Administratorkennwort bestätigen.
 7. Schreiben und Verifikation vollständig abwarten.
 
@@ -49,15 +51,15 @@ Das Image wird nicht als macOS-Anwendung gestartet, sondern lediglich als Datena
 Die XZ-Datei kann direkt in Raspberry Pi Imager ausgewählt werden. Alternativ kann sie vorher geprüft und entpackt werden:
 
 ```bash
-sha256sum --check msfixit-shopos-rpi4-usb.img.xz.sha256
-unxz msfixit-shopos-rpi4-usb.img.xz
+sha256sum --check msfixit-shopos-<VERSION>-rpi4-usb-linux.img.xz.sha256
+unxz msfixit-shopos-<VERSION>-rpi4-usb-linux.img.xz
 ```
 
 Danach die `.img` mit Raspberry Pi Imager oder einem geeigneten Blockkopierwerkzeug schreiben.
 
 ## Prüfsumme kontrollieren
 
-Jedes Downloadpaket besitzt eine eigene `.sha256`-Datei. Eine abweichende Prüfsumme bedeutet, dass die Datei beschädigt oder unvollständig ist. In diesem Fall nicht flashen, sondern erneut herunterladen.
+Jedes Downloadpaket besitzt eine eigene `.sha256`-Datei mit derselben Version im Namen. Eine abweichende Prüfsumme bedeutet, dass die Datei beschädigt oder unvollständig ist. In diesem Fall nicht flashen, sondern erneut herunterladen.
 
 ## Nach dem Schreiben
 
