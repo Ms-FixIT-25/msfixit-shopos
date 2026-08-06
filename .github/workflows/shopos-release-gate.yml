@@ -25,17 +25,17 @@ jobs:
         uses: actions/checkout@v4
         with:
           persist-credentials: false
-
       - name: Install test dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y php-cli python3 openssl sqlite3 shellcheck
-
       - name: Run repository test suite
         run: |
           bash -n scripts/generate-release-metadata.sh
+          bash -n scripts/install-qemu-raspi4.sh
+          bash -n tests/normalize-qemu-sd-size.sh
+          bash tests/normalize-qemu-sd-size.sh --self-test
           make check
-
       - name: Run integrated platform tests
         shell: bash
         run: |
@@ -56,25 +56,24 @@ jobs:
     name: Build and verify candidate image
     needs: test
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 180
+    timeout-minutes: 120
     steps:
       - name: Check out tested candidate
         uses: actions/checkout@v4
         with:
           persist-credentials: false
-
       - name: Reclaim runner disk space
         run: |
           sudo rm -rf /opt/hostedtoolcache || true
           sudo rm -rf /usr/local/lib/android || true
           df -h
-
       - name: Build fresh Raspberry Pi 4 USB image
+        env:
+          SHOPOS_BUILD_DESKTOP_ZIP: "0"
+          SHOPOS_XZ_LEVEL: "1"
         run: make image-rpi4-usb
-
       - name: Verify candidate image
         run: bash scripts/generate-release-metadata.sh artifacts candidate "$GITHUB_SHA" "$GITHUB_RUN_ID"
-
       - name: Upload candidate image
         uses: actions/upload-artifact@v4
         with:
@@ -84,27 +83,108 @@ jobs:
           compression-level: 0
           retention-days: 7
 
-  merge:
-    name: Merge verified candidate to main
-    needs: [test, image]
-    if: >-
-      github.event_name == 'pull_request' &&
-      github.event.pull_request.draft == false &&
-      github.event.pull_request.head.repo.full_name == github.repository &&
-      github.event.pull_request.base.ref == 'main'
-    runs-on: ubuntu-24.04
-    permissions:
-      contents: write
-      pull-requests: write
+  qemu:
+    name: Boot candidate on ARM64
+    needs: image
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 70
     steps:
-      - name: Merge only the verified head commit
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR_URL: ${{ github.event.pull_request.html_url }}
-          VERIFIED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      - name: Check out the exact tested candidate
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Reclaim runner disk space
+        run: |
+          sudo rm -rf /opt/hostedtoolcache || true
+          sudo rm -rf /usr/local/lib/android || true
+          df -h
+      - name: Restore pinned QEMU build
+        id: qemu-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/shopos-qemu/9.2.4
+          key: shopos-qemu-9.2.4-${{ runner.os }}-${{ runner.arch }}-v1
+      - name: Build pinned QEMU with Raspberry Pi 4 support
+        if: steps.qemu-cache.outputs.cache-hit != 'true'
+        run: bash scripts/install-qemu-raspi4.sh "$HOME/.cache/shopos-qemu/9.2.4"
+      - name: Validate QEMU and harness
+        shell: bash
         run: |
           set -Eeuo pipefail
-          gh pr merge "$PR_URL" \
-            --squash \
-            --delete-branch \
-            --match-head-commit "$VERIFIED_HEAD_SHA"
+          echo "$HOME/.cache/shopos-qemu/9.2.4/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.cache/shopos-qemu/9.2.4/bin:$PATH"
+          mkdir -p vm
+          qemu-system-aarch64 --version | tee vm/qemu-version.txt
+          qemu-system-aarch64 -machine help | tee vm/qemu-machines.txt
+          grep -Eq '^[[:space:]]*raspi4b([[:space:]]|$)' vm/qemu-machines.txt
+          bash -n tests/prepare-qemu-image.sh
+          bash -n tests/normalize-qemu-sd-size.sh
+          bash tests/normalize-qemu-sd-size.sh --self-test
+          bash tests/run-qemu-smoke.sh --self-test
+      - name: Download the candidate from this workflow
+        uses: actions/download-artifact@v4
+        with:
+          name: shopos-candidate-${{ github.event.pull_request.head.sha || github.sha }}
+          path: candidate
+      - name: Verify and unpack the exact candidate image
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mkdir -p vm
+          image_xz="$(find candidate -type f -name 'msfixit-shopos-rpi4-usb.img.xz' -print -quit)"
+          test -n "$image_xz"
+          test -s "$image_xz"
+          checksum="${image_xz}.sha256"
+          test -s "$checksum"
+          (
+            cd "$(dirname "$image_xz")"
+            sha256sum --check --strict "$(basename "$checksum")"
+          )
+          xz --decompress --stdout "$image_xz" > vm/shopos-test.img
+          test -s vm/shopos-test.img
+          printf 'Candidate raw image size: %s bytes\n' "$(stat -c '%s' vm/shopos-test.img)"
+          bash tests/normalize-qemu-sd-size.sh vm/shopos-test.img | tee vm/qemu-disk-size.txt
+          test "$(stat -c '%s' vm/shopos-test.img)" = 68719476736
+          df -h .
+      - name: Prepare offline QEMU guest
+        run: sudo bash tests/prepare-qemu-image.sh vm/shopos-test.img
+      - name: Boot, initialize and validate ShopOS
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          qemu_path="$HOME/.cache/shopos-qemu/9.2.4/bin"
+          sudo env PATH="$qemu_path:$PATH" \
+            bash -x tests/run-qemu-smoke.sh vm/shopos-test.img vm \
+            2>&1 | tee vm/harness.log
+      - name: Prepare QEMU evidence
+        if: always()
+        run: |
+          mkdir -p vm
+          sudo chown -R "$USER:$USER" vm 2>/dev/null || true
+          find vm -type d -exec chmod u+rwx {} + 2>/dev/null || true
+          find vm -type f -exec chmod u+rw {} + 2>/dev/null || true
+      - name: Upload QEMU evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: shopos-candidate-qemu-evidence-ARM64-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            vm/harness.log
+            vm/qemu-version.txt
+            vm/qemu-machines.txt
+            vm/qemu-disk-size.txt
+            vm/qemu-acceleration.txt
+            vm/qemu-console.log
+            vm/qemu-exit.txt
+            vm/partition-identifiers.txt
+            vm/fstab.before
+            vm/fstab.after
+            vm/initramfs-selection.txt
+            vm/kernel-command-line.txt
+            vm/msfixit-vm-smoke.log
+            vm/msfixit-vm-smoke.result
+            vm/msfixit-firstboot.log
+            vm/guest-journal.log
+            vm/guest-filesystem-state.txt
+          if-no-files-found: warn
+          retention-days: 14

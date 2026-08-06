@@ -1,9 +1,9 @@
-name: ShopOS PR 60 integration validation
+name: ShopOS integrated validation
 
 on:
-  push:
-    branches: [integration/pr60-shopos-hardware-fixes]
   pull_request:
+    branches: [main]
+  push:
     branches: [main]
   workflow_dispatch:
 
@@ -11,27 +11,26 @@ permissions:
   contents: read
 
 jobs:
-  integrated-improvements:
-    name: Validate PR 50 through PR 60 integration
+  integrated-platform:
+    name: Validate the combined ShopOS platform
     runs-on: ubuntu-24.04
-    timeout-minutes: 25
+    timeout-minutes: 30
 
     steps:
       - name: Check out combined source
         uses: actions/checkout@v7
 
-      - name: Validate workflow YAML
+      - name: Validate workflow and script syntax
         shell: bash
         run: |
           set -Eeuo pipefail
           ruby -e 'require "yaml"; Dir[".github/workflows/*.{yml,yaml}"].sort.each { |f| YAML.parse_file(f); puts "PASS YAML: #{f}" }'
-
-      - name: Validate script syntax
-        shell: bash
-        run: |
-          set -Eeuo pipefail
           bash -n scripts/build-image.sh
           bash -n scripts/postprocess-ab-image.sh
+          bash -n scripts/install-qemu-raspi4.sh
+          bash -n tests/normalize-qemu-sd-size.sh
+          bash -n tests/prepare-qemu-image.sh
+          bash -n tests/run-qemu-smoke.sh
           python3 -m py_compile image/package/usr/local/sbin/msfixit-update-agent
           python3 -m py_compile image/package/usr/local/sbin/msfixit-update-center
           bash -n image/package/usr/local/sbin/msfixit-boot-console
@@ -46,10 +45,15 @@ jobs:
           bash tests/test-shopos-update-agent.sh
           bash tests/test-shopos-update-center.sh
 
-      - name: Validate dense image and A-B boot
+      - name: Validate dense release image and fast candidate mode
         run: |
+          grep -Fq 'SHOPOS_BUILD_DESKTOP_ZIP:-1' scripts/build-image.sh
+          grep -Fq 'SHOPOS_XZ_LEVEL:-6' scripts/build-image.sh
           grep -Fq 'cp --sparse=never' scripts/build-image.sh
           grep -Fq '.img.zip' scripts/build-image.sh
+          grep -Fq 'pv --force --bytes --timer --eta --rate' scripts/build-image.sh
+          grep -Fq 'SHOPOS_BUILD_DESKTOP_ZIP: "0"' .github/workflows/shopos-release-gate.yml
+          grep -Fq 'SHOPOS_XZ_LEVEL: "1"' .github/workflows/shopos-release-gate.yml
           bash tests/test-shopos-ab-image-layout.sh
 
       - name: Validate boot experience
@@ -69,6 +73,30 @@ jobs:
           grep -Fq -- '-nolisten tcp' image/package/etc/systemd/system/msfixit-kiosk.service
           grep -Fq 'User=shopos-kiosk' image/package/etc/systemd/system/msfixit-kiosk.service
 
+      - name: Validate QEMU release-gate contract
+        run: |
+          grep -Fq "qemu_version='9.2.4'" scripts/install-qemu-raspi4.sh
+          grep -Fq 'sha512sum --check --strict' scripts/install-qemu-raspi4.sh
+          grep -Fq 'name: Boot candidate on ARM64' .github/workflows/shopos-release-gate.yml
+          grep -Fq 'runs-on: ubuntu-24.04-arm' .github/workflows/shopos-release-gate.yml
+          if grep -Fq 'matrix.host' .github/workflows/shopos-release-gate.yml; then
+            echo 'The full Raspberry Pi acceptance boot must not be duplicated across host architectures.' >&2
+            exit 1
+          fi
+          grep -Fq -- '-accel kvm' tests/run-qemu-smoke.sh
+          grep -Fq -- '-accel tcg,thread=multi' tests/run-qemu-smoke.sh
+          grep -Fq 'cache=unsafe,aio=threads' tests/run-qemu-smoke.sh
+          grep -Fq 'qemu-acceleration.txt' .github/workflows/shopos-release-gate.yml
+          grep -Fq 'actions/download-artifact@v4' .github/workflows/shopos-release-gate.yml
+          grep -Fq 'normalize-qemu-sd-size.sh vm/shopos-test.img' .github/workflows/shopos-release-gate.yml
+          grep -Fq 'vm/shopos-test.img' .github/workflows/shopos-release-gate.yml
+          if grep -Fq 'gh pr merge' .github/workflows/shopos-release-gate.yml; then
+            echo 'Automatic merge must remain disabled.' >&2
+            exit 1
+          fi
+          bash tests/normalize-qemu-sd-size.sh --self-test
+          bash tests/run-qemu-smoke.sh --self-test
+
       - name: Verify integrated feature files
         run: |
           test -s image/package/usr/share/msfixit-shopos/admin-console/public/updates.php
@@ -76,4 +104,6 @@ jobs:
           test -s image/package/etc/systemd/system/msfixit-kiosk.service
           test -s image/package/usr/local/sbin/msfixit-wifi-connect
           test -s image/package/usr/local/sbin/msfixit-thermal-check
-          echo 'PASS: PR 50 through PR 60 combined source is present and validated.'
+          test -s scripts/install-qemu-raspi4.sh
+          test -s tests/normalize-qemu-sd-size.sh
+          echo 'PASS: combined ShopOS platform and release-gate contracts are valid.'

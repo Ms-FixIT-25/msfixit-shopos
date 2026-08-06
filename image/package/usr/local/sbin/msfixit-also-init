@@ -52,10 +52,13 @@ set -a
 source "$catalog_env"
 set +a
 
+# The catalogue accounts are intentionally local-only (`user`@`localhost`).
+# Passing --port to the MariaDB client forces TCP even when the host value is
+# localhost, which makes MariaDB see the peer as 127.0.0.1. Force the local
+# Unix socket here so initialization uses the matching account identity.
 for sql_file in "$schema_file" "$content_schema_file" "$content_guards_file"; do
     MYSQL_PWD="$CATALOG_DB_PASSWORD" mariadb \
-        --host="$CATALOG_DB_HOST" \
-        --port="$CATALOG_DB_PORT" \
+        --protocol=socket \
         --user="$CATALOG_DB_USER" \
         "$CATALOG_DB_NAME" < "$sql_file"
 done

@@ -58,7 +58,7 @@ mariadb "$database_name" < "$schema_file"
 mariadb "$database_name" < "$guards_file"
 
 cat > "$admin_env" <<EOF_ADMIN
-CATALOG_DB_HOST=127.0.0.1
+CATALOG_DB_HOST=localhost
 CATALOG_DB_PORT=3306
 CATALOG_DB_NAME=${database_name}
 CATALOG_DB_USER=${admin_user}
@@ -68,7 +68,7 @@ chmod 0600 "$admin_env"
 chown root:root "$admin_env"
 
 cat > "$wordpress_env" <<EOF_WORDPRESS
-CATALOG_DB_HOST=127.0.0.1
+CATALOG_DB_HOST=localhost
 CATALOG_DB_PORT=3306
 CATALOG_DB_NAME=${database_name}
 CATALOG_DB_USER=${wordpress_user}

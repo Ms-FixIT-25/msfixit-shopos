@@ -43,7 +43,7 @@ FLUSH PRIVILEGES;
 EOF_SQL
 
 cat > "$wordpress_env" <<EOF_ENV
-PARTNER_DB_HOST=127.0.0.1
+PARTNER_DB_HOST=localhost
 PARTNER_DB_PORT=3306
 PARTNER_DB_NAME=${database_name}
 PARTNER_DB_USER=${wordpress_user}

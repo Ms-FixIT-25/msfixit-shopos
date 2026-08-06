@@ -266,24 +266,42 @@ trap - EXIT
 kernel_cmdline="earlycon=pl011,0xfe201000,115200 console=tty0 console=ttyAMA1,115200 root=UUID=${root_uuid} rootfstype=ext4 rootwait rw fsck.repair=yes loglevel=5 systemd.show_status=1 plymouth.enable=0 panic=5"
 printf '%s\n' "$kernel_cmdline" | tee "$output_dir/kernel-command-line.txt"
 
+# Prefer native ARM virtualization when the hosted runner exposes KVM. QEMU
+# automatically falls back to multi-threaded TCG when KVM cannot initialize.
+# The image is a disposable, checksummed test copy, so unsafe write caching is
+# acceptable here and substantially reduces database-heavy first-boot I/O.
 qemu_args=(
     -machine raspi4b
+    -accel kvm
     -accel tcg,thread=multi
     -kernel "$output_dir/kernel8.img"
     -dtb "$output_dir/bcm2711-rpi-4-b.dtb"
     -initrd "$initrd"
     -append "$kernel_cmdline"
-    -drive "file=${image},format=raw,if=sd,cache=writeback"
+    -drive "file=${image},format=raw,if=sd,cache=unsafe,aio=threads"
     -display none
     -serial stdio
     -monitor none
     -no-reboot
 )
 
+{
+    printf 'Host architecture: %s\n' "$(uname -m)"
+    if [ -c /dev/kvm ]; then
+        printf '/dev/kvm: present\n'
+        ls -l /dev/kvm
+    else
+        printf '/dev/kvm: unavailable; QEMU will use TCG fallback\n'
+    fi
+    printf 'Accelerator preference: kvm -> tcg,thread=multi\n'
+    printf 'Disk cache: unsafe with aio=threads (disposable test image only)\n'
+} | tee "$output_dir/qemu-acceleration.txt"
+
 qemu_full="$output_dir/qemu-console.full.log"
 set +e
-timeout --signal=TERM --kill-after=30s 32m qemu-system-aarch64 "${qemu_args[@]}" > "$qemu_full" 2>&1
-qemu_rc=$?
+timeout --signal=TERM --kill-after=30s 32m \
+    qemu-system-aarch64 "${qemu_args[@]}" 2>&1 | tee "$qemu_full"
+qemu_rc=${PIPESTATUS[0]}
 set -e
 printf 'QEMU_EXIT=%s\n' "$qemu_rc" | tee "$output_dir/qemu-exit.txt"
 bounded_copy "$qemu_full" "$output_dir/qemu-console.log" $((16 * 1024 * 1024))
