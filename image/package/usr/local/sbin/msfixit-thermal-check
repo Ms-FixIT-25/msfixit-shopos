@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+thermal_file=/sys/class/thermal/thermal_zone0/temp
+[ -r "$thermal_file" ] || exit 0
+raw="$(cat "$thermal_file")"
+[[ "$raw" =~ ^[0-9]+$ ]] || exit 0
+millidegrees="$raw"
+degrees=$((millidegrees / 1000))
+
+if (( degrees >= 78 )); then
+    logger -p daemon.crit -t msfixit-thermal "ShopOS CPU temperature critical: ${degrees} C"
+elif (( degrees >= 70 )); then
+    logger -p daemon.warning -t msfixit-thermal "ShopOS CPU temperature high: ${degrees} C"
+fi
