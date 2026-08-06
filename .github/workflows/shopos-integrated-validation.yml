@@ -45,10 +45,15 @@ jobs:
           bash tests/test-shopos-update-agent.sh
           bash tests/test-shopos-update-center.sh
 
-      - name: Validate dense image and A-B boot
+      - name: Validate dense release image and fast candidate mode
         run: |
+          grep -Fq 'SHOPOS_BUILD_DESKTOP_ZIP:-1' scripts/build-image.sh
+          grep -Fq 'SHOPOS_XZ_LEVEL:-6' scripts/build-image.sh
           grep -Fq 'cp --sparse=never' scripts/build-image.sh
           grep -Fq '.img.zip' scripts/build-image.sh
+          grep -Fq 'pv --force --bytes --timer --eta --rate' scripts/build-image.sh
+          grep -Fq 'SHOPOS_BUILD_DESKTOP_ZIP: "0"' .github/workflows/shopos-release-gate.yml
+          grep -Fq 'SHOPOS_XZ_LEVEL: "1"' .github/workflows/shopos-release-gate.yml
           bash tests/test-shopos-ab-image-layout.sh
 
       - name: Validate boot experience
