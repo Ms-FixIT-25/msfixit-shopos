@@ -8,7 +8,7 @@ install -d -m 0755 /run/msfixit-shopos
 install -d -m 0755 /srv/www
 install -d -m 0755 /etc/nftables.d
 install -d -m 0755 /etc/plymouth
-chmod 0755 /usr/local/sbin/msfixit-update /usr/local/sbin/msfixit-update-agent /usr/local/sbin/msfixit-update-center /usr/local/sbin/msfixit-slot-writer /usr/local/sbin/msfixit-update-boot-sync /usr/local/sbin/msfixit-boot-selector /usr/local/sbin/msfixit-kiosk-session
+chmod 0755 /usr/local/sbin/msfixit-update /usr/local/sbin/msfixit-update-agent /usr/local/sbin/msfixit-update-center /usr/local/sbin/msfixit-slot-writer /usr/local/sbin/msfixit-update-boot-sync /usr/local/sbin/msfixit-boot-selector /usr/local/sbin/msfixit-kiosk-session /usr/local/sbin/msfixit-apply-resource-budget /usr/local/sbin/msfixit-thermal-check
 chmod 0640 /etc/msfixit-shopos/update-slots.json /etc/msfixit-shopos/update-source.json
 chmod 0440 /etc/sudoers.d/msfixit-shopos-update-center
 
@@ -19,6 +19,8 @@ for group in video render input; do
     getent group "$group" >/dev/null 2>&1 && usermod -a -G "$group" shopos-kiosk || true
 done
 install -d -o shopos-kiosk -g shopos-kiosk -m 0700 /var/lib/msfixit-shopos/kiosk
+
+/usr/local/sbin/msfixit-apply-resource-budget
 
 # Keep Debian's package-owned nftables.conf and load the ShopOS rules from a
 # separate include file to avoid package ownership conflicts.
@@ -80,6 +82,7 @@ systemctl enable msfixit-firstboot.service 2>/dev/null || true
 systemctl enable msfixit-brand-shop.service 2>/dev/null || true
 systemctl enable msfixit-boot-console.service 2>/dev/null || true
 systemctl enable msfixit-kiosk.service 2>/dev/null || true
+systemctl enable msfixit-thermal-check.timer 2>/dev/null || true
 systemctl set-default graphical.target 2>/dev/null || true
 
 exit 0

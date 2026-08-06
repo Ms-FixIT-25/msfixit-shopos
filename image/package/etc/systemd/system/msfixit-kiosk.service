@@ -20,8 +20,15 @@ StandardError=journal
 PAMName=login
 ExecStart=/usr/bin/xinit /usr/local/sbin/msfixit-kiosk-session -- :0 vt7 -keeptty -nolisten tcp
 Restart=on-failure
-RestartSec=3
+RestartSec=5
 TimeoutStopSec=10
+CPUWeight=20
+CPUQuota=150%
+MemoryHigh=640M
+MemoryMax=896M
+TasksMax=160
+OOMPolicy=stop
+Nice=5
 
 [Install]
 WantedBy=graphical.target
