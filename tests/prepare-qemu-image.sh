@@ -58,10 +58,12 @@ Restart=no
 TimeoutStartSec=15min
 EOF_BRAND
 
-# The appliance boot console is a full-screen user experience intended for a
-# physical display. It adds no acceptance-test coverage and can flood the
-# emulated serial path, so disable it only in the disposable QEMU image.
+# The appliance boot console and Chromium kiosk are physical-display features.
+# Running Chromium under headless TCG would add heavy emulation load without
+# validating pixels or input. Their package and systemd contracts are covered
+# separately; mask both only in this disposable acceptance image.
 ln -sf /dev/null "$mount_dir/etc/systemd/system/msfixit-boot-console.service"
+ln -sf /dev/null "$mount_dir/etc/systemd/system/msfixit-kiosk.service"
 
 # Keep a runaway driver or service from generating multi-gigabyte evidence.
 # Preserve the bounded journal on disk so it can be inspected after QEMU exits.
@@ -80,4 +82,4 @@ ForwardToConsole=no
 EOF_JOURNAL
 
 sync
-printf 'Prepared QEMU guest with random seed, offline ordering and bounded diagnostics.\n'
+printf 'Prepared QEMU guest with random seed, offline ordering, masked display services and bounded diagnostics.\n'
