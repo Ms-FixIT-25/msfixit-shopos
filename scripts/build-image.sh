@@ -9,9 +9,13 @@ rig_dir="${RPI_IMAGE_GEN_DIR:-${root}/.cache/rpi-image-gen-${rig_version}}"
 artifacts_dir="${root}/artifacts"
 image_name="msfixit-shopos-${device}-${storage}"
 config_name="shopos-${device}-${storage}.yaml"
+build_desktop_zip="${SHOPOS_BUILD_DESKTOP_ZIP:-1}"
+xz_level="${SHOPOS_XZ_LEVEL:-6}"
 
 case "$device" in rpi4|rpi5) ;; *) echo "Usage: $0 [rpi4|rpi5] [usb|sd|nvme]" >&2; exit 2;; esac
 case "$storage" in usb|sd|nvme) ;; *) echo "Usage: $0 [rpi4|rpi5] [usb|sd|nvme]" >&2; exit 2;; esac
+case "$build_desktop_zip" in 0|1) ;; *) echo 'SHOPOS_BUILD_DESKTOP_ZIP must be 0 or 1.' >&2; exit 2;; esac
+case "$xz_level" in 0|1|2|3|4|5|6|7|8|9) ;; *) echo 'SHOPOS_XZ_LEVEL must be an integer from 0 to 9.' >&2; exit 2;; esac
 if [ "$device" = rpi4 ] && [ "$storage" = nvme ]; then
     echo "Raspberry Pi 4B has no native NVMe target; use usb for an NVMe USB enclosure." >&2
     exit 2
@@ -39,7 +43,7 @@ fi
 
 if [ "${SHOPOS_SKIP_BUILD_DEPS:-0}" != 1 ]; then
     sudo apt-get update
-    sudo apt-get install -y fdisk e2fsprogs util-linux xz-utils zip
+    sudo apt-get install -y fdisk e2fsprogs util-linux xz-utils zip pv
     sudo chmod o+x "$HOME"
     (cd "$rig_dir" && sudo ./install_deps.sh)
 fi
@@ -55,10 +59,11 @@ image_file="$(find "$deploy_dir" -maxdepth 1 -type f \( -name "${image_name}.img
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
 raw="$work/${image_name}.img"
+printf 'Unpacking base image: %s\n' "$image_file"
 case "$image_file" in
-    *.img.xz) xz --decompress --stdout "$image_file" > "$raw" ;;
-    *.img.zst) zstd --decompress --stdout "$image_file" > "$raw" ;;
-    *.img.gz) gzip --decompress --stdout "$image_file" > "$raw" ;;
+    *.img.xz) pv --force --bytes --timer --eta --rate "$image_file" | xz --decompress --stdout > "$raw" ;;
+    *.img.zst) pv --force --bytes --timer --eta --rate "$image_file" | zstd --decompress --stdout > "$raw" ;;
+    *.img.gz) pv --force --bytes --timer --eta --rate "$image_file" | gzip --decompress --stdout > "$raw" ;;
     *) echo 'unsupported image compression' >&2; exit 1 ;;
 esac
 
@@ -69,33 +74,48 @@ install -d -m 0755 "$artifacts_dir"
 output="$artifacts_dir/${image_name}.img.xz"
 desktop_output="$artifacts_dir/${image_name}.img.zip"
 desktop_raw="$work/desktop/${image_name}.img"
+raw_size="$(stat -c '%s' "$raw")"
+xz_preset="-${xz_level}"
 
-xz --threads=0 --check=crc64 --compress --stdout "$raw" > "$output"
+printf 'Compressing %s-byte A/B image to XZ preset %s...\n' "$raw_size" "$xz_level"
+pv --force --bytes --timer --eta --rate --size "$raw_size" "$raw" \
+    | xz --threads=0 "$xz_preset" --check=crc64 --compress --stdout \
+    > "$output"
+printf 'XZ candidate complete: %s\n' "$output"
 
-# A/B post-processing grows the image after its initial creation. Some Windows
-# and macOS extractors preserve the resulting zero ranges as sparse holes.
-# Raspberry Pi Imager 2.x can then appear to use the allocated size instead of
-# the logical size for its progress denominator and display more than 200
-# percent. Build a deliberately dense copy and wrap it in ZIP64 so normal
-# Windows and macOS extraction yields a conventional, fully allocated IMG file
-# with a stable 0-100 percent display.
-install -d -m 0755 "$(dirname "$desktop_raw")"
-cp --sparse=never "$raw" "$desktop_raw"
-(
-    cd "$(dirname "$desktop_raw")"
-    zip -9 -q "$desktop_output" "$(basename "$desktop_raw")"
-)
+if [ "$build_desktop_zip" = 1 ]; then
+    # A/B post-processing grows the image after its initial creation. Some
+    # Windows and macOS extractors preserve the resulting zero ranges as sparse
+    # holes. Raspberry Pi Imager 2.x can then display more than 200 percent.
+    # Official releases therefore keep a deliberately dense ZIP64 image.
+    printf 'Creating dense Windows/macOS image copy...\n'
+    install -d -m 0755 "$(dirname "$desktop_raw")"
+    cp --sparse=never "$raw" "$desktop_raw"
+    printf 'Compressing dense desktop image to ZIP64...\n'
+    (
+        cd "$(dirname "$desktop_raw")"
+        zip -9 "$desktop_output" "$(basename "$desktop_raw")"
+    )
+    printf 'Desktop ZIP complete: %s\n' "$desktop_output"
+else
+    printf 'Skipping desktop ZIP for this candidate build; official release builds keep it enabled.\n'
+fi
 
 cp "${raw}.ab-layout" "$artifacts_dir/${image_name}.ab-layout"
 (
     cd "$artifacts_dir"
     sha256sum "$(basename "$output")" > "$(basename "$output").sha256"
-    sha256sum "$(basename "$desktop_output")" > "$(basename "$desktop_output").sha256"
+    if [ "$build_desktop_zip" = 1 ]; then
+        sha256sum "$(basename "$desktop_output")" > "$(basename "$desktop_output").sha256"
+    fi
 )
 
 printf 'Device:        %s\n' "$device"
 printf 'Storage:       %s\n' "$storage"
 printf 'A/B image:     %s\n' "$output"
-printf 'Desktop image: %s\n' "$desktop_output"
 printf 'Layout:        %s\n' "$artifacts_dir/${image_name}.ab-layout"
-printf 'Checksums:     %s, %s\n' "$output.sha256" "$desktop_output.sha256"
+printf 'Checksum:      %s\n' "$output.sha256"
+if [ "$build_desktop_zip" = 1 ]; then
+    printf 'Desktop image: %s\n' "$desktop_output"
+    printf 'Desktop SHA:   %s\n' "$desktop_output.sha256"
+fi
