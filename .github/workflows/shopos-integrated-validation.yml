@@ -72,10 +72,17 @@ jobs:
         run: |
           grep -Fq "qemu_version='9.2.4'" scripts/install-qemu-raspi4.sh
           grep -Fq 'sha512sum --check --strict' scripts/install-qemu-raspi4.sh
-          grep -Fq 'needs: [test, image, qemu]' .github/workflows/shopos-release-gate.yml
+          grep -Fq 'host: x86_64' .github/workflows/shopos-release-gate.yml
+          grep -Fq 'runner: ubuntu-24.04' .github/workflows/shopos-release-gate.yml
+          grep -Fq 'host: ARM64' .github/workflows/shopos-release-gate.yml
+          grep -Fq 'runner: ubuntu-24.04-arm' .github/workflows/shopos-release-gate.yml
           grep -Fq 'actions/download-artifact@v4' .github/workflows/shopos-release-gate.yml
           grep -Fq 'normalize-qemu-sd-size.sh vm/shopos-test.img' .github/workflows/shopos-release-gate.yml
           grep -Fq 'vm/shopos-test.img' .github/workflows/shopos-release-gate.yml
+          if grep -Fq 'gh pr merge' .github/workflows/shopos-release-gate.yml; then
+            echo 'Automatic merge must remain disabled.' >&2
+            exit 1
+          fi
           bash tests/normalize-qemu-sd-size.sh --self-test
           bash tests/run-qemu-smoke.sh --self-test
 
