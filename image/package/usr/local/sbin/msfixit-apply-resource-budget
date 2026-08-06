@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+# PHP-FPM should create workers only when requests arrive. Versioned PHP paths
+# are discovered instead of hard-coded so upgrades keep the policy.
+for pool_dir in /etc/php/*/fpm/pool.d; do
+    [ -d "$pool_dir" ] || continue
+    cat > "$pool_dir/zz-shopos-pi-budget.conf" <<'EOF_PHP'
+[www]
+pm = ondemand
+pm.max_children = 8
+pm.process_idle_timeout = 10s
+pm.max_requests = 500
+EOF_PHP
+done
+
+# Redis is a cache, not the source of truth. Cap it to avoid memory pressure and
+# let it evict the least recently used volatile keys when full.
+if [ -f /etc/redis/redis.conf ]; then
+    sed -i '/^# ShopOS Pi resource budget$/,$d' /etc/redis/redis.conf
+    cat >> /etc/redis/redis.conf <<'EOF_REDIS'
+# ShopOS Pi resource budget
+maxmemory 192mb
+maxmemory-policy volatile-lru
+hz 5
+dynamic-hz yes
+EOF_REDIS
+fi
