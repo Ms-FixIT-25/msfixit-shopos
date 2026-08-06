@@ -49,9 +49,10 @@ grep -Fq 'releases/assets/' "$syncer"
 grep -Fq 'rewrite_checksum_asset' "$syncer"
 grep -Fq 'verify_checksum_asset' "$syncer"
 grep -Fq 'printf '\''%s  %s\n'\'' "${digest,,}" "$target_payload"' "$syncer"
+grep -Fq 'temp_name="${target_name}.new-${GITHUB_RUN_ID:-$$}"' "$syncer"
+grep -Fq 'Temporary checksum asset was not uploaded' "$syncer"
 grep -Fq 'windows-macos.zip' "$syncer"
 grep -Fq 'linux.img.xz' "$syncer"
-grep -Fq 'Only tiny checksum files are downloaded and replaced' "$syncer"
 if grep -Fq -- '--pattern "$desktop_asset"' "$syncer"; then
     echo 'The multi-gigabyte Desktop ZIP must not be downloaded during renaming.' >&2
     exit 1
