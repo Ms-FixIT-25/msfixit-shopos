@@ -5,7 +5,7 @@ image="${1:?usage: postprocess-ab-image.sh RAW_IMAGE}"
 [ "$(id -u)" -eq 0 ] || { echo 'must run as root' >&2; exit 1; }
 [ -f "$image" ] && [ ! -L "$image" ] || { echo 'raw image must be a regular file' >&2; exit 1; }
 
-for cmd in losetup lsblk sfdisk blockdev e2label tune2fs partprobe udevadm dd sha256sum mount umount mountpoint python3; do
+for cmd in losetup lsblk sfdisk blockdev e2label tune2fs partprobe udevadm dd mount umount mountpoint python3; do
     command -v "$cmd" >/dev/null || { echo "missing command: $cmd" >&2; exit 1; }
 done
 
@@ -98,6 +98,7 @@ root_b_label=SHOPOS_ROOT_B
 initial_root=LABEL=SHOPOS_ROOT_A
 root_partition_sectors=${root_size}
 EOF
-sha256sum "$image" > "${image}.sha256"
 
+# Only final compressed artifacts are checksummed. Hashing the temporary raw
+# A/B image forced an extra full read without adding release integrity.
 echo "A/B layout created with initial root SHOPOS_ROOT_A: $image"
