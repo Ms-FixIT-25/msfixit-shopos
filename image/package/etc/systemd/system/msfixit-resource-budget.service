@@ -1,0 +1,12 @@
+[Unit]
+Description=Enforce Ms. FixIT ShopOS Raspberry Pi resource limits
+After=local-fs.target msfixit-firstboot.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/msfixit-finalize-resource-budget
+Nice=10
+CPUWeight=1
+
+[Install]
+WantedBy=multi-user.target
