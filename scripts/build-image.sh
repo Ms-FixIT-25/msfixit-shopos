@@ -7,10 +7,11 @@ storage="${2:-usb}"
 rig_version="${RPI_IMAGE_GEN_VERSION:-v2.6.0}"
 rig_dir="${RPI_IMAGE_GEN_DIR:-${root}/.cache/rpi-image-gen-${rig_version}}"
 artifacts_dir="${root}/artifacts"
-image_name="msfixit-shopos-${device}-${storage}"
+source_image_name="msfixit-shopos-${device}-${storage}"
 config_name="shopos-${device}-${storage}.yaml"
 build_desktop_zip="${SHOPOS_BUILD_DESKTOP_ZIP:-1}"
 xz_level="${SHOPOS_XZ_LEVEL:-6}"
+artifact_version="${SHOPOS_ARTIFACT_VERSION:-}"
 
 # Pull requests need a bootable, checksummed QEMU candidate, not the second
 # desktop ZIP intended for published Windows/macOS releases. Keep official and
@@ -29,7 +30,35 @@ if [ "$device" = rpi4 ] && [ "$storage" = nvme ]; then
     exit 2
 fi
 [ -f "${root}/image/config/${config_name}" ] || { echo "Missing image configuration: image/config/${config_name}" >&2; exit 1; }
+[ -f "${root}/image/VERSION" ] || { echo 'Missing image/VERSION.' >&2; exit 1; }
 [ "$(uname -m)" = aarch64 ] || { echo "ShopOS images must be built on a native ARM64 host." >&2; exit 1; }
+
+# Stable main builds advance monotonically from the latest vMAJOR.MINOR.PATCH
+# tag. A manually raised image/VERSION starts a new major/minor line unchanged.
+if [ "${GITHUB_EVENT_NAME:-}" = push ] && [ "${GITHUB_REF:-}" = refs/heads/main ]; then
+    git -C "$root" fetch --force --tags origin
+    release_version="$(bash "${root}/scripts/next-release-version.sh" "${root}/image/VERSION")"
+    printf '%s\n' "$release_version" > "${root}/image/VERSION"
+    export SHOPOS_VERSION="$release_version"
+    artifact_version="$release_version"
+    printf 'Automatic ShopOS release version: %s\n' "$release_version"
+fi
+
+build_version="${SHOPOS_VERSION:-$(tr -d '[:space:]' < "${root}/image/VERSION")}"
+[[ "$build_version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || {
+    echo "Invalid ShopOS build version: $build_version" >&2
+    exit 1
+}
+export SHOPOS_VERSION="$build_version"
+
+image_name="$source_image_name"
+if [ -n "$artifact_version" ]; then
+    [[ "$artifact_version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || {
+        echo "Invalid SHOPOS_ARTIFACT_VERSION: $artifact_version" >&2
+        exit 1
+    }
+    image_name="msfixit-shopos-${artifact_version}-${device}-${storage}"
+fi
 
 bash "${root}/scripts/build-package.sh"
 sha256sum --check "${root}/image/packages/msfixit-shopos_arm64.deb.sha256"
@@ -61,12 +90,12 @@ fi
 deploy_dir="$(find "$rig_dir/work" -maxdepth 1 -type d -name 'deploy-*' -printf '%T@ %p\n' | sort -nr | awk 'NR==1 {$1=""; sub(/^ /, ""); print}')"
 [ -n "$deploy_dir" ] && [ -d "$deploy_dir" ] || { echo 'The image build completed without a deploy directory.' >&2; exit 1; }
 
-image_file="$(find "$deploy_dir" -maxdepth 1 -type f \( -name "${image_name}.img.zst" -o -name "${image_name}.img.xz" -o -name "${image_name}.img.gz" \) ! -name '*.sparse.*' -print -quit)"
+image_file="$(find "$deploy_dir" -maxdepth 1 -type f \( -name "${source_image_name}.img.zst" -o -name "${source_image_name}.img.xz" -o -name "${source_image_name}.img.gz" \) ! -name '*.sparse.*' -print -quit)"
 [ -n "$image_file" ] && [ -f "$image_file" ] || { echo 'The image build completed without a compressed deploy image.' >&2; exit 1; }
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
-raw="$work/${image_name}.img"
+raw="$work/${source_image_name}.img"
 printf 'Unpacking base image: %s\n' "$image_file"
 case "$image_file" in
     *.img.xz) pv --force --bytes --timer --eta --rate "$image_file" | xz --decompress --stdout > "$raw" ;;
@@ -110,6 +139,7 @@ else
 fi
 
 cp "${raw}.ab-layout" "$artifacts_dir/${image_name}.ab-layout"
+printf '%s\n' "$build_version" > "$artifacts_dir/SHOPOS-VERSION.txt"
 (
     cd "$artifacts_dir"
     sha256sum "$(basename "$output")" > "$(basename "$output").sha256"
@@ -118,10 +148,12 @@ cp "${raw}.ab-layout" "$artifacts_dir/${image_name}.ab-layout"
     fi
 )
 
+printf 'Version:       %s\n' "$build_version"
 printf 'Device:        %s\n' "$device"
 printf 'Storage:       %s\n' "$storage"
 printf 'A/B image:     %s\n' "$output"
 printf 'Layout:        %s\n' "$artifacts_dir/${image_name}.ab-layout"
+printf 'Version file:  %s\n' "$artifacts_dir/SHOPOS-VERSION.txt"
 printf 'Checksum:      %s\n' "$output.sha256"
 if [ "$build_desktop_zip" = 1 ]; then
     printf 'Desktop image: %s\n' "$desktop_output"
