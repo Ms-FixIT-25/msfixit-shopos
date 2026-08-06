@@ -13,17 +13,23 @@ bash -n "$wifi"
 grep -Fq 'exec </dev/tty1 >/dev/tty1 2>&1' "$init"
 grep -Fq 'Benutzername [${default_user}]' "$init"
 grep -Fq 'Passwort wiederholen' "$init"
-grep -Fq 'mindestens 12 Zeichen' "$init"
+grep -Fq 'mindestens 8 Zeichen' "$init"
+if grep -Fq 'mindestens 12 Zeichen' "$init"; then
+    echo 'The local appliance setup must not require twelve password characters.' >&2
+    exit 1
+fi
 grep -Fq 'useradd --create-home' "$init"
 grep -Fq 'usermod --lock "$default_user"' "$init"
 grep -Fq 'WLAN einrichten?' "$init"
-grep -Fq 'Automatisch mit der vorkonfigurierten SSID verbinden' "$init"
-grep -Fq 'Anderes WLAN manuell auswählen' "$init"
+grep -Fq 'WLAN automatisch suchen und verbinden' "$init"
+grep -Fq 'SSID manuell eingeben' "$init"
 grep -Fq 'Überspringen' "$init"
-grep -Fq 'nmcli --ask device wifi connect "$manual_ssid"' "$init"
+grep -Fq 'nmcli device wifi rescan' "$wifi"
+grep -Fq 'nmcli --fields SSID,SIGNAL,SECURITY device wifi list' "$wifi"
+grep -Fq 'WLAN-Passwort abgefragt' "$wifi"
+grep -Fq 'nmcli --ask device wifi connect "$ssid"' "$wifi"
 grep -Fq 'ExecStartPre=/bin/bash /usr/local/sbin/msfixit-first-login-init' "$dropin"
 grep -Fxq 'SHOPOS_WIFI_SSID=Skynet' "$ssid"
-grep -Fq 'nmcli --ask device wifi connect "$ssid"' "$wifi"
 
 if grep -Fq 'ConditionPathExists=' "$dropin"; then
     echo 'The tty1 getty must remain available after setup.' >&2
@@ -45,4 +51,4 @@ if grep -Eq 'One-time password|chage -d 0|/dev/urandom' "$init"; then
     exit 1
 fi
 
-printf 'PASS: interactive user creation and optional password-free Wi-Fi bootstrap checks.\n'
+printf 'PASS: interactive user creation and active Wi-Fi discovery checks.\n'

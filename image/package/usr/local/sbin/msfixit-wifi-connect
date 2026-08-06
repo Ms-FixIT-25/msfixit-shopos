@@ -5,9 +5,31 @@ config=/etc/msfixit-shopos/wifi.env
 [ -r "$config" ] || { echo "Missing Wi-Fi configuration: $config" >&2; exit 1; }
 # shellcheck disable=SC1090
 . "$config"
-ssid="${SHOPOS_WIFI_SSID:-}"
-[ -n "$ssid" ] || { echo "SHOPOS_WIFI_SSID is empty." >&2; exit 1; }
+preferred_ssid="${SHOPOS_WIFI_SSID:-}"
 
 command -v nmcli >/dev/null 2>&1 || { echo "NetworkManager nmcli is unavailable." >&2; exit 1; }
+
 nmcli radio wifi on
+printf 'WLAN-Netze werden gesucht ...\n'
+nmcli device wifi rescan >/dev/null 2>&1 || true
+sleep 2
+
+available="$(nmcli -t -f SSID device wifi list 2>/dev/null | sed '/^$/d' | awk '!seen[$0]++')"
+if [ -z "$available" ]; then
+    printf 'Es wurden keine WLAN-Netze gefunden.\n' >&2
+    exit 1
+fi
+
+ssid=""
+if [ -n "$preferred_ssid" ] && printf '%s\n' "$available" | grep -Fxq "$preferred_ssid"; then
+    ssid="$preferred_ssid"
+    printf 'Vorkonfiguriertes WLAN gefunden: %s\n' "$ssid"
+else
+    printf 'Gefundene WLAN-Netze:\n'
+    nmcli --fields SSID,SIGNAL,SECURITY device wifi list || true
+    read -r -p 'SSID auswählen: ' ssid
+fi
+
+[ -n "$ssid" ] || { printf 'Keine SSID ausgewählt.\n' >&2; exit 1; }
+printf 'Verbindung mit %s wird eingerichtet. Falls geschützt, wird jetzt das WLAN-Passwort abgefragt.\n' "$ssid"
 exec nmcli --ask device wifi connect "$ssid"
