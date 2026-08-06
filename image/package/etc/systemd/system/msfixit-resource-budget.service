@@ -6,6 +6,7 @@ Before=msfixit-brand-shop.service
 [Service]
 Type=oneshot
 ExecStart=/usr/local/sbin/msfixit-finalize-resource-budget
+RemainAfterExit=yes
 Nice=10
 CPUWeight=1
 
