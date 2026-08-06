@@ -19,7 +19,7 @@ if [ "${1:-}" = '--self-test' ]; then
     tmp="$(mktemp)"
     trap 'rm -f "$tmp"' EXIT
     truncate -s 37044092928 "$tmp"
-    "$0" "$tmp" >/dev/null
+    bash "$0" "$tmp" >/dev/null
     test "$(stat -c '%s' "$tmp")" = 68719476736
     test "$(du -B1 "$tmp" | awk '{print $1}')" -lt 1048576
     printf 'PASS: QEMU SD images grow sparsely to the next power-of-two size.\n'
