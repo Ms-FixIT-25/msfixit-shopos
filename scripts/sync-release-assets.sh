@@ -78,7 +78,8 @@ rewrite_checksum_asset() {
     local source_name="$1"
     local target_name="$2"
     local target_payload="$3"
-    local source_id target_id download_name download_dir source_file digest output_file
+    local source_id target_id temp_id download_name download_dir source_file
+    local digest temp_name output_file
 
     refresh_release
     source_id="$(asset_id "$source_name")"
@@ -107,18 +108,35 @@ rewrite_checksum_asset() {
         exit 1
     }
 
-    output_file="$work/$target_name"
+    temp_name="${target_name}.new-${GITHUB_RUN_ID:-$$}"
+    output_file="$work/$temp_name"
     printf '%s  %s\n' "${digest,,}" "$target_payload" > "$output_file"
 
-    # Only tiny checksum files are downloaded and replaced. Multi-gigabyte
-    # image assets are renamed server-side through the release asset API.
-    if [ -n "$source_id" ]; then
+    # Upload the replacement under a temporary name first. The old checksum
+    # remains available until the new tiny asset has been uploaded successfully.
+    refresh_release
+    temp_id="$(asset_id "$temp_name")"
+    delete_asset_id "$temp_id"
+    gh release upload "$tag" "$output_file" --repo "$repo"
+
+    refresh_release
+    temp_id="$(asset_id "$temp_name")"
+    [ -n "$temp_id" ] || {
+        echo "Temporary checksum asset was not uploaded: $temp_name" >&2
+        exit 1
+    }
+
+    source_id="$(asset_id "$source_name")"
+    target_id="$(asset_id "$target_name")"
+    if [ -n "$source_id" ] && [ "$source_id" != "$temp_id" ]; then
         delete_asset_id "$source_id"
     fi
-    if [ -n "$target_id" ] && [ "$target_id" != "$source_id" ]; then
+    if [ -n "$target_id" ] && [ "$target_id" != "$source_id" ] && [ "$target_id" != "$temp_id" ]; then
         delete_asset_id "$target_id"
     fi
-    gh release upload "$tag" "$output_file" --repo "$repo" --clobber
+
+    gh api --method PATCH "repos/${repo}/releases/assets/${temp_id}" \
+        -f name="$target_name" >/dev/null
 }
 
 verify_checksum_asset() {
