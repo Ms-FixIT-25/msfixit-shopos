@@ -17,7 +17,10 @@ concurrency:
 jobs:
   test:
     name: Test complete ShopOS tree
-    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.draft == false
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      github.event.action == 'ready_for_review' ||
+      github.event.pull_request.draft == false
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
