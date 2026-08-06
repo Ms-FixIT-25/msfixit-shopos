@@ -19,7 +19,18 @@ jobs:
       - name: Check out test harness
         uses: actions/checkout@v7
 
-      - name: Download validated ShopOS 0.14 image
+      - name: Install QEMU and image tools
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          sudo apt-get -o Acquire::Retries=3 update
+          sudo apt-get -o Acquire::Retries=3 install --yes qemu-system-arm qemu-utils zstd unzip curl util-linux
+          qemu-system-aarch64 --version
+          qemu-system-aarch64 -machine help | grep '^raspi4b '
+          bash -n tests/prepare-qemu-image.sh
+          bash tests/run-qemu-smoke.sh --self-test
+
+      - name: Download validated ShopOS image
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -34,176 +45,47 @@ jobs:
           cd vm
           sha256sum --check msfixit-shopos-rpi4-usb.img.zst.sha256
           unzstd --no-progress msfixit-shopos-rpi4-usb.img.zst -o shopos-test.img
+          rm -f artifact.zip msfixit-shopos-rpi4-usb.img.zst
           truncate -s 16G shopos-test.img
+
+      - name: Prepare offline QEMU guest
+        shell: bash
+        run: sudo bash tests/prepare-qemu-image.sh vm/shopos-test.img
 
       - name: Boot and run guest acceptance checks
         shell: bash
         run: |
           set -Eeuo pipefail
-          docker run --rm --privileged \
-            -v "$PWD/vm:/work" \
-            archlinux:base \
-            bash -Eeuo pipefail -c '
-              pacman -Syu --noconfirm --needed \
-                qemu-system-aarch64 qemu-common zstd util-linux e2fsprogs curl grep sed coreutils
+          sudo bash -x tests/run-qemu-smoke.sh vm/shopos-test.img vm 2>&1 | tee vm/harness.log
 
-              image=/work/shopos-test.img
-              mkdir -p /mnt/shopos-boot /mnt/shopos-root
-              loop="$(losetup --find --show --partscan "$image")"
-              cleanup() {
-                umount /mnt/shopos-boot 2>/dev/null || true
-                umount /mnt/shopos-root 2>/dev/null || true
-                losetup -d "$loop" 2>/dev/null || true
-              }
-              trap cleanup EXIT
-
-              mount "${loop}p1" /mnt/shopos-boot
-              mount "${loop}p2" /mnt/shopos-root
-              test -s /mnt/shopos-boot/kernel8.img
-              test -s /mnt/shopos-boot/bcm2711-rpi-4-b.dtb
-              cp /mnt/shopos-boot/kernel8.img /work/kernel8.img
-              cp /mnt/shopos-boot/bcm2711-rpi-4-b.dtb /work/bcm2711-rpi-4-b.dtb
-
-              initrd=""
-              for candidate in /mnt/shopos-boot/initramfs8 /mnt/shopos-boot/initramfs8.gz /mnt/shopos-boot/initrd.img-*; do
-                if [ -s "$candidate" ]; then
-                  cp "$candidate" /work/initramfs8
-                  initrd=/work/initramfs8
-                  break
-                fi
-              done
-
-              cat > /mnt/shopos-boot/shopos.env <<"EOF_CONFIG"
-          SHOP_URL=http://127.0.0.1
-          SHOP_TITLE=Ms. FixIT ShopOS VM Test
-          SHOP_ADMIN_USER=shopadmin
-          SHOP_ADMIN_EMAIL=office@msfixit.at
-          SHOP_ADMIN_PASSWORD=VmTest-Only-ChangeMe-2026
-          OS_ADMIN_PASSWORD=VmTest-Only-ChangeMe-2026
-          WORDPRESS_LOCALE=de_DE
-          WORDPRESS_VERSION=7.0.2
-          EOF_CONFIG
-              chmod 0600 /mnt/shopos-boot/shopos.env
-
-              cat > /mnt/shopos-root/usr/local/sbin/msfixit-vm-smoke <<"EOF_SMOKE"
-          #!/usr/bin/env bash
-          set -u
-          exec > >(tee -a /var/log/msfixit-vm-smoke.log /dev/ttyAMA0 2>/dev/null) 2>&1
-          failures=0
-          check() {
-              local label="$1"
-              shift
-              if "$@"; then printf "PASS: %s\n" "$label"; else printf "FAIL: %s\n" "$label"; failures=$((failures + 1)); fi
-          }
-
-          printf "MSFIXIT_VM_SMOKE_BEGIN\n"
-          printf "Kernel: %s\n" "$(uname -a)"
-          printf "Architecture: %s\n" "$(uname -m)"
-          for _ in $(seq 1 180); do
-              [ -e /data/.shopos-ready ] && break
-              systemctl is-failed --quiet msfixit-firstboot.service msfixit-brand-shop.service && break
-              sleep 5
-          done
-
-          systemctl --no-pager --full status msfixit-firstboot.service msfixit-brand-shop.service || true
-          check "initialization marker" test -e /data/.shopos-initialized
-          check "ready marker" test -e /data/.shopos-ready
-          check "credentials file" test -s /boot/firmware/SHOPOS-CREDENTIALS.txt
-          check "MariaDB active" systemctl is-active --quiet mariadb.service
-          check "Redis active" systemctl is-active --quiet redis-server.service
-          check "Nginx active" systemctl is-active --quiet nginx.service
-          php_service="$(systemctl list-unit-files --type=service --no-legend "php*-fpm.service" 2>/dev/null | awk "NR==1 {print \$1}")"
-          check "PHP-FPM discovered" test -n "$php_service"
-          [ -z "$php_service" ] || check "PHP-FPM active" systemctl is-active --quiet "$php_service"
-          check "WordPress files" test -s /srv/www/wordpress/wp-load.php
-          check "WordPress installed" runuser -u www-data -- env HOME=/tmp /usr/local/bin/wp --path=/srv/www/wordpress core is-installed
-          check "WooCommerce active" runuser -u www-data -- env HOME=/tmp /usr/local/bin/wp --path=/srv/www/wordpress plugin is-active woocommerce
-          check "Redis plugin active" runuser -u www-data -- env HOME=/tmp /usr/local/bin/wp --path=/srv/www/wordpress plugin is-active redis-cache
-          check "customer authentication installed" test -s /usr/share/msfixit-shopos/wordpress/msfixit-customer-auth.php
-          check "service portal installed" test -s /usr/share/msfixit-shopos/wordpress/msfixit-service-requests.php
-          check "Workspace mail installed" test -s /usr/share/msfixit-shopos/wordpress/msfixit-workspace.php
-          check "local HTTP response" curl --fail --silent --show-error --max-time 30 http://127.0.0.1/
-          check "version command" /usr/local/bin/shopos-version
-
-          tail -n 160 /var/log/msfixit-firstboot.log 2>/dev/null || true
-          systemctl --failed --no-pager --full || true
-          result=PASS
-          [ "$failures" -eq 0 ] || result=FAIL
-          printf "MSFIXIT_VM_SMOKE_RESULT=%s failures=%s\n" "$result" "$failures" | tee /var/log/msfixit-vm-smoke.result
-          sync
-          systemctl poweroff --no-block || true
-          EOF_SMOKE
-              chmod 0755 /mnt/shopos-root/usr/local/sbin/msfixit-vm-smoke
-
-              cat > /mnt/shopos-root/etc/systemd/system/msfixit-vm-smoke.service <<"EOF_UNIT"
-          [Unit]
-          Description=Ms. FixIT ShopOS QEMU acceptance test
-          After=msfixit-brand-shop.service msfixit-firstboot.service
-          Wants=msfixit-brand-shop.service
-
-          [Service]
-          Type=oneshot
-          ExecStart=/usr/local/sbin/msfixit-vm-smoke
-          TimeoutStartSec=25min
-
-          [Install]
-          WantedBy=multi-user.target
-          EOF_UNIT
-              install -d -m 0755 /mnt/shopos-root/etc/systemd/system/multi-user.target.wants
-              ln -sf ../msfixit-vm-smoke.service /mnt/shopos-root/etc/systemd/system/multi-user.target.wants/msfixit-vm-smoke.service
-              sync
-              umount /mnt/shopos-boot /mnt/shopos-root
-              losetup -d "$loop"
-              trap - EXIT
-
-              qemu_args=(
-                -machine raspi4b
-                -accel tcg,thread=multi
-                -kernel /work/kernel8.img
-                -dtb /work/bcm2711-rpi-4-b.dtb
-                -append "earlycon=pl011,0xfe201000 console=ttyAMA0,115200 root=/dev/mmcblk1p2 rootfstype=ext4 rootwait rw fsck.repair=yes loglevel=7 systemd.show_status=1"
-                -drive file=/work/shopos-test.img,format=raw,if=sd,cache=writeback
-                -display none
-                -serial stdio
-                -monitor none
-                -no-reboot
-              )
-              [ -z "$initrd" ] || qemu_args+=( -initrd "$initrd" )
-
-              set +e
-              timeout --signal=TERM --kill-after=30s 40m qemu-system-aarch64 "${qemu_args[@]}" > /work/qemu-console.log 2>&1
-              qemu_rc=$?
-              set -e
-              printf "QEMU_EXIT=%s\n" "$qemu_rc" > /work/qemu-exit.txt
-
-              loop="$(losetup --find --show --partscan "$image")"
-              trap cleanup EXIT
-              mount "${loop}p2" /mnt/shopos-root
-              cp /mnt/shopos-root/var/log/msfixit-vm-smoke.log /work/ 2>/dev/null || true
-              cp /mnt/shopos-root/var/log/msfixit-vm-smoke.result /work/ 2>/dev/null || true
-              cp /mnt/shopos-root/var/log/msfixit-firstboot.log /work/ 2>/dev/null || true
-              journalctl --directory=/mnt/shopos-root/var/log/journal --no-pager -b > /work/guest-journal.log 2>/dev/null || true
-              umount /mnt/shopos-root
-              losetup -d "$loop"
-              trap - EXIT
-
-              cat /work/qemu-exit.txt
-              tail -n 300 /work/qemu-console.log || true
-              cat /work/msfixit-vm-smoke.result 2>/dev/null || true
-              grep -q "MSFIXIT_VM_SMOKE_RESULT=PASS" /work/msfixit-vm-smoke.result
-            '
+      - name: Prepare VM evidence
+        if: always()
+        shell: bash
+        run: |
+          sudo chown -R "$USER:$USER" vm 2>/dev/null || true
+          find vm -type d -exec chmod u+rwx {} + 2>/dev/null || true
+          find vm -type f -exec chmod u+rw {} + 2>/dev/null || true
 
       - name: Upload VM evidence
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: shopos-0.14-qemu-smoke-evidence
+          name: shopos-qemu-smoke-evidence
           path: |
+            vm/harness.log
+            vm/qemu-version.txt
             vm/qemu-console.log
+            vm/qemu-console.full.log
             vm/qemu-exit.txt
+            vm/partition-identifiers.txt
+            vm/fstab.before
+            vm/fstab.after
+            vm/initramfs-selection.txt
+            vm/kernel-command-line.txt
             vm/msfixit-vm-smoke.log
             vm/msfixit-vm-smoke.result
             vm/msfixit-firstboot.log
             vm/guest-journal.log
+            vm/guest-filesystem-state.txt
           if-no-files-found: warn
           retention-days: 14
