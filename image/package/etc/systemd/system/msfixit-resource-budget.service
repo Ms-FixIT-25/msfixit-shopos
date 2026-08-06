@@ -1,6 +1,7 @@
 [Unit]
 Description=Enforce Ms. FixIT ShopOS Raspberry Pi resource limits
 After=local-fs.target msfixit-firstboot.service
+Before=msfixit-brand-shop.service
 
 [Service]
 Type=oneshot
