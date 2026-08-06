@@ -16,7 +16,7 @@ permissions:
 jobs:
   qemu-smoke:
     name: Boot and initialize the Raspberry Pi 4 image
-    runs-on: ubuntu-26.04
+    runs-on: ubuntu-24.04
     timeout-minutes: 50
     steps:
       - name: Check out test harness
@@ -91,8 +91,7 @@ jobs:
           (
             while kill -0 "$qemu_step_pid" 2>/dev/null; do
               sleep 60
-              kill -0 "$qemu_step_pid" 2>/dev/null || break
-              printf '%s\n' "QEMU_HEARTBEAT $(date --iso-8601=seconds)"
+              printf '%s\n' 'QEMU smoke test is still running...'
               snapshot_console
             done
           ) &
@@ -106,46 +105,24 @@ jobs:
           wait "$heartbeat_pid" 2>/dev/null || true
           snapshot_console
 
-          if [ "$interrupted" -eq 1 ]; then
-            printf 'QEMU_EXIT=interrupted\n' > vm/qemu-exit.txt
-            exit 143
+          if (( interrupted != 0 )); then
+            exit 130
           fi
           exit "$qemu_rc"
 
-      - name: Prepare VM evidence for upload
-        if: always()
-        shell: bash
-        run: |
-          if sudo test -f vm/qemu-console.full.log && ! sudo test -f vm/qemu-console.log; then
-            sudo cp vm/qemu-console.full.log vm/qemu-console.log || true
-          fi
-          if ! sudo test -f vm/qemu-exit.txt; then
-            printf 'QEMU_EXIT=workflow-interrupted-before-harness-finalization\n' | sudo tee vm/qemu-exit.txt >/dev/null
-          fi
-          sudo chown -R "$USER:$USER" vm 2>/dev/null || true
-          find vm -type d -exec chmod u+rwx {} + 2>/dev/null || true
-          find vm -type f -exec chmod u+rw {} + 2>/dev/null || true
-
-      - name: Upload VM evidence
+      - name: Upload QEMU evidence
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: shopos-admin-console-qemu-smoke-evidence
+          name: shopos-qemu-smoke-evidence
           path: |
-            vm/harness.log
-            vm/qemu-version.txt
             vm/qemu-console.log
             vm/qemu-console.full.log
             vm/qemu-exit.txt
-            vm/partition-identifiers.txt
-            vm/fstab.before
-            vm/fstab.after
-            vm/initramfs-selection.txt
-            vm/kernel-command-line.txt
             vm/msfixit-vm-smoke.log
             vm/msfixit-vm-smoke.result
             vm/msfixit-firstboot.log
             vm/guest-journal.log
-            vm/guest-filesystem-state.txt
+            vm/harness.log
           if-no-files-found: warn
           retention-days: 14
