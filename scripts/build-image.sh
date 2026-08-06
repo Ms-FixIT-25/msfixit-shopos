@@ -51,13 +51,13 @@ build_version="${SHOPOS_VERSION:-$(tr -d '[:space:]' < "${root}/image/VERSION")}
 }
 export SHOPOS_VERSION="$build_version"
 
-image_name="$source_image_name"
+desktop_image_name="$source_image_name"
 if [ -n "$artifact_version" ]; then
     [[ "$artifact_version" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]] || {
         echo "Invalid SHOPOS_ARTIFACT_VERSION: $artifact_version" >&2
         exit 1
     }
-    image_name="msfixit-shopos-${artifact_version}-${device}-${storage}"
+    desktop_image_name="msfixit-shopos-${artifact_version}-${device}-${storage}"
 fi
 
 bash "${root}/scripts/build-package.sh"
@@ -108,9 +108,9 @@ sudo bash "${root}/scripts/postprocess-ab-image.sh" "$raw"
 
 rm -rf "$artifacts_dir"
 install -d -m 0755 "$artifacts_dir"
-output="$artifacts_dir/${image_name}.img.xz"
-desktop_output="$artifacts_dir/${image_name}.img.zip"
-desktop_raw="$work/desktop/${image_name}.img"
+output="$artifacts_dir/${source_image_name}.img.xz"
+desktop_output="$artifacts_dir/${source_image_name}.img.zip"
+desktop_raw="$work/desktop/${desktop_image_name}.img"
 raw_size="$(stat -c '%s' "$raw")"
 xz_preset="-${xz_level}"
 
@@ -124,7 +124,9 @@ if [ "$build_desktop_zip" = 1 ]; then
     # A/B post-processing grows the image after its initial creation. Some
     # Windows and macOS extractors preserve the resulting zero ranges as sparse
     # holes. Raspberry Pi Imager 2.x can then display more than 200 percent.
-    # Official releases therefore keep a deliberately dense ZIP64 image.
+    # Official releases therefore keep a deliberately dense ZIP64 image. The
+    # outer archive name remains stable, while the extracted IMG carries the
+    # exact ShopOS release version.
     printf 'Creating dense Windows/macOS image copy...\n'
     install -d -m 0755 "$(dirname "$desktop_raw")"
     cp --sparse=never "$raw" "$desktop_raw"
@@ -138,7 +140,7 @@ else
     printf 'Skipping desktop ZIP for this candidate build; official release builds keep it enabled.\n'
 fi
 
-cp "${raw}.ab-layout" "$artifacts_dir/${image_name}.ab-layout"
+cp "${raw}.ab-layout" "$artifacts_dir/${source_image_name}.ab-layout"
 printf '%s\n' "$build_version" > "$artifacts_dir/SHOPOS-VERSION.txt"
 (
     cd "$artifacts_dir"
@@ -152,10 +154,11 @@ printf 'Version:       %s\n' "$build_version"
 printf 'Device:        %s\n' "$device"
 printf 'Storage:       %s\n' "$storage"
 printf 'A/B image:     %s\n' "$output"
-printf 'Layout:        %s\n' "$artifacts_dir/${image_name}.ab-layout"
+printf 'Layout:        %s\n' "$artifacts_dir/${source_image_name}.ab-layout"
 printf 'Version file:  %s\n' "$artifacts_dir/SHOPOS-VERSION.txt"
 printf 'Checksum:      %s\n' "$output.sha256"
 if [ "$build_desktop_zip" = 1 ]; then
     printf 'Desktop image: %s\n' "$desktop_output"
+    printf 'Extracted IMG: %s.img\n' "$desktop_image_name"
     printf 'Desktop SHA:   %s\n' "$desktop_output.sha256"
 fi
