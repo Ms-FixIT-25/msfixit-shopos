@@ -12,6 +12,14 @@ config_name="shopos-${device}-${storage}.yaml"
 build_desktop_zip="${SHOPOS_BUILD_DESKTOP_ZIP:-1}"
 xz_level="${SHOPOS_XZ_LEVEL:-6}"
 
+# Pull requests need a bootable, checksummed QEMU candidate, not the second
+# desktop ZIP intended for published Windows/macOS releases. Keep official and
+# manual builds unchanged while making every PR build fast by default.
+if [ "${GITHUB_EVENT_NAME:-}" = pull_request ]; then
+    build_desktop_zip="${SHOPOS_BUILD_DESKTOP_ZIP:-0}"
+    xz_level="${SHOPOS_XZ_LEVEL:-1}"
+fi
+
 case "$device" in rpi4|rpi5) ;; *) echo "Usage: $0 [rpi4|rpi5] [usb|sd|nvme]" >&2; exit 2;; esac
 case "$storage" in usb|sd|nvme) ;; *) echo "Usage: $0 [rpi4|rpi5] [usb|sd|nvme]" >&2; exit 2;; esac
 case "$build_desktop_zip" in 0|1) ;; *) echo 'SHOPOS_BUILD_DESKTOP_ZIP must be 0 or 1.' >&2; exit 2;; esac
