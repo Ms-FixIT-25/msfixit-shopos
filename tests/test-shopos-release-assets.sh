@@ -44,10 +44,10 @@ if bash "$renderer" 01.2.3 >/dev/null 2>&1; then
     exit 1
 fi
 
-grep -Fq "--method PATCH" "$syncer"
-grep -Fq "releases/assets/" "$syncer"
-grep -Fq "windows-macos.zip" "$syncer"
-grep -Fq "linux.img.xz" "$syncer"
+grep -Fq -- '--method PATCH' "$syncer"
+grep -Fq 'releases/assets/' "$syncer"
+grep -Fq 'windows-macos.zip' "$syncer"
+grep -Fq 'linux.img.xz' "$syncer"
 if grep -Eq 'gh release download|curl .*releases/download' "$syncer"; then
     echo 'Release assets must be renamed server-side instead of downloaded and uploaded again.' >&2
     exit 1
