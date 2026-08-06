@@ -52,13 +52,12 @@ jobs:
             test -n "${BUILD_SHA:-}"
             tag=''
             for attempt in $(seq 1 20); do
-              releases="$(gh release list --repo "$GITHUB_REPOSITORY" --limit 100 \
-                --json tagName,targetCommitish,isDraft,isPrerelease)"
+              releases="$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100")"
               tag="$(jq -r --arg sha "$BUILD_SHA" '
                 .[]
-                | select(.targetCommitish == $sha)
-                | select(.isDraft == false and .isPrerelease == false)
-                | .tagName
+                | select(.target_commitish == $sha)
+                | select(.draft == false and .prerelease == false)
+                | .tag_name
               ' <<< "$releases" | head -n 1)"
               if [ -n "$tag" ] && [ "$tag" != null ]; then
                 break
