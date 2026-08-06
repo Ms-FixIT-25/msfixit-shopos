@@ -1,0 +1,35 @@
+name: Workflow integrity gate
+
+on:
+  pull_request:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  workflow-integrity:
+    name: Workflow integrity gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Install pinned actionlint
+        shell: bash
+        env:
+          ACTIONLINT_VERSION: v1.7.7
+        run: |
+          set -Eeuo pipefail
+          go install "github.com/rhysd/actionlint/cmd/actionlint@${ACTIONLINT_VERSION}"
+          printf '%s\n' "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      - name: Validate every workflow
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          chmod +x scripts/validate-workflows.sh
+          scripts/validate-workflows.sh
