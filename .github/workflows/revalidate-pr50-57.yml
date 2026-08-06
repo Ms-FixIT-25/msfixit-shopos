@@ -1,0 +1,87 @@
+name: Revalidate ShopOS PR 50-57
+
+on:
+  push:
+    branches: [ci/revalidate-pr50-57]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  merged-improvements:
+    name: Validate merged improvements
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - name: Check out current combined source
+        uses: actions/checkout@v7
+
+      - name: Validate workflow YAML
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          ruby -e 'require "yaml"; Dir[".github/workflows/*.{yml,yaml}"].sort.each { |f| YAML.parse_file(f); puts "PASS YAML: #{f}" }'
+
+      - name: Validate shell syntax
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          bash -n scripts/build-image.sh
+          bash -n scripts/postprocess-ab-image.sh
+          bash -n image/package/usr/local/sbin/msfixit-update-agent
+          bash -n image/package/usr/local/sbin/msfixit-update-center
+          bash -n image/package/usr/local/sbin/msfixit-boot-console
+          bash -n image/package/usr/local/sbin/msfixit-kiosk-session
+          bash -n image/package/usr/local/sbin/msfixit-first-login-init
+          bash -n image/package/usr/local/sbin/msfixit-wifi-connect
+
+      - name: Validate Update Center from PR 50
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          bash tests/test-shopos-update-agent.sh
+          bash tests/test-shopos-update-center.sh
+
+      - name: Validate dense image and A-B boot fixes from PR 53-54
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          grep -Fq 'cp --sparse=never' scripts/build-image.sh
+          grep -Fq '.img.zip' scripts/build-image.sh
+          bash tests/test-shopos-ab-image-layout.sh
+
+      - name: Validate stable centered boot screen from PR 55
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          bash tests/test-boot-experience.sh
+
+      - name: Validate local graphical kiosk from PR 56
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          grep -Fq 'chromium' image/package/DEBIAN/control
+          grep -Fq 'msfixit-kiosk.service' image/package/DEBIAN/postinst
+          grep -Fq -- '--kiosk' image/package/usr/local/sbin/msfixit-kiosk-session
+          grep -Fq -- '-nolisten tcp' image/package/etc/systemd/system/msfixit-kiosk.service
+          grep -Fq 'User=shopos-kiosk' image/package/etc/systemd/system/msfixit-kiosk.service
+
+      - name: Validate first-login and Wi-Fi UX from PR 57
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          bash tests/test-first-login-wifi.sh
+
+      - name: Verify merged feature files are present
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -s image/package/usr/share/msfixit-shopos/admin-console/public/updates.php
+          test -s docs/INSTALL_IMAGE.md
+          test -s image/package/etc/systemd/system/msfixit-kiosk.service
+          test -s image/package/usr/local/sbin/msfixit-wifi-connect
+          echo 'PASS: PR 50 through PR 57 combined source is present and validated.'
