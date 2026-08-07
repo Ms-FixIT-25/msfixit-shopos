@@ -1,4 +1,4 @@
-name: ShopOS build 367 repeated QEMU validation
+name: ShopOS build 368 repeated QEMU validation
 
 on:
   pull_request:
@@ -51,22 +51,19 @@ jobs:
           grep -Fq '9.2.4' vm-qemu-version.txt
           qemu-system-aarch64 -machine help | tee vm-qemu-machines.txt
           grep -Eq '^[[:space:]]*raspi4b([[:space:]]|$)' vm-qemu-machines.txt
-          # Regression: the smoke test runs as root because it mounts loop devices.
-          # Preserve the pinned user-space QEMU path explicitly and prove sudo can
-          # resolve the same 9.2.4 binary before downloading the large candidate.
           sudo env "PATH=$PATH" qemu-system-aarch64 --version | tee vm-sudo-qemu-version.txt
           grep -Fq '9.2.4' vm-sudo-qemu-version.txt
           bash -n tests/prepare-qemu-image.sh
           bash tests/run-qemu-smoke.sh --self-test
           bash tests/normalize-qemu-sd-size.sh --self-test
 
-      - name: Download and verify exact Build 367 candidate
+      - name: Download and verify exact Build 368 candidate
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          SHOPOS_ARTIFACT_ID: '8990717896'
-          SHOPOS_ARTIFACT_SHA256: 20f96535db2501d2d00e3661e40576436ae87f86d7ba54a5ec428ffa1a9fdea9
-          SHOPOS_SOURCE_SHA: 5cca22d80059fb1d9a18272f03044d9f9d734441
+          SHOPOS_ARTIFACT_ID: '8994823651'
+          SHOPOS_ARTIFACT_SHA256: 8582e18a305a3284f8227e41641ec7f82b831a8124148a5682e2440a4edc48cc
+          SHOPOS_SOURCE_SHA: 8e2b5cfa82574c6e4ae08ffac921ef0abacdb9a8
         run: |
           set -Eeuo pipefail
           mkdir -p vm
@@ -111,7 +108,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: shopos-build-367-${{ matrix.host }}-repeat-${{ matrix.repetition }}
+          name: shopos-build-368-${{ matrix.host }}-repeat-${{ matrix.repetition }}
           path: |
             vm-qemu-version.txt
             vm-qemu-machines.txt
