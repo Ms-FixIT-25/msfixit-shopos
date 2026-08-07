@@ -3,7 +3,7 @@ ShopOS Raspberry Pi performance tuning
 
 Configuration: /etc/msfixit-shopos/performance.env
 Profiles: efficiency, balanced, performance
-Apply now: sudo systemctl start msfixit-performance-profile.service
+Apply and refresh now: sudo systemctl start msfixit-performance-refresh.service
 Hardware report: sudo msfixit-hardware-report
 Saved report: /var/log/msfixit-shopos/hardware-report.txt
 
