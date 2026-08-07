@@ -78,16 +78,17 @@ jobs:
       - name: Validate QEMU release-gate contract
         run: |
           gate=.github/workflows/shopos-release-gate.yml
+          dollar='$'
           grep -Fq "qemu_version='9.2.4'" scripts/install-qemu-raspi4.sh
           grep -Fq 'sha512sum --check --strict' scripts/install-qemu-raspi4.sh
-          grep -Fq 'name: Boot candidate on ${{ matrix.host }} repeat ${{ matrix.repeat }}' "$gate"
+          grep -Fq "name: Boot candidate on ${dollar}{{ matrix.host }} repeat ${dollar}{{ matrix.repeat }}" "$gate"
           grep -Fq 'host: ARM64' "$gate"
           grep -Fq 'host: X86_64' "$gate"
           test "$(grep -Fc 'host: ARM64' "$gate")" -eq 2
           test "$(grep -Fc 'host: X86_64' "$gate")" -eq 2
           grep -Fq 'runner: ubuntu-24.04-arm' "$gate"
           grep -Fq 'runner: ubuntu-24.04' "$gate"
-          grep -Fq 'runs-on: ${{ matrix.runner }}' "$gate"
+          grep -Fq "runs-on: ${dollar}{{ matrix.runner }}" "$gate"
           if grep -Eq 'pull_request\.draft[[:space:]]*==[[:space:]]*false|draft[[:space:]]*==[[:space:]]*false' "$gate"; then
             echo 'Draft PRs must not be excluded from full system validation.' >&2
             exit 1
