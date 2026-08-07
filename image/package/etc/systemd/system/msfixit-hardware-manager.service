@@ -1,0 +1,44 @@
+[Unit]
+Description=Ms. FixIT ShopOS Hardware Manager
+After=local-fs.target systemd-vconsole-setup.service
+Wants=network.target
+
+[Service]
+Type=simple
+User=shopos-hwmon
+Group=shopos-hwmon
+SupplementaryGroups=www-data
+ExecStart=/usr/local/sbin/msfixit-hardware-manager
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=15s
+RuntimeDirectory=msfixit-hardware-manager
+RuntimeDirectoryMode=0750
+UMask=0077
+Nice=10
+IOSchedulingClass=idle
+CPUWeight=10
+MemoryHigh=96M
+MemoryMax=160M
+TasksMax=64
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictAddressFamilies=AF_UNIX
+CapabilityBoundingSet=
+AmbientCapabilities=
+ReadWritePaths=/var/lib/msfixit-shopos/hardware-manager /run/msfixit-hardware-manager
+
+[Install]
+WantedBy=multi-user.target
