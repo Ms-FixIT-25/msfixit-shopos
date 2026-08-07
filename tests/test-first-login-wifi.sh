@@ -10,6 +10,9 @@ dropin="$root/image/package/etc/systemd/system/getty@tty1.service.d/shopos-first
 first_login_service="$root/image/package/etc/systemd/system/msfixit-first-login.service"
 keepawake_service="$root/image/package/etc/systemd/system/msfixit-display-keepawake.service"
 kiosk_service="$root/image/package/etc/systemd/system/msfixit-kiosk.service"
+firstboot_service="$root/image/package/etc/systemd/system/msfixit-firstboot.service"
+brand_service="$root/image/package/etc/systemd/system/msfixit-brand-shop.service"
+control="$root/image/package/DEBIAN/control"
 postinst="$root/image/package/DEBIAN/postinst"
 layout="$root/scripts/postprocess-ab-image.sh"
 
@@ -34,11 +37,30 @@ grep -Fq 'WLAN einrichten?' "$init"
 grep -Fq 'WLAN automatisch suchen und verbinden' "$init"
 grep -Fq 'SSID manuell eingeben' "$init"
 grep -Fq 'Überspringen' "$init"
-grep -Fq 'nmcli device wifi rescan' "$wifi"
-grep -Fq 'nmcli --fields SSID,SIGNAL,SECURITY device wifi list' "$wifi"
+
+# Wi-Fi hardware may appear several seconds after the interactive tty on real
+# Raspberry Pi hardware. The helper must actively unblock and wait for the
+# adapter instead of treating one empty scan as proof that no hardware exists.
+grep -Fq 'systemctl start NetworkManager.service' "$wifi"
+grep -Fq 'rfkill unblock wlan' "$wifi"
+grep -Fq 'modprobe brcmfmac' "$wifi"
+grep -Fq 'udevadm settle' "$wifi"
+grep -Fq 'for attempt in $(seq 1 45)' "$wifi"
+grep -Fq 'nmcli -t -f DEVICE,TYPE device status' "$wifi"
+grep -Fq 'nmcli device set "$wifi_device" managed yes' "$wifi"
+grep -Fq 'nmcli device wifi rescan ifname "$wifi_device"' "$wifi"
+grep -Fq 'nmcli --fields SSID,SIGNAL,SECURITY device wifi list ifname "$wifi_device"' "$wifi"
 grep -Fq 'WLAN-Passwort abgefragt' "$wifi"
-grep -Fq 'nmcli --ask device wifi connect "$ssid"' "$wifi"
+grep -Fq 'nmcli --ask device wifi connect "$ssid" ifname "$wifi_device"' "$wifi"
+grep -Fq 'wifi_diagnostics' "$wifi"
 grep -Fxq 'SHOPOS_WIFI_SSID=Skynet' "$ssid"
+
+for dependency in network-manager wpasupplicant rfkill iw wireless-regdb firmware-brcm80211; do
+    grep -Eq "Depends:.*(^|, )${dependency}(,|$)" "$control" || {
+        echo "Missing explicit Wi-Fi runtime dependency: $dependency" >&2
+        exit 1
+    }
+done
 
 # The interactive wizard must never block getty's ExecStartPre. systemd gives
 # start-pre commands a finite startup timeout, which previously killed and
@@ -56,11 +78,21 @@ grep -Fq 'After=local-fs.target systemd-vconsole-setup.service msfixit-display-k
 grep -Fq 'ConditionPathExists=!/var/lib/msfixit-shopos/first-setup-complete' "$first_login_service"
 grep -Fq 'ExecStartPre=/usr/local/sbin/msfixit-display-keepawake /dev/tty1' "$first_login_service"
 grep -Fq 'ExecStart=/usr/local/sbin/msfixit-first-login-init' "$first_login_service"
+grep -Fq 'ExecStartPost=/bin/systemctl --no-block start msfixit-kiosk.service' "$first_login_service"
 grep -Fq 'StandardInput=tty-force' "$first_login_service"
 grep -Fq 'TTYPath=/dev/tty1' "$first_login_service"
 grep -Fq 'TimeoutStartSec=infinity' "$first_login_service"
-grep -Fq 'After=network-online.target nginx.service msfixit-brand-shop.service msfixit-first-login.service' "$kiosk_service"
-grep -Fq 'Wants=network-online.target msfixit-first-login.service' "$kiosk_service"
+
+# ShopOS is a local appliance first. Losing Wi-Fi or Ethernet must not block
+# first-boot provisioning, branding, Nginx or the Chromium control center.
+grep -Fq 'After=local-fs.target nginx.service msfixit-brand-shop.service msfixit-first-login.service' "$kiosk_service"
+grep -Fq 'Wants=nginx.service msfixit-brand-shop.service msfixit-first-login.service' "$kiosk_service"
+if grep -Fq 'network-online.target' "$kiosk_service" "$firstboot_service" "$brand_service"; then
+    echo 'Local ShopOS provisioning and kiosk must not depend on network-online.target.' >&2
+    exit 1
+fi
+grep -Fq 'After=local-fs.target' "$firstboot_service"
+grep -Fq 'After=msfixit-firstboot.service msfixit-resource-budget.service' "$brand_service"
 
 grep -Fq 'setterm --blank 0 --powerdown 0' "$keepawake"
 grep -Fq 'setterm --powersave off' "$keepawake"
@@ -98,4 +130,4 @@ if grep -Eq 'One-time password|chage -d 0|/dev/urandom' "$init"; then
     exit 1
 fi
 
-printf 'PASS: first-login owns tty1 without getty timeouts and keeps the display awake until kiosk handoff.\n'
+printf 'PASS: first-login waits for real Wi-Fi hardware, keeps tty1 stable and hands an offline-capable appliance to the kiosk.\n'
