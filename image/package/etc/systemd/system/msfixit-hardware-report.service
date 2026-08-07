@@ -1,0 +1,12 @@
+[Unit]
+Description=Collect ShopOS Raspberry Pi hardware and efficiency report
+After=multi-user.target
+ConditionVirtualization=!container
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/msfixit-hardware-report
+Nice=15
+IOSchedulingClass=idle
+CPUWeight=5
+IOWeight=5
