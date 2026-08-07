@@ -8,7 +8,7 @@ StartLimitBurst=5
 
 [Service]
 Type=simple
-ExecStart=/usr/local/sbin/msfixit-cloudflared-run
+ExecStart=/bin/bash /usr/local/sbin/msfixit-cloudflared-run
 Restart=always
 RestartSec=5s
 NoNewPrivileges=true
