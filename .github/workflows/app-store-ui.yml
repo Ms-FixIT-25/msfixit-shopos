@@ -1,0 +1,21 @@
+name: ShopOS app store UI
+
+on:
+  pull_request:
+    branches: [agent/shopos-app-catalog-gui]
+    paths:
+      - image/package/usr/share/msfixit-shopos/admin-console/public/store.php
+      - tests/test-shopos-app-store-ui.sh
+      - .github/workflows/app-store-ui.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-store-ui:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate authenticated entitlement-aware Store UI
+        run: bash tests/test-shopos-app-store-ui.sh
