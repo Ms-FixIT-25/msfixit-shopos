@@ -1,0 +1,12 @@
+[Unit]
+Description=Apply adaptive ShopOS Raspberry Pi performance profile
+After=local-fs.target
+Before=msfixit-resource-budget.service msfixit-kiosk.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/msfixit-apply-performance-profile
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
