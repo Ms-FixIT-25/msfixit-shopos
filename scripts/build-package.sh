@@ -93,6 +93,7 @@ chmod 0755 \
     "$stage/usr/local/sbin/msfixit-firstboot-progress" \
     "$stage/usr/local/sbin/msfixit-boot-state" \
     "$stage/usr/local/sbin/msfixit-boot-console" \
+    "$stage/usr/local/sbin/msfixit-first-login-init" \
     "$stage/usr/local/sbin/msfixit-brand-shop" \
     "$stage/usr/local/sbin/msfixit-cloudflared-run" \
     "$stage/usr/local/sbin/msfixit-catalog-init" \
@@ -163,6 +164,7 @@ install -d -m 0755 "$stage/usr/share/msfixit-shopos"
             usr/local/sbin/msfixit-firstboot-progress \
             usr/local/sbin/msfixit-boot-state \
             usr/local/sbin/msfixit-boot-console \
+            usr/local/sbin/msfixit-first-login-init \
             usr/local/sbin/msfixit-brand-shop \
             usr/local/sbin/msfixit-cloudflared-run \
             usr/local/sbin/msfixit-tax-decision \
