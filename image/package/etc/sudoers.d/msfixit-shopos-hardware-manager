@@ -1,0 +1,2 @@
+Defaults:www-data !authenticate
+www-data ALL=(root) NOPASSWD: /usr/local/sbin/msfixit-hardware-action *
