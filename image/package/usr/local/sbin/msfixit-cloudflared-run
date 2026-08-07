@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+umask 077
+
+readonly env_file=/etc/msfixit-shopos/cloudflared.env
+readonly runtime_dir=/run/msfixit-shopos
+readonly token_file=${runtime_dir}/cloudflared.token
+
+[ -r "$env_file" ] || {
+    echo 'Cloudflare tunnel configuration is unavailable.' >&2
+    exit 1
+}
+
+token=''
+while IFS= read -r line || [ -n "$line" ]; do
+    case "$line" in
+        CF_TUNNEL_TOKEN=*) token="${line#CF_TUNNEL_TOKEN=}" ;;
+    esac
+done < "$env_file"
+
+[ -n "$token" ] || {
+    echo 'Cloudflare tunnel token is empty.' >&2
+    exit 1
+}
+
+install -d -o root -g root -m 0700 "$runtime_dir"
+printf '%s\n' "$token" > "$token_file"
+chmod 0600 "$token_file"
+unset token line
+
+exec /usr/local/bin/cloudflared tunnel --no-autoupdate run --token-file "$token_file"
