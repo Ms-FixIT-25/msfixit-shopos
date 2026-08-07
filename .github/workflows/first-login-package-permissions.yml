@@ -3,7 +3,7 @@ name: First-login package permissions
 on:
   pull_request:
     branches:
-      - fix/full-audit-product-defects
+      - integration/shopos-master-consolidation
     paths:
       - scripts/build-package.sh
       - image/package/usr/local/sbin/msfixit-first-login-init
