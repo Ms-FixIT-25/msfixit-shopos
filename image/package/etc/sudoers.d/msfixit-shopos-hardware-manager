@@ -1,0 +1,3 @@
+# ShopOS Hardware Manager may invoke only its fixed, internally allowlisted helper.
+Defaults:shopos-hwmon !authenticate,env_reset,secure_path=/usr/sbin:/usr/bin:/sbin:/bin
+shopos-hwmon ALL=(root) NOPASSWD: /usr/local/sbin/msfixit-hardware-action *
