@@ -61,6 +61,10 @@ e2label "$root_b" | grep -Fxq SHOPOS_ROOT_B
 # rpi-image-gen writes its original single-slot root path into cmdline.txt.
 # Once the image is converted to ShopOS A/B that path no longer exists, so the
 # very first boot must explicitly select the newly labelled Slot A filesystem.
+# Enforce consoleblank=0 here as well, on the final mounted boot partition. The
+# package postinst can run before /boot/firmware is available during image
+# construction, so relying on postinst alone can leave the released image with
+# the kernel's default console blanking timeout.
 boot_mount="$(mktemp -d)"
 mount "$boot_part" "$boot_mount"
 cmdline="$boot_mount/cmdline.txt"
@@ -79,6 +83,10 @@ roots = [index for index, token in enumerate(tokens) if token.startswith('root='
 if len(roots) != 1:
     raise SystemExit('kernel cmdline must contain exactly one root parameter')
 tokens[roots[0]] = 'root=LABEL=SHOPOS_ROOT_A'
+tokens = [token for token in tokens if not token.startswith('consoleblank=')]
+tokens.append('consoleblank=0')
+if tokens.count('consoleblank=0') != 1:
+    raise SystemExit('kernel cmdline must contain exactly one consoleblank=0 parameter')
 tmp = path.with_name('.cmdline.shopos.tmp')
 tmp.write_text(' '.join(tokens) + '\n', encoding='utf-8')
 os.replace(tmp, path)
