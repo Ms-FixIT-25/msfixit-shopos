@@ -51,6 +51,11 @@ jobs:
           grep -Fq '9.2.4' vm-qemu-version.txt
           qemu-system-aarch64 -machine help | tee vm-qemu-machines.txt
           grep -Eq '^[[:space:]]*raspi4b([[:space:]]|$)' vm-qemu-machines.txt
+          # Regression: the smoke test runs as root because it mounts loop devices.
+          # Preserve the pinned user-space QEMU path explicitly and prove sudo can
+          # resolve the same 9.2.4 binary before downloading the large candidate.
+          sudo env "PATH=$PATH" qemu-system-aarch64 --version | tee vm-sudo-qemu-version.txt
+          grep -Fq '9.2.4' vm-sudo-qemu-version.txt
           bash -n tests/prepare-qemu-image.sh
           bash tests/run-qemu-smoke.sh --self-test
           bash tests/normalize-qemu-sd-size.sh --self-test
@@ -91,7 +96,7 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          sudo bash tests/run-qemu-smoke.sh vm/shopos-test.img vm 2>&1 | tee vm/harness.log
+          sudo env "PATH=$PATH" bash tests/run-qemu-smoke.sh vm/shopos-test.img vm 2>&1 | tee vm/harness.log
           grep -Fxq 'MSFIXIT_VM_SMOKE_RESULT=PASS failures=0' vm/msfixit-vm-smoke.result
 
       - name: Prepare evidence
@@ -110,6 +115,7 @@ jobs:
           path: |
             vm-qemu-version.txt
             vm-qemu-machines.txt
+            vm-sudo-qemu-version.txt
             vm/candidate-binding.txt
             vm/qemu-image-size.txt
             vm/harness.log
