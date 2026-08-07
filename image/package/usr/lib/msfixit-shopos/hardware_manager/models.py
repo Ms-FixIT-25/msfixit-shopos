@@ -67,6 +67,9 @@ class ThermalSnapshot:
     current_undervoltage: bool | None = None
     undervoltage_occurred: bool | None = None
     raw_throttled_mask: int | None = None
+    emergency_seconds: int = 0
+    shutdown_eligible: bool = False
+    decision_reason: str = ""
 
 
 @dataclass(slots=True)
