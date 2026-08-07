@@ -3,7 +3,8 @@ set -Eeuo pipefail
 
 config_dir=/etc/msfixit-shopos
 config_file="$config_dir/admin-console.php"
-password_file=/boot/firmware/shopos.env
+control_password_file="$config_dir/control-console.env"
+legacy_password_file=/boot/firmware/shopos.env
 
 install -d -o root -g www-data -m 0750 "$config_dir"
 
@@ -12,16 +13,23 @@ if [ -s "$config_file" ]; then
 fi
 
 password=''
-if [ -r "$password_file" ]; then
-    password="$(sed -n 's/^OS_ADMIN_PASSWORD=//p' "$password_file" | tail -n1)"
+if [ -r "$control_password_file" ]; then
+    password="$(sed -n 's/^CONTROL_ADMIN_PASSWORD=//p' "$control_password_file" | tail -n1)"
+fi
+
+# Compatibility for test images and older preseed files. New installations
+# use CONTROL_ADMIN_PASSWORD and never treat this value as a Linux password.
+if [ -z "$password" ] && [ -r "$legacy_password_file" ]; then
+    password="$(sed -n 's/^OS_ADMIN_PASSWORD=//p' "$legacy_password_file" | tail -n1)"
 fi
 
 if [ -z "$password" ]; then
-    printf 'Admin console remains disabled: OS_ADMIN_PASSWORD is unavailable.\n' >&2
+    printf 'Admin console remains disabled: Control Center password is unavailable.\n' >&2
     exit 0
 fi
 
 hash="$(php -r 'echo password_hash($argv[1], PASSWORD_DEFAULT);' "$password")"
+unset password
 tmp="$(mktemp "$config_dir/admin-console.php.XXXXXX")"
 trap 'rm -f "$tmp"' EXIT
 printf "<?php\nreturn ['password_hash' => '%s'];\n" "$hash" > "$tmp"
