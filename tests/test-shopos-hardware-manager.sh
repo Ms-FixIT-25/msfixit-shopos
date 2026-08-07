@@ -73,8 +73,20 @@ grep -Fq 'SupplementaryGroups=shopos-hwapi' "$service"
 grep -Fq 'CPUQuota=20%' "$service"
 grep -Fq 'MemoryMax=96M' "$service"
 grep -Fq 'IOSchedulingClass=idle' "$service"
-grep -Fq 'NoNewPrivileges=true' "$service"
 grep -Fq 'ProtectSystem=strict' "$service"
+grep -Fq 'ProtectKernelModules=true' "$service"
+grep -Fq 'ProtectKernelLogs=true' "$service"
+grep -Fq 'RestrictAddressFamilies=AF_UNIX' "$service"
+# The manager deliberately uses one sudo allowlisted helper for reversible
+# cpufreq writes. These systemd directives would make that helper impossible.
+if grep -Eq '^NoNewPrivileges=(yes|true)$' "$service"; then
+    echo 'NoNewPrivileges would block the allowlisted Hardware Manager sudo helper.' >&2
+    exit 1
+fi
+if grep -Eq '^ProtectKernelTunables=(yes|true)$' "$service"; then
+    echo 'ProtectKernelTunables would make the validated cpufreq sysfs write read-only.' >&2
+    exit 1
+fi
 
 grep -Fq 'shopos-hwmon ALL=(root) NOPASSWD: /usr/local/sbin/msfixit-hardware-action *' "$sudoers"
 if grep -Fq 'NOPASSWD: ALL' "$sudoers"; then echo 'Hardware Manager sudoers must never grant unrestricted root.' >&2; exit 1; fi
