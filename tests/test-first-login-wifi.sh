@@ -5,6 +5,7 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 init="$root/image/package/usr/local/sbin/msfixit-first-login-init"
 wifi="$root/image/package/usr/local/sbin/msfixit-wifi-connect"
 keepawake="$root/image/package/usr/local/sbin/msfixit-display-keepawake"
+kiosk_session="$root/image/package/usr/local/sbin/msfixit-kiosk-session"
 ssid="$root/image/package/etc/msfixit-shopos/wifi.env"
 dropin="$root/image/package/etc/systemd/system/getty@tty1.service.d/shopos-first-login.conf"
 first_login_service="$root/image/package/etc/systemd/system/msfixit-first-login.service"
@@ -19,6 +20,7 @@ layout="$root/scripts/postprocess-ab-image.sh"
 bash -n "$init"
 bash -n "$wifi"
 bash -n "$keepawake"
+bash -n "$kiosk_session"
 bash -n "$layout"
 
 test -s "$first_login_service"
@@ -90,12 +92,24 @@ grep -Fq 'TimeoutStartSec=infinity' "$first_login_service"
 grep -Fq 'Requires=msfixit-brand-shop.service' "$kiosk_service"
 grep -Fq 'After=local-fs.target nginx.service msfixit-brand-shop.service msfixit-first-login.service' "$kiosk_service"
 grep -Fq 'Wants=nginx.service msfixit-first-login.service' "$kiosk_service"
+grep -Fq 'ExecStartPre=/usr/bin/test -x /usr/bin/chromium' "$kiosk_service"
+grep -Fq 'ExecStartPre=/usr/bin/test -x /usr/bin/xinit' "$kiosk_service"
+grep -Fq 'TimeoutStartSec=4min' "$kiosk_service"
 if grep -Fq 'network-online.target' "$kiosk_service" "$firstboot_service" "$brand_service"; then
     echo 'Local ShopOS provisioning and kiosk must not depend on network-online.target.' >&2
     exit 1
 fi
 grep -Fq 'After=local-fs.target' "$firstboot_service"
 grep -Fq 'After=msfixit-firstboot.service msfixit-resource-budget.service' "$brand_service"
+
+# Unsupported X/KMS DPMS features must never terminate the whole kiosk. The
+# browser is launched only after the local admin endpoint is genuinely ready.
+grep -Fq 'xset -dpms 2>/dev/null || true' "$kiosk_session"
+grep -Fq 'xset s off 2>/dev/null || true' "$kiosk_session"
+grep -Fq 'xset s noblank 2>/dev/null || true' "$kiosk_session"
+grep -Fq 'curl --silent --fail --max-time 2 "$target_url"' "$kiosk_session"
+grep -Fq 'local_ready=1' "$kiosk_session"
+grep -Fq 'restarting kiosk session' "$kiosk_session"
 
 grep -Fq 'setterm --blank 0 --powerdown 0' "$keepawake"
 grep -Fq 'setterm --powersave off' "$keepawake"
@@ -133,4 +147,4 @@ if grep -Eq 'One-time password|chage -d 0|/dev/urandom' "$init"; then
     exit 1
 fi
 
-printf 'PASS: first-login waits for real Wi-Fi hardware, keeps tty1 stable and always hands an offline-capable appliance to a successfully provisioned kiosk.\n'
+printf 'PASS: first-login waits for real Wi-Fi hardware, keeps tty1 stable and hands an offline-capable appliance to a resilient local kiosk.\n'
