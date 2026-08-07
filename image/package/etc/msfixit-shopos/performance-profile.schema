@@ -1,0 +1,4 @@
+SHOPOS_PERFORMANCE_PROFILE=efficiency|balanced|performance
+SHOPOS_CPU_GOVERNOR=auto|schedutil|ondemand|conservative|powersave|performance
+SHOPOS_WIFI_POLICY=auto|enabled|disabled
+SHOPOS_BLUETOOTH_POLICY=auto|enabled|disabled
