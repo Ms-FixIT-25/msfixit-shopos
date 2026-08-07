@@ -32,7 +32,7 @@ read_shopos_config() {
         value="${value%\'}"
 
         case "$key" in
-            SHOP_URL|SHOP_TITLE|SHOP_ADMIN_USER|SHOP_ADMIN_EMAIL|SHOP_ADMIN_PASSWORD|OS_ADMIN_PASSWORD|CF_TUNNEL_TOKEN|WORDPRESS_LOCALE|WORDPRESS_VERSION)
+            SHOP_URL|SHOP_TITLE|SHOP_ADMIN_USER|SHOP_ADMIN_EMAIL|SHOP_ADMIN_PASSWORD|CONTROL_ADMIN_PASSWORD|CF_TUNNEL_TOKEN|WORDPRESS_LOCALE|WORDPRESS_VERSION)
                 printf -v "$key" '%s' "$value"
                 ;;
         esac
@@ -66,7 +66,7 @@ SHOP_TITLE="Ms. FixIT"
 SHOP_ADMIN_USER="shopadmin"
 SHOP_ADMIN_EMAIL="admin@localhost.invalid"
 SHOP_ADMIN_PASSWORD=""
-OS_ADMIN_PASSWORD=""
+CONTROL_ADMIN_PASSWORD=""
 CF_TUNNEL_TOKEN=""
 WORDPRESS_LOCALE="de_DE"
 WORDPRESS_VERSION="latest"
@@ -91,14 +91,14 @@ done
 [ -n "$SHOP_URL" ] || SHOP_URL="http://${local_ip}"
 
 SHOP_ADMIN_PASSWORD="${SHOP_ADMIN_PASSWORD:-$(random_secret)}"
-OS_ADMIN_PASSWORD="${OS_ADMIN_PASSWORD:-$(random_secret)}"
+CONTROL_ADMIN_PASSWORD="${CONTROL_ADMIN_PASSWORD:-$(random_secret)}"
 DB_PASSWORD="$(random_secret)"
 
-if id shopadmin >/dev/null 2>&1; then
-    printf 'shopadmin:%s\n' "$OS_ADMIN_PASSWORD" | chpasswd
-fi
-
 install -d -m 0750 "$config_dir"
+printf 'CONTROL_ADMIN_PASSWORD=%s\n' "$CONTROL_ADMIN_PASSWORD" > "$config_dir/control-console.env"
+chown root:www-data "$config_dir/control-console.env"
+chmod 0640 "$config_dir/control-console.env"
+
 # Service-owned subdirectories stay private, while the persistent storage root
 # remains traversable so MariaDB and PHP-FPM can reach their own directories.
 install -d -m 0711 "$data_dir"
@@ -290,13 +290,13 @@ Shop URL: ${SHOP_URL}
 WordPress user: ${SHOP_ADMIN_USER}
 WordPress password: ${SHOP_ADMIN_PASSWORD}
 
-SSH user: shopadmin
-SSH password: ${OS_ADMIN_PASSWORD}
+ShopOS Control Center password: ${CONTROL_ADMIN_PASSWORD}
+Linux/SSH administrator: configured interactively during first login
 
 Cloudflare Tunnel: ${tunnel_state}
 LAN address: ${local_ip}
 
-Delete this file after saving the credentials in a password manager.
+Delete this file after saving the generated application credentials in a password manager.
 EOF_CREDENTIALS
 chmod 0600 "$credentials_file"
 
