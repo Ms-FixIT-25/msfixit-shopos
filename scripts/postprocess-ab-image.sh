@@ -60,7 +60,9 @@ e2label "$root_b" | grep -Fxq SHOPOS_ROOT_B
 
 # rpi-image-gen writes its original single-slot root path into cmdline.txt.
 # Once the image is converted to ShopOS A/B that path no longer exists, so the
-# very first boot must explicitly select the newly labelled Slot A filesystem.
+# very first boot must explicitly select Slot A. This is also the final point at
+# which the real boot partition is guaranteed to be mounted, so enforce the
+# no-blank policy here instead of relying only on package-install time.
 boot_mount="$(mktemp -d)"
 mount "$boot_part" "$boot_mount"
 cmdline="$boot_mount/cmdline.txt"
@@ -79,6 +81,8 @@ roots = [index for index, token in enumerate(tokens) if token.startswith('root='
 if len(roots) != 1:
     raise SystemExit('kernel cmdline must contain exactly one root parameter')
 tokens[roots[0]] = 'root=LABEL=SHOPOS_ROOT_A'
+tokens = [token for token in tokens if not token.startswith('consoleblank=')]
+tokens.append('consoleblank=0')
 tmp = path.with_name('.cmdline.shopos.tmp')
 tmp.write_text(' '.join(tokens) + '\n', encoding='utf-8')
 os.replace(tmp, path)
@@ -101,4 +105,4 @@ EOF
 
 # Only final compressed artifacts are checksummed. Hashing the temporary raw
 # A/B image forced an extra full read without adding release integrity.
-echo "A/B layout created with initial root SHOPOS_ROOT_A: $image"
+echo "A/B layout created with initial root SHOPOS_ROOT_A and consoleblank=0: $image"

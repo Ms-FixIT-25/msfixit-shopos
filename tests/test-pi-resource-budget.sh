@@ -40,7 +40,11 @@ grep -Fq 'ExecStart=/usr/local/sbin/msfixit-finalize-resource-budget' "$budget_s
 grep -Fq 'RemainAfterExit=yes' "$budget_service"
 grep -Fq 'systemctl enable msfixit-resource-budget.service' "$postinst"
 grep -Fq 'Requires=msfixit-resource-budget.service' "$brand_service"
-grep -Fq 'After=network-online.target msfixit-firstboot.service msfixit-resource-budget.service' "$brand_service"
+grep -Fq 'After=msfixit-firstboot.service msfixit-resource-budget.service' "$brand_service"
+if grep -Fq 'network-online.target' "$brand_service"; then
+    echo 'Local branding must remain available without Internet or Wi-Fi.' >&2
+    exit 1
+fi
 
 grep -Fq 'degrees >= 78' "$thermal"
 grep -Fq 'OnUnitActiveSec=2min' "$timer"
@@ -51,4 +55,4 @@ if grep -Eq 'over_voltage|arm_freq|force_turbo' "$root/image/package" -R; then
     exit 1
 fi
 
-printf 'PASS: ShopOS readiness requires active bounded kiosk, PHP, Redis and final-precedence MariaDB limits.\n'
+printf 'PASS: ShopOS readiness requires bounded resources while local branding remains independent of Wi-Fi.\n'

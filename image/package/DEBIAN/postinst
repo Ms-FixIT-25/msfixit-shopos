@@ -79,12 +79,17 @@ for unit in /lib/systemd/system/php*-fpm.service; do
     systemctl disable "$(basename "$unit")" 2>/dev/null || true
 done
 
+# NetworkManager is part of the appliance contract, not an accidental property
+# of the Raspberry Pi base image. Enable it early; first-login will still wait
+# for the actual Wi-Fi device before scanning.
+systemctl enable NetworkManager.service 2>/dev/null || true
 systemctl enable nftables.service 2>/dev/null || true
 systemctl enable msfixit-update-boot-sync.service 2>/dev/null || true
 systemctl enable msfixit-update-agent.timer 2>/dev/null || true
 systemctl enable msfixit-firstboot.service 2>/dev/null || true
 systemctl enable msfixit-brand-shop.service 2>/dev/null || true
 systemctl enable msfixit-display-keepawake.service 2>/dev/null || true
+systemctl enable msfixit-first-login.service 2>/dev/null || true
 systemctl enable msfixit-boot-console.service 2>/dev/null || true
 systemctl enable msfixit-kiosk.service 2>/dev/null || true
 systemctl enable msfixit-resource-budget.service 2>/dev/null || true

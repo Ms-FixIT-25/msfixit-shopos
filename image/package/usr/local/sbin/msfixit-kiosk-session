@@ -6,17 +6,26 @@ readonly target_url=http://127.0.0.1/admin/
 
 install -d -m 0700 "$profile_dir"
 
-xset -dpms
-xset s off
-xset s noblank
-xsetroot -solid '#0a1930'
+# X/KMS drivers differ in which legacy DPMS controls they expose. None of
+# these cosmetic power-management calls is allowed to abort the kiosk session.
+xset -dpms 2>/dev/null || true
+xset s off 2>/dev/null || true
+xset s noblank 2>/dev/null || true
+xsetroot -solid '#0a1930' 2>/dev/null || true
 
+local_ready=0
 for _ in $(seq 1 180); do
-    if curl --silent --fail --max-time 2 http://127.0.0.1/ >/dev/null; then
+    if curl --silent --fail --max-time 2 "$target_url" >/dev/null; then
+        local_ready=1
         break
     fi
     sleep 1
 done
+
+if [ "$local_ready" -ne 1 ]; then
+    printf 'ShopOS local admin endpoint did not become ready at %s; restarting kiosk session.\n' "$target_url" >&2
+    exit 1
+fi
 
 exec /usr/bin/chromium \
     --kiosk \

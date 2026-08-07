@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+mode=auto
+case "${1:-}" in
+    '') ;;
+    --manual) mode=manual ;;
+    *) printf 'Usage: %s [--manual]\n' "$0" >&2; exit 2 ;;
+esac
+
 config=/etc/msfixit-shopos/wifi.env
 [ -r "$config" ] || { echo "Missing Wi-Fi configuration: $config" >&2; exit 1; }
 # shellcheck disable=SC1090
@@ -9,27 +16,82 @@ preferred_ssid="${SHOPOS_WIFI_SSID:-}"
 
 command -v nmcli >/dev/null 2>&1 || { echo "NetworkManager nmcli is unavailable." >&2; exit 1; }
 
-nmcli radio wifi on
-printf 'WLAN-Netze werden gesucht ...\n'
-nmcli device wifi rescan >/dev/null 2>&1 || true
-sleep 2
+wifi_diagnostics() {
+    printf '\nWLAN-Diagnose:\n' >&2
+    nmcli general status >&2 2>/dev/null || true
+    nmcli device status >&2 2>/dev/null || true
+    if command -v rfkill >/dev/null 2>&1; then
+        rfkill list >&2 2>/dev/null || true
+    fi
+    if command -v iw >/dev/null 2>&1; then
+        iw dev >&2 2>/dev/null || true
+    fi
+    ip -brief link >&2 2>/dev/null || true
+}
 
-available="$(nmcli -t -f SSID device wifi list 2>/dev/null | sed '/^$/d' | awk '!seen[$0]++')"
-if [ -z "$available" ]; then
-    printf 'Es wurden keine WLAN-Netze gefunden.\n' >&2
+systemctl start NetworkManager.service 2>/dev/null || true
+if command -v rfkill >/dev/null 2>&1; then
+    rfkill unblock wlan 2>/dev/null || true
+fi
+modprobe brcmfmac 2>/dev/null || true
+udevadm settle 2>/dev/null || true
+nmcli radio wifi on 2>/dev/null || true
+
+wifi_device=""
+for attempt in $(seq 1 45); do
+    wifi_device="$(nmcli -t -f DEVICE,TYPE device status 2>/dev/null | awk -F: '$2 == "wifi" { print $1; exit }')"
+    if [ -n "$wifi_device" ]; then
+        nmcli device set "$wifi_device" managed yes 2>/dev/null || true
+        state="$(nmcli -g GENERAL.STATE device show "$wifi_device" 2>/dev/null || true)"
+        case "$state" in
+            *unavailable*|*nicht\ verfügbar*) ;;
+            *) break ;;
+        esac
+    fi
+    if [ "$attempt" -eq 10 ] || [ "$attempt" -eq 25 ]; then
+        udevadm trigger --subsystem-match=net 2>/dev/null || true
+        udevadm settle 2>/dev/null || true
+        nmcli general reload 2>/dev/null || true
+        nmcli radio wifi on 2>/dev/null || true
+    fi
+    wifi_device=""
+    sleep 1
+done
+
+if [ -z "$wifi_device" ]; then
+    printf 'Kein betriebsbereites WLAN-Gerät wurde innerhalb von 45 Sekunden erkannt.\n' >&2
+    printf 'ShopOS kann trotzdem lokal weiterlaufen; WLAN kann später erneut eingerichtet werden.\n' >&2
+    wifi_diagnostics
     exit 1
 fi
 
+printf 'WLAN-Gerät erkannt: %s\n' "$wifi_device"
+printf 'WLAN-Netze werden gesucht ...\n'
+available=""
+for attempt in $(seq 1 8); do
+    nmcli radio wifi on 2>/dev/null || true
+    nmcli device wifi rescan ifname "$wifi_device" >/dev/null 2>&1 || true
+    sleep 2
+    available="$(nmcli -t -f SSID device wifi list ifname "$wifi_device" 2>/dev/null | sed '/^$/d' | awk '!seen[$0]++')"
+    [ -n "$available" ] && break
+    printf 'Noch keine Netze sichtbar, neuer Scan (%s/8) ...\n' "$attempt"
+done
+
 ssid=""
-if [ -n "$preferred_ssid" ] && printf '%s\n' "$available" | grep -Fxq "$preferred_ssid"; then
-    ssid="$preferred_ssid"
-    printf 'Vorkonfiguriertes WLAN gefunden: %s\n' "$ssid"
+if [ -n "$available" ]; then
+    if [ "$mode" = auto ] && [ -n "$preferred_ssid" ] && printf '%s\n' "$available" | grep -Fxq "$preferred_ssid"; then
+        ssid="$preferred_ssid"
+        printf 'Vorkonfiguriertes WLAN gefunden: %s\n' "$ssid"
+    else
+        printf 'Gefundene WLAN-Netze:\n'
+        nmcli --fields SSID,SIGNAL,SECURITY device wifi list ifname "$wifi_device" || true
+        read -r -p 'SSID auswählen: ' ssid
+    fi
 else
-    printf 'Gefundene WLAN-Netze:\n'
-    nmcli --fields SSID,SIGNAL,SECURITY device wifi list || true
-    read -r -p 'SSID auswählen: ' ssid
+    printf 'Der WLAN-Adapter ist vorhanden, aber es wurde noch kein sichtbares Netz gefunden.\n' >&2
+    read -r -p 'Versteckte oder noch nicht sichtbare SSID manuell eingeben (leer = abbrechen): ' ssid
 fi
 
-[ -n "$ssid" ] || { printf 'Keine SSID ausgewählt.\n' >&2; exit 1; }
-printf 'Verbindung mit %s wird eingerichtet. Falls geschützt, wird jetzt das WLAN-Passwort abgefragt.\n' "$ssid"
-exec nmcli --ask device wifi connect "$ssid"
+[ -n "$ssid" ] || { printf 'Keine SSID ausgewählt. WLAN-Einrichtung wird übersprungen.\n' >&2; exit 1; }
+printf 'Verbindung mit %s wird über %s eingerichtet. Falls geschützt, wird jetzt das WLAN-Passwort abgefragt.\n' "$ssid" "$wifi_device"
+exec nmcli --ask device wifi connect "$ssid" ifname "$wifi_device"
