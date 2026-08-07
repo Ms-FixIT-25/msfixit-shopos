@@ -27,12 +27,7 @@ def fail(message: str) -> None:
 
 
 def canonical(data: dict) -> bytes:
-    return json.dumps(
-        {key: value for key, value in data.items() if key != "signature"},
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-    ).encode()
+    return json.dumps({key: value for key, value in data.items() if key != "signature"}, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
 
 
 def verify_signature(meta: dict, key: Path) -> None:
@@ -48,17 +43,7 @@ def verify_signature(meta: dict, key: Path) -> None:
         path = Path(temp)
         (path / "payload").write_bytes(canonical(meta))
         (path / "sig").write_bytes(signature)
-        result = subprocess.run(
-            [
-                "openssl", "pkeyutl", "-verify", "-pubin", "-inkey", str(key),
-                "-rawin", "-in", str(path / "payload"), "-sigfile", str(path / "sig"),
-            ],
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            check=False,
-            timeout=15,
-        )
+        result = subprocess.run(["openssl", "pkeyutl", "-verify", "-pubin", "-inkey", str(key), "-rawin", "-in", str(path / "payload"), "-sigfile", str(path / "sig")], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False, timeout=15)
     if result.returncode:
         fail("signature verification failed")
 
@@ -74,9 +59,6 @@ def digest(path: Path) -> str:
 def safe_extract(archive: tarfile.TarFile, target: Path) -> None:
     root = target.resolve()
     for member in archive.getmembers():
-        # ShopOS app packages deliberately support only regular files and
-        # directories. Links, devices, FIFOs and set-id payloads are not needed
-        # by the app model and are unsafe when extraction runs as root.
         if not (member.isfile() or member.isdir()):
             fail(f"unsupported archive member type: {member.name}")
         if member.mode & (stat.S_ISUID | stat.S_ISGID):
@@ -102,7 +84,6 @@ def main() -> int:
     parser.add_argument("--audit", type=Path, default=Path("/var/log/msfixit-shopos/app-install.jsonl"))
     parser.add_argument("--fail-after-stage", action="store_true")
     args = parser.parse_args()
-
     try:
         if not args.package.is_file() or args.package.is_symlink():
             fail("package must be a regular non-symlink file")
@@ -110,11 +91,9 @@ def main() -> int:
             stage = Path(temp)
             with tarfile.open(args.package, "r:*") as package_archive:
                 safe_extract(package_archive, stage)
-
             meta = json.loads((stage / "package.json").read_text(encoding="utf-8"))
             if not isinstance(meta, dict) or set(meta) != ALLOWED_PACKAGE_FIELDS or meta.get("schema") != 1:
                 fail("invalid package metadata")
-
             app_id = meta.get("app_id")
             version = meta.get("version")
             if not isinstance(app_id, str) or not APP_ID_RE.fullmatch(app_id):
@@ -124,7 +103,6 @@ def main() -> int:
             for field in ("manifest_sha256", "payload_sha256"):
                 if not isinstance(meta.get(field), str) or not SHA256_RE.fullmatch(meta[field]):
                     fail(f"invalid {field}")
-
             manifest = stage / "manifest.json"
             payload = stage / "payload.tar"
             if not manifest.is_file() or manifest.is_symlink() or not payload.is_file() or payload.is_symlink():
@@ -132,28 +110,19 @@ def main() -> int:
             if digest(manifest) != meta["manifest_sha256"] or digest(payload) != meta["payload_sha256"]:
                 fail("package digest mismatch")
             verify_signature(meta, args.public_key)
-
             validator = Path(__file__).with_name("validate-shopos-app.py")
-            subprocess.run(
-                [sys.executable, str(validator), str(manifest)],
-                stdin=subprocess.DEVNULL,
-                check=True,
-                timeout=30,
-            )
+            subprocess.run([sys.executable, str(validator), str(manifest)], stdin=subprocess.DEVNULL, check=True, timeout=30)
             manifest_data = load_manifest(manifest)
             if manifest_data.get("id") != app_id:
                 fail("signed app_id does not match manifest id")
             if manifest_data.get("version") != version:
                 fail("signed version does not match manifest version")
-
             app_stage = stage / "app"
             app_stage.mkdir()
             with tarfile.open(payload, "r:") as payload_archive:
                 safe_extract(payload_archive, app_stage)
-
             if args.fail_after_stage:
                 fail("simulated failure")
-
             args.root.mkdir(parents=True, exist_ok=True)
             target = args.root / app_id
             backup = args.root / (app_id + ".rollback")
@@ -169,27 +138,12 @@ def main() -> int:
                 raise
             if backup.exists():
                 shutil.rmtree(backup)
-
             args.audit.parent.mkdir(parents=True, exist_ok=True)
             with args.audit.open("a", encoding="utf-8") as log:
-                log.write(json.dumps({
-                    "time": int(time.time()),
-                    "action": "install",
-                    "app_id": app_id,
-                    "version": version,
-                    "result": "success",
-                }, sort_keys=True) + "\n")
+                log.write(json.dumps({"time": int(time.time()), "action": "install", "app_id": app_id, "version": version, "result": "success"}, sort_keys=True) + "\n")
             print(f"INSTALLED: {app_id} {version}")
             return 0
-    except (
-        OSError,
-        ValueError,
-        KeyError,
-        json.JSONDecodeError,
-        tarfile.TarError,
-        subprocess.CalledProcessError,
-        subprocess.TimeoutExpired,
-    ) as exc:
+    except (OSError, ValueError, KeyError, json.JSONDecodeError, tarfile.TarError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
         print(f"FAILED: {exc}", file=sys.stderr)
         return 1
 
