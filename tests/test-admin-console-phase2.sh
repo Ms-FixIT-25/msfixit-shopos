@@ -40,6 +40,7 @@ assert_contains "cache-flush)" "$helper"
 assert_contains "service-restart)" "$helper"
 assert_contains "backup-create)" "$helper"
 assert_contains "logs)" "$helper"
+assert_contains '[ -n "$SEEN_AT" ] || return 1' "$helper"
 assert_contains "log_result rejected" "$helper"
 assert_contains "[REDACTED]" "$helper"
 assert_contains "tail -n 200" "$helper"
@@ -54,4 +55,4 @@ assert_contains "/usr/local/sbin/msfixit-admin-action service-restart nginx" "$s
 assert_contains "/usr/local/sbin/msfixit-admin-action backup-create" "$sudoers"
 assert_contains "/usr/local/sbin/msfixit-admin-action logs shopos" "$sudoers"
 
-printf 'PASS: admin console Phase 2 uses argv-based allowlisted actions, bounded proc_open streams, audit logging, bounded logs and secret filtering checks.\n'
+printf 'PASS: admin console Phase 2 uses argv-based allowlisted actions, validates timestamped device requests, bounds proc_open streams, audits actions, bounds logs and filters secrets.\n'
