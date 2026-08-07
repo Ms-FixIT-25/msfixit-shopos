@@ -2,7 +2,7 @@ name: ShopOS integrated validation
 
 on:
   pull_request:
-    branches: [main]
+    branches: [main, integration/shopos-master-consolidation]
   push:
     branches: [main]
   workflow_dispatch:
