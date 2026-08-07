@@ -5,7 +5,7 @@ umask 077
 backup_root=/data/backups
 stamp="$(date +%Y%m%d-%H%M%S)"
 workdir="${backup_root}/.${stamp}.tmp"
-archive="${backup_root}/shopos-${stamp}.tar.gz"
+archive="${backup_root}/shopos-${stamp}.tar.zst"
 
 install -d -m 0700 "$backup_root" "$workdir"
 trap 'rm -rf "$workdir"' EXIT
@@ -49,9 +49,9 @@ if [ -d /etc/msfixit-shopos ]; then
     tar -C /etc -czf "${workdir}/shopos-config.tar.gz" msfixit-shopos
 fi
 
-tar -C "$workdir" -czf "$archive" .
+tar --zstd -C "$workdir" -cpf "$archive" .
 sha256sum "$archive" > "${archive}.sha256"
 
 find "$backup_root" -maxdepth 1 -type f \
-    \( -name 'shopos-*.tar.gz' -o -name 'shopos-*.tar.gz.sha256' \) \
+    \( -name 'shopos-*.tar.zst' -o -name 'shopos-*.tar.zst.sha256' \) \
     -mtime +14 -delete
