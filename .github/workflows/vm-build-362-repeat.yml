@@ -46,6 +46,7 @@ jobs:
           qemu-system-aarch64 -machine help | grep '^raspi4b '
           bash -n tests/prepare-qemu-image.sh
           bash tests/run-qemu-smoke.sh --self-test
+          bash tests/normalize-qemu-sd-size.sh --self-test
 
       - name: Download and verify exact Build 362 candidate
         shell: bash
@@ -65,9 +66,14 @@ jobs:
           sha256sum --check msfixit-shopos-rpi4-usb.img.xz.sha256
           xz --decompress --stdout msfixit-shopos-rpi4-usb.img.xz > shopos-test.img
           rm -f artifact.zip msfixit-shopos-rpi4-usb.img.xz
-          truncate -s 16G shopos-test.img
-          printf 'SOURCE_SHA=%s\nARTIFACT_ID=%s\nARTIFACT_DIGEST=sha256:%s\n' \
-            "$SHOPOS_SOURCE_SHA" "$SHOPOS_ARTIFACT_ID" "$SHOPOS_ARTIFACT_SHA256" > candidate-binding.txt
+          original_bytes="$(stat -c '%s' shopos-test.img)"
+          test "$original_bytes" -gt 0
+          bash ../tests/normalize-qemu-sd-size.sh shopos-test.img | tee qemu-image-size.txt
+          normalized_bytes="$(stat -c '%s' shopos-test.img)"
+          test "$normalized_bytes" -ge "$original_bytes"
+          printf 'SOURCE_SHA=%s\nARTIFACT_ID=%s\nARTIFACT_DIGEST=sha256:%s\nORIGINAL_IMAGE_BYTES=%s\nQEMU_IMAGE_BYTES=%s\n' \
+            "$SHOPOS_SOURCE_SHA" "$SHOPOS_ARTIFACT_ID" "$SHOPOS_ARTIFACT_SHA256" \
+            "$original_bytes" "$normalized_bytes" > candidate-binding.txt
           ls -lh shopos-test.img
 
       - name: Prepare offline QEMU guest
@@ -96,6 +102,7 @@ jobs:
           name: shopos-build-362-${{ matrix.host }}-repeat-${{ matrix.repetition }}
           path: |
             vm/candidate-binding.txt
+            vm/qemu-image-size.txt
             vm/harness.log
             vm/qemu-version.txt
             vm/qemu-console.log
