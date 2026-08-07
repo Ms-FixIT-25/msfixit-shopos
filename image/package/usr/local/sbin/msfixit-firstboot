@@ -32,7 +32,7 @@ read_shopos_config() {
         value="${value%\'}"
 
         case "$key" in
-            SHOP_URL|SHOP_TITLE|SHOP_ADMIN_USER|SHOP_ADMIN_EMAIL|SHOP_ADMIN_PASSWORD|OS_ADMIN_PASSWORD|CF_TUNNEL_TOKEN|WORDPRESS_LOCALE|WORDPRESS_VERSION)
+            SHOP_URL|SHOP_TITLE|SHOP_ADMIN_USER|SHOP_ADMIN_EMAIL|SHOP_ADMIN_PASSWORD|CF_TUNNEL_TOKEN|WORDPRESS_LOCALE|WORDPRESS_VERSION)
                 printf -v "$key" '%s' "$value"
                 ;;
         esac
@@ -66,7 +66,6 @@ SHOP_TITLE="Ms. FixIT"
 SHOP_ADMIN_USER="shopadmin"
 SHOP_ADMIN_EMAIL="admin@localhost.invalid"
 SHOP_ADMIN_PASSWORD=""
-OS_ADMIN_PASSWORD=""
 CF_TUNNEL_TOKEN=""
 WORDPRESS_LOCALE="de_DE"
 WORDPRESS_VERSION="latest"
@@ -91,16 +90,13 @@ done
 [ -n "$SHOP_URL" ] || SHOP_URL="http://${local_ip}"
 
 SHOP_ADMIN_PASSWORD="${SHOP_ADMIN_PASSWORD:-$(random_secret)}"
-OS_ADMIN_PASSWORD="${OS_ADMIN_PASSWORD:-$(random_secret)}"
 DB_PASSWORD="$(random_secret)"
 
-if id shopadmin >/dev/null 2>&1; then
-    printf 'shopadmin:%s\n' "$OS_ADMIN_PASSWORD" | chpasswd
-fi
+# Linux administrator credentials intentionally belong exclusively to the
+# interactive first-login service. Firstboot must never race that wizard by
+# changing a local account password or persisting a second copy of it.
 
 install -d -m 0750 "$config_dir"
-# Service-owned subdirectories stay private, while the persistent storage root
-# remains traversable so MariaDB and PHP-FPM can reach their own directories.
 install -d -m 0711 "$data_dir"
 install -d -o mysql -g mysql -m 0750 "$data_dir/mariadb"
 install -d -o www-data -g www-data -m 0750 "$data_dir/wordpress"
@@ -123,8 +119,6 @@ innodb_file_per_table=1
 max_connections=100
 EOF_DB
 
-# Repair ownership before initialization as well as after it. This also makes
-# first boot recover cleanly from a previously interrupted database setup.
 chown -R mysql:mysql "$data_dir/mariadb"
 chmod 0750 "$data_dir/mariadb"
 if [ ! -d "$data_dir/mariadb/mysql" ]; then
@@ -174,7 +168,7 @@ sed -ri 's|^pm.max_spare_servers = .*|pm.max_spare_servers = 6|' "$php_pool"
 cat > "/etc/php/${php_version}/fpm/conf.d/99-shopos.ini" <<'EOF_PHP'
 memory_limit=512M
 upload_max_filesize=128M
-post_max_size=128M
+post_max_filesize=128M
 max_execution_time=120
 max_input_vars=5000
 expose_php=Off
@@ -188,6 +182,9 @@ opcache.revalidate_freq=60
 session.cookie_httponly=1
 session.cookie_samesite=Lax
 EOF_PHP
+# Correct the directive spelling defensively if this script is updated from an
+# older generated image snippet.
+sed -i 's/^post_max_filesize=/post_max_size=/' "/etc/php/${php_version}/fpm/conf.d/99-shopos.ini"
 ln -sf "/etc/php/${php_version}/fpm/conf.d/99-shopos.ini" "/etc/php/${php_version}/cli/conf.d/99-shopos.ini"
 
 log "Configuring Redis."
@@ -290,13 +287,13 @@ Shop URL: ${SHOP_URL}
 WordPress user: ${SHOP_ADMIN_USER}
 WordPress password: ${SHOP_ADMIN_PASSWORD}
 
-SSH user: shopadmin
-SSH password: ${OS_ADMIN_PASSWORD}
+Local Linux administrator: configured interactively on the device
+Linux administrator password: never written by firstboot
 
 Cloudflare Tunnel: ${tunnel_state}
 LAN address: ${local_ip}
 
-Delete this file after saving the credentials in a password manager.
+Delete this file after saving the WordPress credentials in a password manager.
 EOF_CREDENTIALS
 chmod 0600 "$credentials_file"
 
