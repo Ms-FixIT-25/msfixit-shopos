@@ -70,10 +70,14 @@ case "${wifi_choice,,}" in
             if /usr/local/sbin/msfixit-wifi-connect; then
                 printf 'WLAN wurde erfolgreich verbunden.\n'
             else
-                printf 'WLAN konnte nicht verbunden werden. Du kannst es später mit sudo msfixit-wifi-connect erneut versuchen.\n'
+                printf '\nWLAN konnte noch nicht verbunden werden.\n'
+                printf 'ShopOS startet trotzdem vollständig lokal weiter.\n'
+                printf 'Später erneut versuchen: sudo msfixit-wifi-connect\n'
             fi
         else
-            printf 'NetworkManager ist nicht verfügbar. WLAN wird übersprungen.\n'
+            printf '\nNetworkManager ist nicht verfügbar.\n'
+            printf 'ShopOS startet trotzdem vollständig lokal weiter.\n'
+            printf 'Nach der Diagnose kann WLAN später erneut eingerichtet werden.\n'
         fi
         ;;
     m)
@@ -85,17 +89,17 @@ case "${wifi_choice,,}" in
             nmcli --fields SSID,SIGNAL,SECURITY device wifi list || true
             read -r -p 'SSID: ' manual_ssid
             if [ -n "$manual_ssid" ]; then
-                nmcli --ask device wifi connect "$manual_ssid" || printf 'WLAN konnte nicht verbunden werden.\n'
+                nmcli --ask device wifi connect "$manual_ssid" || printf 'WLAN konnte nicht verbunden werden. ShopOS startet lokal weiter.\n'
             fi
         else
-            printf 'NetworkManager ist nicht verfügbar. WLAN wird übersprungen.\n'
+            printf 'NetworkManager ist nicht verfügbar. WLAN wird vorerst übersprungen; ShopOS startet lokal weiter.\n'
         fi
         ;;
     s)
-        printf 'WLAN-Einrichtung übersprungen. Später: sudo msfixit-wifi-connect\n'
+        printf 'WLAN-Einrichtung übersprungen. ShopOS startet lokal weiter. Später: sudo msfixit-wifi-connect\n'
         ;;
     *)
-        printf 'Unbekannte Auswahl. WLAN-Einrichtung übersprungen.\n'
+        printf 'Unbekannte Auswahl. WLAN-Einrichtung übersprungen; ShopOS startet lokal weiter.\n'
         ;;
 esac
 
@@ -103,4 +107,5 @@ install -d -o root -g root -m 0700 "$(dirname "$marker")"
 touch "$marker"
 chmod 0600 "$marker"
 
-printf '\nErsteinrichtung abgeschlossen. Du kannst dich jetzt als %s anmelden.\n\n' "$username"
+printf '\nErsteinrichtung abgeschlossen. Die lokale ShopOS-Oberfläche wird jetzt gestartet.\n'
+printf 'Falls kein WLAN verbunden ist, bleibt die Oberfläche trotzdem auf diesem Gerät verfügbar.\n\n'
