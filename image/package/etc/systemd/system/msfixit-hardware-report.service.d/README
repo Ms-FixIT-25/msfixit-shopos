@@ -1,1 +1,0 @@
-The hardware report runs with idle I/O priority and low CPU weight. It can be started manually with: systemctl start msfixit-hardware-report.service
