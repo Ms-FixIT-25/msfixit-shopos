@@ -51,7 +51,14 @@ if [ -f /etc/msfixit-shopos/office.env ]; then
         state="degraded"
         failed+=("office")
     fi
-    for timer in msfixit-office-worker.timer msfixit-office-dunning.timer msfixit-office-print.timer; do
+    # Every timer enabled by msfixit-office-init is operationally required. In
+    # particular, a stopped compliance worker must degrade health rather than
+    # leaving the appliance falsely green.
+    for timer in \
+        msfixit-office-worker.timer \
+        msfixit-office-dunning.timer \
+        msfixit-office-print.timer \
+        msfixit-compliance-worker.timer; do
         if ! systemctl is-active --quiet "$timer"; then
             state="degraded"
             failed+=("$timer")
