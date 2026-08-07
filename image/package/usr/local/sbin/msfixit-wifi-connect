@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+mode=auto
+case "${1:-}" in
+    '') ;;
+    --manual) mode=manual ;;
+    *) printf 'Usage: %s [--manual]\n' "$0" >&2; exit 2 ;;
+esac
+
 config=/etc/msfixit-shopos/wifi.env
 [ -r "$config" ] || { echo "Missing Wi-Fi configuration: $config" >&2; exit 1; }
 # shellcheck disable=SC1090
@@ -22,10 +29,6 @@ wifi_diagnostics() {
     ip -brief link >&2 2>/dev/null || true
 }
 
-# The onboard brcmfmac interface can appear a few seconds after tty1 becomes
-# interactive on a real Raspberry Pi. Do not mistake that race for missing
-# hardware. Bring NetworkManager/radio up, unblock WLAN and wait for udev plus
-# the driver before deciding that there is no adapter.
 systemctl start NetworkManager.service 2>/dev/null || true
 if command -v rfkill >/dev/null 2>&1; then
     rfkill unblock wlan 2>/dev/null || true
@@ -76,7 +79,7 @@ done
 
 ssid=""
 if [ -n "$available" ]; then
-    if [ -n "$preferred_ssid" ] && printf '%s\n' "$available" | grep -Fxq "$preferred_ssid"; then
+    if [ "$mode" = auto ] && [ -n "$preferred_ssid" ] && printf '%s\n' "$available" | grep -Fxq "$preferred_ssid"; then
         ssid="$preferred_ssid"
         printf 'Vorkonfiguriertes WLAN gefunden: %s\n' "$ssid"
     else
