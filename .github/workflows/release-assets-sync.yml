@@ -65,10 +65,10 @@ jobs:
               echo "Release for commit $BUILD_SHA is not visible yet (attempt $attempt/20)."
               sleep 6
             done
-            [ -n "$tag" ] && [ "$tag" != null ] || {
+            if [ -z "$tag" ] || [ "$tag" = null ]; then
               echo "No published ShopOS release found for build commit $BUILD_SHA." >&2
               exit 1
-            }
+            fi
             version="${tag#v}"
           fi
 
