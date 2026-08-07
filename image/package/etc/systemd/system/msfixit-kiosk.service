@@ -1,7 +1,8 @@
 [Unit]
 Description=Ms. FixIT ShopOS local graphical interface
-After=network-online.target nginx.service msfixit-brand-shop.service
-Wants=network-online.target
+Requires=msfixit-brand-shop.service msfixit-first-login.service
+After=local-fs.target nginx.service msfixit-brand-shop.service msfixit-first-login.service
+Wants=nginx.service
 ConditionPathExists=/usr/bin/chromium
 
 [Service]
@@ -18,9 +19,12 @@ StandardInput=tty-force
 StandardOutput=journal
 StandardError=journal
 PAMName=login
+ExecStartPre=/usr/bin/test -x /usr/bin/chromium
+ExecStartPre=/usr/bin/test -x /usr/bin/xinit
 ExecStart=/usr/bin/xinit /usr/local/sbin/msfixit-kiosk-session -- :0 vt7 -keeptty -nolisten tcp
 Restart=on-failure
 RestartSec=5
+TimeoutStartSec=4min
 TimeoutStopSec=10
 CPUWeight=20
 CPUQuota=150%
