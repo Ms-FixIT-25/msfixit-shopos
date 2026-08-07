@@ -31,19 +31,26 @@ jobs:
             runner: ubuntu-24.04-arm
             repetition: 2
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 55
+    timeout-minutes: 75
     steps:
       - name: Check out disposable harness
         uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
-      - name: Install QEMU and image tools
+      - name: Install image tools and pinned Raspberry Pi 4 QEMU
         shell: bash
         run: |
           set -Eeuo pipefail
           sudo apt-get -o Acquire::Retries=3 update
-          sudo apt-get -o Acquire::Retries=3 install --yes qemu-system-arm qemu-utils xz-utils unzip curl util-linux
-          qemu-system-aarch64 --version
-          qemu-system-aarch64 -machine help | grep '^raspi4b '
+          sudo apt-get -o Acquire::Retries=3 install --yes qemu-utils xz-utils unzip curl util-linux
+          bash scripts/install-qemu-raspi4.sh "$HOME/.cache/shopos-qemu/9.2.4"
+          export PATH="$HOME/.cache/shopos-qemu/9.2.4/bin:$PATH"
+          echo "$HOME/.cache/shopos-qemu/9.2.4/bin" >> "$GITHUB_PATH"
+          qemu-system-aarch64 --version | tee vm-qemu-version.txt
+          grep -Fq '9.2.4' vm-qemu-version.txt
+          qemu-system-aarch64 -machine help | tee vm-qemu-machines.txt
+          grep -Eq '^[[:space:]]*raspi4b([[:space:]]|$)' vm-qemu-machines.txt
           bash -n tests/prepare-qemu-image.sh
           bash tests/run-qemu-smoke.sh --self-test
           bash tests/normalize-qemu-sd-size.sh --self-test
@@ -101,6 +108,8 @@ jobs:
         with:
           name: shopos-build-367-${{ matrix.host }}-repeat-${{ matrix.repetition }}
           path: |
+            vm-qemu-version.txt
+            vm-qemu-machines.txt
             vm/candidate-binding.txt
             vm/qemu-image-size.txt
             vm/harness.log
