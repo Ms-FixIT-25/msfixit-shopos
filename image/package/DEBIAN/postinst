@@ -20,18 +20,17 @@ for group in video render input; do
 done
 install -d -o shopos-kiosk -g shopos-kiosk -m 0700 /var/lib/msfixit-shopos/kiosk
 
-if ! getent group shopos-hwmon >/dev/null 2>&1; then
-    groupadd --system shopos-hwmon
-fi
+if ! getent group shopos-hwmon >/dev/null 2>&1; then groupadd --system shopos-hwmon; fi
+if ! getent group shopos-hwapi >/dev/null 2>&1; then groupadd --system shopos-hwapi; fi
 if ! getent passwd shopos-hwmon >/dev/null 2>&1; then
     useradd --system --gid shopos-hwmon --home-dir /var/lib/msfixit-shopos/hardware-manager --no-create-home --shell /usr/sbin/nologin shopos-hwmon
 fi
+usermod -a -G shopos-hwapi shopos-hwmon
+usermod -a -G shopos-hwapi www-data
 install -d -o shopos-hwmon -g shopos-hwmon -m 0750 /var/lib/msfixit-shopos/hardware-manager
 
 /usr/local/sbin/msfixit-apply-resource-budget
 
-# Keep Debian's package-owned nftables.conf and load the ShopOS rules from a
-# separate include file to avoid package ownership conflicts.
 if ! grep -Fq 'include "/etc/nftables.d/*.nft"' /etc/nftables.conf; then
     printf '\ninclude "/etc/nftables.d/*.nft"\n' >> /etc/nftables.conf
 fi
@@ -62,10 +61,7 @@ for cmdline in /boot/firmware/cmdline.txt /boot/cmdline.txt; do
     current="$(cat "$cmdline")"
     current="$(printf '%s\n' "$current" | sed -E 's/(^|[[:space:]])consoleblank=[^[:space:]]+//g; s/[[:space:]]+/ /g; s/^ //; s/ $//')"
     for parameter in quiet splash loglevel=3 systemd.show_status=auto rd.udev.log_level=3 vt.global_cursor_default=0 logo.nologo consoleblank=0; do
-        case " $current " in
-            *" $parameter "*) ;;
-            *) current="$current $parameter" ;;
-        esac
+        case " $current " in *" $parameter "*) ;; *) current="$current $parameter" ;; esac
     done
     printf '%s\n' "$current" > "$cmdline"
 done
