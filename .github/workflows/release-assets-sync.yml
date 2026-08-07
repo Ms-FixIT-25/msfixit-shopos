@@ -1,30 +1,23 @@
 name: Sync versioned ShopOS release assets
 
 on:
-  workflow_run:
-    workflows: ["Build ShopOS image"]
-    types: [completed]
   workflow_dispatch:
     inputs:
       version:
         description: Existing ShopOS release version to normalize, for example 0.15.1
-        required: false
+        required: true
         type: string
 
 permissions:
   contents: write
 
 concurrency:
-  group: shopos-release-assets-${{ github.event.workflow_run.id || inputs.version || github.run_id }}
+  group: shopos-release-assets-${{ inputs.version }}
   cancel-in-progress: false
 
 jobs:
   sync:
-    name: Apply exact versioned download names
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      (github.event.workflow_run.conclusion == 'success' &&
-       github.event.workflow_run.head_branch == 'main')
+    name: Repair exact versioned download names
     runs-on: ubuntu-24.04
     timeout-minutes: 15
 
@@ -35,50 +28,23 @@ jobs:
           ref: main
           persist-credentials: false
 
-      - name: Resolve the release produced by the completed build
+      - name: Validate requested published release
         id: release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           MANUAL_VERSION: ${{ inputs.version }}
-          BUILD_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           set -Eeuo pipefail
           semver_re='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
-
-          if [ -n "${MANUAL_VERSION:-}" ]; then
-            version="$MANUAL_VERSION"
-          else
-            test -n "${BUILD_SHA:-}"
-            tag=''
-            for attempt in $(seq 1 20); do
-              releases="$(gh api "repos/${GITHUB_REPOSITORY}/releases?per_page=100")"
-              tag="$(jq -r --arg sha "$BUILD_SHA" '
-                .[]
-                | select(.target_commitish == $sha)
-                | select(.draft == false and .prerelease == false)
-                | .tag_name
-              ' <<< "$releases" | head -n 1)"
-              if [ -n "$tag" ] && [ "$tag" != null ]; then
-                break
-              fi
-              echo "Release for commit $BUILD_SHA is not visible yet (attempt $attempt/20)."
-              sleep 6
-            done
-            if [ -z "$tag" ] || [ "$tag" = null ]; then
-              echo "No published ShopOS release found for build commit $BUILD_SHA." >&2
-              exit 1
-            fi
-            version="${tag#v}"
-          fi
-
+          version="$MANUAL_VERSION"
           [[ "$version" =~ $semver_re ]] || {
             echo "Invalid ShopOS release version: $version" >&2
             exit 1
           }
           gh release view "v${version}" --repo "$GITHUB_REPOSITORY" >/dev/null
           echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "Resolved ShopOS release v${version}."
+          echo "Resolved existing ShopOS release v${version}."
 
       - name: Rename assets and synchronize release table
         shell: bash
