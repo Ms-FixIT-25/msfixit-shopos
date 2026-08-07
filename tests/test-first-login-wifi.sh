@@ -65,6 +65,7 @@ for dependency in network-manager wpasupplicant rfkill iw wireless-regdb firmwar
         exit 1
     }
 done
+grep -Fq 'systemctl enable NetworkManager.service' "$postinst"
 
 # The interactive wizard must never block getty's ExecStartPre. systemd gives
 # start-pre commands a finite startup timeout, which previously killed and
