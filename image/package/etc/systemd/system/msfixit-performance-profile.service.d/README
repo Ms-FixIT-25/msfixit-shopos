@@ -1,0 +1,1 @@
+ShopOS writes generated runtime limits to service drop-ins. Do not edit generated files directly; edit /etc/msfixit-shopos/performance.env instead.
