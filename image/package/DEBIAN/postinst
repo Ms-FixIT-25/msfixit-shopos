@@ -85,6 +85,7 @@ systemctl enable msfixit-update-agent.timer 2>/dev/null || true
 systemctl enable msfixit-firstboot.service 2>/dev/null || true
 systemctl enable msfixit-brand-shop.service 2>/dev/null || true
 systemctl enable msfixit-display-keepawake.service 2>/dev/null || true
+systemctl enable msfixit-first-login.service 2>/dev/null || true
 systemctl enable msfixit-boot-console.service 2>/dev/null || true
 systemctl enable msfixit-kiosk.service 2>/dev/null || true
 systemctl enable msfixit-resource-budget.service 2>/dev/null || true
