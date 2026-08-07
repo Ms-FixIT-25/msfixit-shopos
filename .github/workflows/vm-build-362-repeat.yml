@@ -1,4 +1,4 @@
-name: ShopOS build 362 repeated QEMU validation
+name: ShopOS build 367 repeated QEMU validation
 
 on:
   pull_request:
@@ -19,16 +19,16 @@ jobs:
       matrix:
         include:
           - host: normal-x86_64
-            runner: ubuntu-26.04
+            runner: ubuntu-24.04
             repetition: 1
           - host: normal-x86_64
-            runner: ubuntu-26.04
+            runner: ubuntu-24.04
             repetition: 2
           - host: arm64
-            runner: ubuntu-26.04-arm
+            runner: ubuntu-24.04-arm
             repetition: 1
           - host: arm64
-            runner: ubuntu-26.04-arm
+            runner: ubuntu-24.04-arm
             repetition: 2
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 55
@@ -48,13 +48,13 @@ jobs:
           bash tests/run-qemu-smoke.sh --self-test
           bash tests/normalize-qemu-sd-size.sh --self-test
 
-      - name: Download and verify exact Build 362 candidate
+      - name: Download and verify exact Build 367 candidate
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          SHOPOS_ARTIFACT_ID: '8988709486'
-          SHOPOS_ARTIFACT_SHA256: 47752d01f935fb57d1cbced7e83d290953467a175f51ab58f86d725dc0e6202a
-          SHOPOS_SOURCE_SHA: f5eb6e32b386a7d653cabb64471245d6a86b05db
+          SHOPOS_ARTIFACT_ID: '8990717896'
+          SHOPOS_ARTIFACT_SHA256: 20f96535db2501d2d00e3661e40576436ae87f86d7ba54a5ec428ffa1a9fdea9
+          SHOPOS_SOURCE_SHA: 5cca22d80059fb1d9a18272f03044d9f9d734441
         run: |
           set -Eeuo pipefail
           mkdir -p vm
@@ -62,7 +62,7 @@ jobs:
           printf '%s  %s\n' "$SHOPOS_ARTIFACT_SHA256" vm/artifact.zip | sha256sum --check --strict
           unzip -q vm/artifact.zip -d vm
           cd vm
-          test "$(cat SHOPOS-VERSION.txt | tr -d '[:space:]')" != ''
+          test "$(tr -d '[:space:]' < SHOPOS-VERSION.txt)" != ''
           sha256sum --check msfixit-shopos-rpi4-usb.img.xz.sha256
           xz --decompress --stdout msfixit-shopos-rpi4-usb.img.xz > shopos-test.img
           rm -f artifact.zip msfixit-shopos-rpi4-usb.img.xz
@@ -99,7 +99,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: shopos-build-362-${{ matrix.host }}-repeat-${{ matrix.repetition }}
+          name: shopos-build-367-${{ matrix.host }}-repeat-${{ matrix.repetition }}
           path: |
             vm/candidate-binding.txt
             vm/qemu-image-size.txt
