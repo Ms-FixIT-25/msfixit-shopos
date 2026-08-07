@@ -10,8 +10,14 @@ readonly stage="$1"
 readonly vendor_dir="$stage/usr/share/msfixit-shopos/vendor"
 readonly wordpress_version=7.0.2
 readonly woocommerce_version=10.9.4
+readonly woocommerce_sha256="${WOOCOMMERCE_SHA256:-6e58fc3ba9b18d1c9aee6b0227d3c3c09e4fe2c1332823bd2e0ac54ffcff64a9}"
 readonly redis_cache_version=2.8.0
 readonly storefront_version=4.6.2
+
+[[ "$woocommerce_sha256" =~ ^[0-9a-fA-F]{64}$ ]] || {
+    echo "WOOCOMMERCE_SHA256 must be a 64-character SHA-256 digest." >&2
+    exit 2
+}
 
 install -d -m 0755 "$vendor_dir"
 
@@ -32,6 +38,7 @@ curl --fail --location --retry 5 --retry-all-errors \
     "https://de.wordpress.org/wordpress-${wordpress_version}-de_DE.zip.sha1" \
     --output "$wordpress_sha1_file"
 download "https://downloads.wordpress.org/plugin/woocommerce.${woocommerce_version}.zip" "$woocommerce"
+printf '%s  %s\n' "$woocommerce_sha256" "$woocommerce" | sha256sum --check --strict
 download "https://downloads.wordpress.org/plugin/redis-cache.${redis_cache_version}.zip" "$redis_cache"
 download "https://downloads.wordpress.org/theme/storefront.${storefront_version}.zip" "$storefront"
 

@@ -273,7 +273,7 @@ printf '%s\n' "$kernel_cmdline" | tee "$output_dir/kernel-command-line.txt"
 qemu_args=(
     -machine raspi4b
     -accel kvm
-    -accel tcg,thread=multi
+    -accel 'tcg,thread=multi'
     -kernel "$output_dir/kernel8.img"
     -dtb "$output_dir/bcm2711-rpi-4-b.dtb"
     -initrd "$initrd"
