@@ -1,0 +1,3 @@
+# Queue newly attached removable partitions for an explicit ShopOS user decision.
+# Nothing is mounted automatically.
+ACTION=="add", SUBSYSTEM=="block", ENV{DEVTYPE}=="partition", ENV{ID_BUS}=="usb", RUN+="/usr/local/sbin/msfixit-device-detected %E{DEVNAME}"
