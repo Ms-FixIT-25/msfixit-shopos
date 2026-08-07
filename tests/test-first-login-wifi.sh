@@ -32,6 +32,7 @@ grep -Fq 'nmcli device wifi rescan' "$wifi"
 grep -Fq 'nmcli --fields SSID,SIGNAL,SECURITY device wifi list' "$wifi"
 grep -Fq 'WLAN-Passwort abgefragt' "$wifi"
 grep -Fq 'nmcli --ask device wifi connect "$ssid"' "$wifi"
+grep -Fq 'TimeoutStartSec=infinity' "$dropin"
 grep -Fq 'ExecStartPre=/bin/bash /usr/local/sbin/msfixit-display-keepawake /dev/tty1' "$dropin"
 grep -Fq 'ExecStartPre=/bin/bash /usr/local/sbin/msfixit-first-login-init' "$dropin"
 grep -Fxq 'SHOPOS_WIFI_SSID=Skynet' "$ssid"
@@ -72,4 +73,4 @@ if grep -Eq 'One-time password|chage -d 0|/dev/urandom' "$init"; then
     exit 1
 fi
 
-printf 'PASS: interactive setup keeps tty1 bright and awake while discovering Wi-Fi.\n'
+printf 'PASS: interactive setup keeps tty1 bright, awake and exempt from the default systemd start timeout while discovering Wi-Fi.\n'
