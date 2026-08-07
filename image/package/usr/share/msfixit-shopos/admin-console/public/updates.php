@@ -12,8 +12,25 @@ function helper(array $args,int $timeout=120):array{
  $cmd=array_merge(['sudo','-n','/usr/local/sbin/msfixit-update-center'],$args);
  $p=proc_open($cmd,[1=>['pipe','w'],2=>['pipe','w']],$pipes,null,['PATH'=>'/usr/sbin:/usr/bin:/sbin:/bin'],['bypass_shell'=>true]);
  if(!is_resource($p))return[1,'Dienst konnte nicht gestartet werden.'];
- $out=stream_get_contents($pipes[1]);$err=stream_get_contents($pipes[2]);fclose($pipes[1]);fclose($pipes[2]);$code=proc_close($p);
- return[$code,trim($code===0?$out:$err)];
+ stream_set_blocking($pipes[1],false);stream_set_blocking($pipes[2],false);
+ $out='';$err='';$deadline=microtime(true)+max(1,$timeout);$code=null;$timedOut=false;
+ while(true){
+  $out.=stream_get_contents($pipes[1]);$err.=stream_get_contents($pipes[2]);
+  if(strlen($out)>1048576)$out=substr($out,-1048576);if(strlen($err)>1048576)$err=substr($err,-1048576);
+  $status=proc_get_status($p);
+  if(!$status['running']){$code=(int)$status['exitcode'];break;}
+  if(microtime(true)>=$deadline){
+   $timedOut=true;proc_terminate($p,15);$grace=microtime(true)+1.0;
+   while(microtime(true)<$grace){usleep(50000);$status=proc_get_status($p);if(!$status['running'])break;}
+   if(($status['running']??false)===true)proc_terminate($p,9);
+   $code=124;break;
+  }
+  usleep(50000);
+ }
+ $out.=stream_get_contents($pipes[1]);$err.=stream_get_contents($pipes[2]);fclose($pipes[1]);fclose($pipes[2]);$closed=proc_close($p);
+ if($code===null||$code<0)$code=$closed>=0?$closed:1;
+ if($timedOut)return[124,'Zeitüberschreitung: Die Update-Aktion wurde beendet.'];
+ return[$code,trim($code===0?$out:($err!==''?$err:$out))];
 }
 $message='';$kind='info';
 if($_SERVER['REQUEST_METHOD']==='POST'){
