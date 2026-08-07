@@ -30,6 +30,6 @@ if grep -Fq 'SSH password:' "$firstboot"; then
 fi
 
 grep -Fq 'Linux administrator password: never written by firstboot' "$firstboot"
-grep -Fq 'configured interactively' "$example"
+grep -Eq 'Linux/SSH administrator password.*interactiv' "$example"
 
 printf 'PASS: local Linux administrator credentials have one interactive owner and are never persisted by unattended firstboot.\n'
