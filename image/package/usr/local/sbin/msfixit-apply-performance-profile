@@ -1,0 +1,148 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+readonly config_dir=/etc/msfixit-shopos
+readonly config_file=${config_dir}/performance.env
+readonly example_file=${config_dir}/performance.env.example
+readonly runtime_dir=/run/msfixit-shopos
+readonly state_file=${runtime_dir}/performance-profile
+
+if [ "$(id -u)" -ne 0 ]; then
+    echo 'Run this command with sudo.' >&2
+    exit 1
+fi
+
+install -d -m 0750 "$config_dir"
+install -d -m 0755 "$runtime_dir"
+if [ ! -f "$config_file" ] && [ -f "$example_file" ]; then
+    install -m 0644 "$example_file" "$config_file"
+fi
+
+SHOPOS_PERFORMANCE_PROFILE=balanced
+SHOPOS_CPU_GOVERNOR=auto
+SHOPOS_WIFI_POLICY=auto
+SHOPOS_BLUETOOTH_POLICY=auto
+if [ -r "$config_file" ]; then
+    # shellcheck disable=SC1090
+    source "$config_file"
+fi
+
+case "$SHOPOS_PERFORMANCE_PROFILE" in
+    efficiency|balanced|performance) ;;
+    *)
+        echo "Invalid SHOPOS_PERFORMANCE_PROFILE: $SHOPOS_PERFORMANCE_PROFILE" >&2
+        exit 2
+        ;;
+esac
+
+mem_kib="$(awk '/^MemTotal:/ {print $2}' /proc/meminfo)"
+[[ "$mem_kib" =~ ^[0-9]+$ ]] || {
+    echo 'Unable to determine total memory.' >&2
+    exit 1
+}
+mem_mib=$((mem_kib / 1024))
+
+case "$SHOPOS_PERFORMANCE_PROFILE:$mem_mib" in
+    efficiency:*)
+        mariadb_pool=128M
+        mariadb_connections=24
+        redis_memory=96mb
+        php_children=5
+        kiosk_high=512M
+        kiosk_max=704M
+        ;;
+    balanced:[0-9]* )
+        if (( mem_mib < 3000 )); then
+            mariadb_pool=160M; mariadb_connections=32; redis_memory=128mb; php_children=6; kiosk_high=576M; kiosk_max=768M
+        elif (( mem_mib < 6000 )); then
+            mariadb_pool=256M; mariadb_connections=48; redis_memory=160mb; php_children=8; kiosk_high=704M; kiosk_max=960M
+        else
+            mariadb_pool=384M; mariadb_connections=64; redis_memory=192mb; php_children=10; kiosk_high=896M; kiosk_max=1280M
+        fi
+        ;;
+    performance:*)
+        if (( mem_mib < 3000 )); then
+            mariadb_pool=192M; mariadb_connections=40; redis_memory=160mb; php_children=8; kiosk_high=640M; kiosk_max=896M
+        elif (( mem_mib < 6000 )); then
+            mariadb_pool=384M; mariadb_connections=64; redis_memory=224mb; php_children=12; kiosk_high=896M; kiosk_max=1280M
+        else
+            mariadb_pool=768M; mariadb_connections=96; redis_memory=320mb; php_children=16; kiosk_high=1280M; kiosk_max=1792M
+        fi
+        ;;
+esac
+
+cat > /etc/mysql/mariadb.conf.d/zz-shopos-pi-budget.cnf <<EOF_MYSQL
+[mysqld]
+innodb_buffer_pool_size=${mariadb_pool}
+innodb_log_buffer_size=16M
+max_connections=${mariadb_connections}
+table_open_cache=400
+table_definition_cache=400
+thread_cache_size=8
+performance_schema=OFF
+skip_name_resolve=ON
+EOF_MYSQL
+
+for pool_dir in /etc/php/*/fpm/pool.d; do
+    [ -d "$pool_dir" ] || continue
+    cat > "$pool_dir/zz-shopos-pi-budget.conf" <<EOF_PHP
+[www]
+pm = ondemand
+pm.max_children = ${php_children}
+pm.process_idle_timeout = 10s
+pm.max_requests = 500
+EOF_PHP
+done
+
+if [ -f /etc/redis/redis.conf ]; then
+    sed -i '/^# ShopOS Pi resource budget$/,$d' /etc/redis/redis.conf
+    cat >> /etc/redis/redis.conf <<EOF_REDIS
+# ShopOS Pi resource budget
+maxmemory ${redis_memory}
+maxmemory-policy volatile-lru
+hz 5
+dynamic-hz yes
+EOF_REDIS
+fi
+
+install -d -m 0755 /etc/systemd/system/msfixit-kiosk.service.d
+cat > /etc/systemd/system/msfixit-kiosk.service.d/20-performance-profile.conf <<EOF_KIOSK
+[Service]
+MemoryHigh=${kiosk_high}
+MemoryMax=${kiosk_max}
+EOF_KIOSK
+
+requested_governor="$SHOPOS_CPU_GOVERNOR"
+for policy in /sys/devices/system/cpu/cpufreq/policy*; do
+    [ -d "$policy" ] || continue
+    available="$(cat "$policy/scaling_available_governors" 2>/dev/null || true)"
+    governor="$requested_governor"
+    if [ "$governor" = auto ]; then
+        if grep -qw schedutil <<< "$available"; then
+            governor=schedutil
+        else
+            governor="$(cat "$policy/scaling_governor" 2>/dev/null || true)"
+        fi
+    fi
+    if [ -n "$governor" ] && grep -qw "$governor" <<< "$available"; then
+        printf '%s\n' "$governor" > "$policy/scaling_governor" 2>/dev/null || true
+    fi
+done
+
+systemctl daemon-reload
+systemctl enable fstrim.timer >/dev/null 2>&1 || true
+
+cat > "$state_file" <<EOF_STATE
+profile=${SHOPOS_PERFORMANCE_PROFILE}
+memory_mib=${mem_mib}
+mariadb_pool=${mariadb_pool}
+mariadb_connections=${mariadb_connections}
+redis_memory=${redis_memory}
+php_children=${php_children}
+kiosk_memory_high=${kiosk_high}
+kiosk_memory_max=${kiosk_max}
+EOF_STATE
+chmod 0644 "$state_file"
+
+logger -p daemon.info -t msfixit-performance \
+    "Applied ${SHOPOS_PERFORMANCE_PROFILE} profile for ${mem_mib} MiB RAM."
