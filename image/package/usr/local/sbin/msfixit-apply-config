@@ -13,8 +13,8 @@ config_file="${1:-${boot_root}/shopos.env}"
 wordpress_dir=/srv/www/wordpress
 config_dir=/etc/msfixit-shopos
 
-[ -f "$config_file" ] || {
-    echo "Configuration file not found: $config_file" >&2
+[ -f "$config_file" ] && [ ! -L "$config_file" ] || {
+    echo "Configuration file not found or unsafe: $config_file" >&2
     exit 1
 }
 
@@ -22,7 +22,6 @@ SHOP_URL=""
 SHOP_ADMIN_USER="shopadmin"
 SHOP_ADMIN_EMAIL=""
 SHOP_ADMIN_PASSWORD=""
-OS_ADMIN_PASSWORD=""
 CF_TUNNEL_TOKEN=""
 
 while IFS= read -r line || [ -n "$line" ]; do
@@ -36,7 +35,7 @@ while IFS= read -r line || [ -n "$line" ]; do
     value="${value%\'}"
 
     case "$key" in
-        SHOP_URL|SHOP_ADMIN_USER|SHOP_ADMIN_EMAIL|SHOP_ADMIN_PASSWORD|OS_ADMIN_PASSWORD|CF_TUNNEL_TOKEN)
+        SHOP_URL|SHOP_ADMIN_USER|SHOP_ADMIN_EMAIL|SHOP_ADMIN_PASSWORD|CF_TUNNEL_TOKEN)
             printf -v "$key" '%s' "$value"
             ;;
     esac
@@ -60,9 +59,8 @@ if [ -n "$SHOP_ADMIN_PASSWORD" ]; then
     run_wp user update "$SHOP_ADMIN_USER" --user_pass="$SHOP_ADMIN_PASSWORD"
 fi
 
-if [ -n "$OS_ADMIN_PASSWORD" ]; then
-    printf 'shopadmin:%s\n' "$OS_ADMIN_PASSWORD" | chpasswd
-fi
+# Local Linux credentials are intentionally outside shopos.env. The tty1
+# first-login wizard is their single owner, avoiding races and stale passwords.
 
 if [ -n "$CF_TUNNEL_TOKEN" ]; then
     install -d -m 0750 "$config_dir"
