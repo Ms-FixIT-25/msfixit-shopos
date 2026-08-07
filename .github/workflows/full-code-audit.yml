@@ -3,7 +3,7 @@ name: Full ShopOS code audit
 on:
   pull_request:
     branches:
-      - fix/first-login-display-stability
+      - fix/full-audit-product-defects
     paths-ignore:
       - '**/*.md'
   workflow_dispatch:
