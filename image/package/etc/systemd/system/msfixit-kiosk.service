@@ -1,7 +1,7 @@
 [Unit]
 Description=Ms. FixIT ShopOS local graphical interface
-After=network-online.target nginx.service msfixit-brand-shop.service msfixit-first-login.service
-Wants=network-online.target msfixit-first-login.service
+After=local-fs.target nginx.service msfixit-brand-shop.service msfixit-first-login.service
+Wants=nginx.service msfixit-brand-shop.service msfixit-first-login.service
 ConditionPathExists=/usr/bin/chromium
 
 [Service]
