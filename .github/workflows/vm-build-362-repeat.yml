@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - .github/workflows/vm-build-362-repeat.yml
+      - tests/prepare-qemu-image.sh
   workflow_dispatch:
 
 permissions:
@@ -54,6 +55,7 @@ jobs:
           sudo env "PATH=$PATH" qemu-system-aarch64 --version | tee vm-sudo-qemu-version.txt
           grep -Fq '9.2.4' vm-sudo-qemu-version.txt
           bash -n tests/prepare-qemu-image.sh
+          bash tests/prepare-qemu-image.sh --self-test
           bash tests/run-qemu-smoke.sh --self-test
           bash tests/normalize-qemu-sd-size.sh --self-test
 
