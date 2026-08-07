@@ -38,7 +38,6 @@ jobs:
           bash -n image/package/usr/local/sbin/msfixit-first-login-init
           bash -n image/package/usr/local/sbin/msfixit-wifi-connect
           bash -n image/package/usr/local/sbin/msfixit-apply-resource-budget
-          bash -n image/package/usr/local/sbin/msfixit-thermal-check
 
       - name: Validate Update Center
         run: |
@@ -103,7 +102,8 @@ jobs:
           test -s docs/INSTALL_IMAGE.md
           test -s image/package/etc/systemd/system/msfixit-kiosk.service
           test -s image/package/usr/local/sbin/msfixit-wifi-connect
-          test -s image/package/usr/local/sbin/msfixit-thermal-check
+          test -s image/package/etc/systemd/system/msfixit-hardware-manager.service
+          test -s image/package/usr/lib/msfixit-shopos/hardware_manager/thermal.py
           test -s scripts/install-qemu-raspi4.sh
           test -s tests/normalize-qemu-sd-size.sh
           echo 'PASS: combined ShopOS platform and release-gate contracts are valid.'
