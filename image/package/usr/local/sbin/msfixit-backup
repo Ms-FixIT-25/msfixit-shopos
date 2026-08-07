@@ -5,7 +5,7 @@ umask 077
 backup_root=/data/backups
 stamp="$(date +%Y%m%d-%H%M%S)"
 workdir="${backup_root}/.${stamp}.tmp"
-archive="${backup_root}/shopos-${stamp}.tar.gz"
+archive="${backup_root}/shopos-${stamp}.tar.zst"
 
 install -d -m 0700 "$backup_root" "$workdir"
 trap 'rm -rf "$workdir"' EXIT
@@ -34,9 +34,6 @@ if [ -d /data/partners ]; then
     tar -C /data -czf "${workdir}/partner-evidence.tar.gz" partners
 fi
 
-# Import history and supplier payloads are already preserved in shopos_catalog.
-# Keep only compact human review reports in the normal backup, not every raw
-# wholesaler feed archive.
 if [ -d /data/suppliers/also/reports ]; then
     tar -C /data/suppliers/also -czf "${workdir}/also-reports.tar.gz" reports
 fi
@@ -49,9 +46,9 @@ if [ -d /etc/msfixit-shopos ]; then
     tar -C /etc -czf "${workdir}/shopos-config.tar.gz" msfixit-shopos
 fi
 
-tar -C "$workdir" -czf "$archive" .
+tar -C "$workdir" --zstd -cf "$archive" .
 sha256sum "$archive" > "${archive}.sha256"
 
 find "$backup_root" -maxdepth 1 -type f \
-    \( -name 'shopos-*.tar.gz' -o -name 'shopos-*.tar.gz.sha256' \) \
+    \( -name 'shopos-*.tar.zst' -o -name 'shopos-*.tar.zst.sha256' \) \
     -mtime +14 -delete
