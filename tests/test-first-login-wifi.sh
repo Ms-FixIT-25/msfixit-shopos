@@ -87,8 +87,9 @@ grep -Fq 'TimeoutStartSec=infinity' "$first_login_service"
 
 # ShopOS is a local appliance first. Losing Wi-Fi or Ethernet must not block
 # first-boot provisioning, branding, Nginx or the Chromium control center.
+grep -Fq 'Requires=msfixit-brand-shop.service' "$kiosk_service"
 grep -Fq 'After=local-fs.target nginx.service msfixit-brand-shop.service msfixit-first-login.service' "$kiosk_service"
-grep -Fq 'Wants=nginx.service msfixit-brand-shop.service msfixit-first-login.service' "$kiosk_service"
+grep -Fq 'Wants=nginx.service msfixit-first-login.service' "$kiosk_service"
 if grep -Fq 'network-online.target' "$kiosk_service" "$firstboot_service" "$brand_service"; then
     echo 'Local ShopOS provisioning and kiosk must not depend on network-online.target.' >&2
     exit 1
@@ -132,4 +133,4 @@ if grep -Eq 'One-time password|chage -d 0|/dev/urandom' "$init"; then
     exit 1
 fi
 
-printf 'PASS: first-login waits for real Wi-Fi hardware, keeps tty1 stable and always hands an offline-capable appliance to the kiosk.\n'
+printf 'PASS: first-login waits for real Wi-Fi hardware, keeps tty1 stable and always hands an offline-capable appliance to a successfully provisioned kiosk.\n'
