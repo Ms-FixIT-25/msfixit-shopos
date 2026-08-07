@@ -7,12 +7,17 @@ on:
       - .github/workflows/resolve-woocommerce-checksum.yml
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   checksum:
     runs-on: ubuntu-24.04
     steps:
+      - name: Check out checksum branch
+        uses: actions/checkout@v7
+        with:
+          ref: fix/full-audit-product-defects
+
       - name: Download official pinned WooCommerce package
         shell: bash
         run: |
@@ -20,5 +25,16 @@ jobs:
           url='https://downloads.wordpress.org/plugin/woocommerce.10.9.4.zip'
           curl --fail --location --retry 5 --retry-all-errors "$url" --output woocommerce-10.9.4.zip
           unzip -tq woocommerce-10.9.4.zip >/dev/null
-          printf 'WOOCOMMERCE_SHA256='
-          sha256sum woocommerce-10.9.4.zip | awk '{print $1}'
+          digest="$(sha256sum woocommerce-10.9.4.zip | awk '{print $1}')"
+          printf 'WOOCOMMERCE_SHA256=%s\n' "$digest" | tee .woocommerce-10.9.4.sha256.env
+
+      - name: Commit resolved checksum for review
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .woocommerce-10.9.4.sha256.env
+          git diff --cached --quiet && exit 0
+          git commit -m 'ci: record official WooCommerce 10.9.4 checksum'
+          git push origin HEAD:fix/full-audit-product-defects
