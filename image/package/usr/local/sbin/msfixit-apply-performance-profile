@@ -15,17 +15,36 @@ fi
 install -d -m 0750 "$config_dir"
 install -d -m 0755 "$runtime_dir"
 if [ ! -f "$config_file" ] && [ -f "$example_file" ]; then
-    install -m 0644 "$example_file" "$config_file"
+    install -m 0644 -o root -g root "$example_file" "$config_file"
 fi
 
 SHOPOS_PERFORMANCE_PROFILE=balanced
 SHOPOS_CPU_GOVERNOR=auto
 SHOPOS_WIFI_POLICY=auto
 SHOPOS_BLUETOOTH_POLICY=auto
-if [ -r "$config_file" ]; then
-    # shellcheck disable=SC1090
-    source "$config_file"
-fi
+
+read_profile_config() {
+    local file="$1" line key value
+    [ -r "$file" ] || return 0
+
+    while IFS= read -r line || [ -n "$line" ]; do
+        line="${line%$'\r'}"
+        [[ -z "$line" || "$line" == \#* || "$line" != *=* ]] && continue
+        key="${line%%=*}"
+        value="${line#*=}"
+        value="${value#\"}"
+        value="${value%\"}"
+        value="${value#\'}"
+        value="${value%\'}"
+
+        case "$key" in
+            SHOPOS_PERFORMANCE_PROFILE|SHOPOS_CPU_GOVERNOR|SHOPOS_WIFI_POLICY|SHOPOS_BLUETOOTH_POLICY)
+                printf -v "$key" '%s' "$value"
+                ;;
+        esac
+    done < "$file"
+}
+read_profile_config "$config_file"
 
 case "$SHOPOS_PERFORMANCE_PROFILE" in
     efficiency|balanced|performance) ;;
@@ -34,6 +53,23 @@ case "$SHOPOS_PERFORMANCE_PROFILE" in
         exit 2
         ;;
 esac
+case "$SHOPOS_CPU_GOVERNOR" in
+    auto|schedutil|ondemand|conservative|powersave|performance) ;;
+    *)
+        echo "Invalid SHOPOS_CPU_GOVERNOR: $SHOPOS_CPU_GOVERNOR" >&2
+        exit 2
+        ;;
+esac
+for policy_name in SHOPOS_WIFI_POLICY SHOPOS_BLUETOOTH_POLICY; do
+    policy_value="${!policy_name}"
+    case "$policy_value" in
+        auto|enabled|disabled) ;;
+        *)
+            echo "Invalid ${policy_name}: ${policy_value}" >&2
+            exit 2
+            ;;
+    esac
+done
 
 mem_kib="$(awk '/^MemTotal:/ {print $2}' /proc/meminfo)"
 [[ "$mem_kib" =~ ^[0-9]+$ ]] || {
@@ -42,8 +78,8 @@ mem_kib="$(awk '/^MemTotal:/ {print $2}' /proc/meminfo)"
 }
 mem_mib=$((mem_kib / 1024))
 
-case "$SHOPOS_PERFORMANCE_PROFILE:$mem_mib" in
-    efficiency:*)
+case "$SHOPOS_PERFORMANCE_PROFILE" in
+    efficiency)
         mariadb_pool=128M
         mariadb_connections=24
         redis_memory=96mb
@@ -51,7 +87,7 @@ case "$SHOPOS_PERFORMANCE_PROFILE:$mem_mib" in
         kiosk_high=512M
         kiosk_max=704M
         ;;
-    balanced:[0-9]* )
+    balanced)
         if (( mem_mib < 3000 )); then
             mariadb_pool=160M; mariadb_connections=32; redis_memory=128mb; php_children=6; kiosk_high=576M; kiosk_max=768M
         elif (( mem_mib < 6000 )); then
@@ -60,7 +96,7 @@ case "$SHOPOS_PERFORMANCE_PROFILE:$mem_mib" in
             mariadb_pool=384M; mariadb_connections=64; redis_memory=192mb; php_children=10; kiosk_high=896M; kiosk_max=1280M
         fi
         ;;
-    performance:*)
+    performance)
         if (( mem_mib < 3000 )); then
             mariadb_pool=192M; mariadb_connections=40; redis_memory=160mb; php_children=8; kiosk_high=640M; kiosk_max=896M
         elif (( mem_mib < 6000 )); then
@@ -112,11 +148,11 @@ MemoryHigh=${kiosk_high}
 MemoryMax=${kiosk_max}
 EOF_KIOSK
 
-requested_governor="$SHOPOS_CPU_GOVERNOR"
+applied_governor=unchanged
 for policy in /sys/devices/system/cpu/cpufreq/policy*; do
     [ -d "$policy" ] || continue
     available="$(cat "$policy/scaling_available_governors" 2>/dev/null || true)"
-    governor="$requested_governor"
+    governor="$SHOPOS_CPU_GOVERNOR"
     if [ "$governor" = auto ]; then
         if grep -qw schedutil <<< "$available"; then
             governor=schedutil
@@ -126,8 +162,20 @@ for policy in /sys/devices/system/cpu/cpufreq/policy*; do
     fi
     if [ -n "$governor" ] && grep -qw "$governor" <<< "$available"; then
         printf '%s\n' "$governor" > "$policy/scaling_governor" 2>/dev/null || true
+        applied_governor="$governor"
     fi
 done
+
+apply_radio_policy() {
+    local radio="$1" policy="$2"
+    command -v rfkill >/dev/null 2>&1 || return 0
+    case "$policy" in
+        enabled) rfkill unblock "$radio" 2>/dev/null || true ;;
+        disabled) rfkill block "$radio" 2>/dev/null || true ;;
+    esac
+}
+apply_radio_policy wifi "$SHOPOS_WIFI_POLICY"
+apply_radio_policy bluetooth "$SHOPOS_BLUETOOTH_POLICY"
 
 systemctl daemon-reload
 systemctl enable fstrim.timer >/dev/null 2>&1 || true
@@ -141,8 +189,11 @@ redis_memory=${redis_memory}
 php_children=${php_children}
 kiosk_memory_high=${kiosk_high}
 kiosk_memory_max=${kiosk_max}
+cpu_governor=${applied_governor}
+wifi_policy=${SHOPOS_WIFI_POLICY}
+bluetooth_policy=${SHOPOS_BLUETOOTH_POLICY}
 EOF_STATE
 chmod 0644 "$state_file"
 
 logger -p daemon.info -t msfixit-performance \
-    "Applied ${SHOPOS_PERFORMANCE_PROFILE} profile for ${mem_mib} MiB RAM."
+    "Applied ${SHOPOS_PERFORMANCE_PROFILE} profile for ${mem_mib} MiB RAM with CPU governor ${applied_governor}."
