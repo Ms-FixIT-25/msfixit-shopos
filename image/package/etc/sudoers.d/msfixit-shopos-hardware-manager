@@ -1,2 +1,2 @@
-Defaults:www-data !authenticate
-www-data ALL=(root) NOPASSWD: /usr/local/sbin/msfixit-hardware-action *
+Defaults:shopos-hwmon !authenticate
+shopos-hwmon ALL=(root) NOPASSWD: /usr/local/sbin/msfixit-hardware-action *
