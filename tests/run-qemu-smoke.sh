@@ -114,10 +114,6 @@ test -n "$boot_uuid"
 test -n "$root_uuid"
 printf 'Boot filesystem UUID: %s\nRoot filesystem UUID: %s\n' "$boot_uuid" "$root_uuid" | tee "$output_dir/partition-identifiers.txt"
 
-# The production image intentionally mounts partitions through Raspberry Pi
-# storage-slot aliases. QEMU presents the disposable image as an emulated SD
-# card and does not create /dev/disk/by-slot/boot. Rewrite only the disposable
-# test copy to stable filesystem UUID sources so systemd can reach local-fs.target.
 cp /mnt/shopos-root/etc/fstab "$output_dir/fstab.before"
 rewrite_fstab_for_vm /mnt/shopos-root/etc/fstab "$boot_uuid" "$root_uuid"
 cp /mnt/shopos-root/etc/fstab "$output_dir/fstab.after"
@@ -260,20 +256,13 @@ cleanup_mounts
 loop=''
 trap - EXIT
 
-# QEMU exposes the PL011 at fe201000 as ttyAMA1 with this Raspberry Pi 4 DTB.
-# Using ttyAMA0 leaves the kernel without a usable /dev/console, so the
-# initramfs shell exits with code 2 while redirecting run-init and PID 1 panics.
 kernel_cmdline="earlycon=pl011,0xfe201000,115200 console=tty0 console=ttyAMA1,115200 root=UUID=${root_uuid} rootfstype=ext4 rootwait rw fsck.repair=yes loglevel=5 systemd.show_status=1 plymouth.enable=0 panic=5"
 printf '%s\n' "$kernel_cmdline" | tee "$output_dir/kernel-command-line.txt"
 
-# Prefer native ARM virtualization when the hosted runner exposes KVM. QEMU
-# automatically falls back to multi-threaded TCG when KVM cannot initialize.
-# The image is a disposable, checksummed test copy, so unsafe write caching is
-# acceptable here and substantially reduces database-heavy first-boot I/O.
 qemu_args=(
     -machine raspi4b
     -accel kvm
-    -accel tcg,thread=multi
+    -accel 'tcg,thread=multi'
     -kernel "$output_dir/kernel8.img"
     -dtb "$output_dir/bcm2711-rpi-4-b.dtb"
     -initrd "$initrd"
