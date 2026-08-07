@@ -1,0 +1,11 @@
+[Unit]
+Description=Refresh active ShopOS Raspberry Pi performance limits
+After=multi-user.target msfixit-resource-budget.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/msfixit-finalize-resource-budget
+Nice=10
+IOSchedulingClass=idle
+CPUWeight=10
+IOWeight=10
