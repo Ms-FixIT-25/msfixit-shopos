@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+readonly INBOX=/var/lib/msfixit-shopos/app-inbox
+readonly APPS=/var/lib/msfixit-shopos/apps
+readonly AUDIT=/var/log/msfixit-shopos/app-install.jsonl
+readonly KEY=/etc/msfixit-shopos/keys/app-signing-public.pem
+readonly INSTALLER=/usr/lib/msfixit-shopos/shopos-app-install.py
+readonly ID_RE='^[a-z0-9]+([.-][a-z0-9]+)+$'
+
+fail() { printf 'ERROR: %s\n' "$1" >&2; exit 2; }
+
+[[ $# -eq 2 ]] || fail 'usage: msfixit-app-install-helper install APP_ID'
+[[ $1 == install ]] || fail 'unsupported operation'
+app_id=$2
+[[ $app_id =~ $ID_RE ]] || fail 'invalid app id'
+[[ $app_id == at.msfixit.shopos.* ]] || fail 'app id outside ShopOS namespace'
+
+package="$INBOX/$app_id.shopos"
+[[ -f $package && ! -L $package ]] || fail 'package not found'
+[[ -r $KEY && -f $INSTALLER ]] || fail 'installer trust material unavailable'
+
+owner_uid=$(stat -c '%u' "$package")
+mode=$(stat -c '%a' "$package")
+[[ $owner_uid -eq 0 || $owner_uid -eq 33 ]] || fail 'unexpected package owner'
+[[ $mode != *2 && $mode != *3 && $mode != *6 && $mode != *7 ]] || fail 'package must not be group/world writable'
+
+exec /usr/bin/python3 "$INSTALLER" "$package" \
+  --public-key "$KEY" \
+  --root "$APPS" \
+  --audit "$AUDIT"
