@@ -9,6 +9,7 @@ ConditionPathExists=!/var/lib/msfixit-shopos/first-setup-complete
 Type=oneshot
 ExecStartPre=/usr/local/sbin/msfixit-display-keepawake /dev/tty1
 ExecStart=/usr/local/sbin/msfixit-first-login-init
+ExecStartPost=/bin/systemctl --no-block start msfixit-kiosk.service
 StandardInput=tty-force
 StandardOutput=tty
 StandardError=tty
