@@ -1,0 +1,1 @@
+Editing /etc/msfixit-shopos/performance.env triggers a one-shot reapplication of the selected profile. Service restarts remain controlled by the resource-budget finalizer.
