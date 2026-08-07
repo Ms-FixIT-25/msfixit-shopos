@@ -8,9 +8,9 @@ install -d -m 0755 /run/msfixit-shopos
 install -d -m 0755 /srv/www
 install -d -m 0755 /etc/nftables.d
 install -d -m 0755 /etc/plymouth
-chmod 0755 /usr/local/sbin/msfixit-update /usr/local/sbin/msfixit-update-agent /usr/local/sbin/msfixit-update-center /usr/local/sbin/msfixit-slot-writer /usr/local/sbin/msfixit-update-boot-sync /usr/local/sbin/msfixit-boot-selector /usr/local/sbin/msfixit-kiosk-session /usr/local/sbin/msfixit-display-keepawake /usr/local/sbin/msfixit-apply-resource-budget /usr/local/sbin/msfixit-finalize-resource-budget /usr/local/sbin/msfixit-thermal-check
+chmod 0755 /usr/local/sbin/msfixit-update /usr/local/sbin/msfixit-update-agent /usr/local/sbin/msfixit-update-center /usr/local/sbin/msfixit-slot-writer /usr/local/sbin/msfixit-update-boot-sync /usr/local/sbin/msfixit-boot-selector /usr/local/sbin/msfixit-kiosk-session /usr/local/sbin/msfixit-display-keepawake /usr/local/sbin/msfixit-apply-resource-budget /usr/local/sbin/msfixit-finalize-resource-budget /usr/local/sbin/msfixit-hardware-manager /usr/local/sbin/msfixit-hardware-action /usr/local/sbin/msfixit-cloudflared-run
 chmod 0640 /etc/msfixit-shopos/update-slots.json /etc/msfixit-shopos/update-source.json
-chmod 0440 /etc/sudoers.d/msfixit-shopos-update-center
+chmod 0440 /etc/sudoers.d/msfixit-shopos-update-center /etc/sudoers.d/msfixit-shopos-hardware-manager
 
 if ! getent passwd shopos-kiosk >/dev/null 2>&1; then
     useradd --system --home-dir /var/lib/msfixit-shopos/kiosk --create-home --shell /usr/sbin/nologin shopos-kiosk
@@ -19,6 +19,14 @@ for group in video render input; do
     getent group "$group" >/dev/null 2>&1 && usermod -a -G "$group" shopos-kiosk || true
 done
 install -d -o shopos-kiosk -g shopos-kiosk -m 0700 /var/lib/msfixit-shopos/kiosk
+
+if ! getent group shopos-hwmon >/dev/null 2>&1; then
+    groupadd --system shopos-hwmon
+fi
+if ! getent passwd shopos-hwmon >/dev/null 2>&1; then
+    useradd --system --gid shopos-hwmon --home-dir /var/lib/msfixit-shopos/hardware-manager --no-create-home --shell /usr/sbin/nologin shopos-hwmon
+fi
+install -d -o shopos-hwmon -g shopos-hwmon -m 0750 /var/lib/msfixit-shopos/hardware-manager
 
 /usr/local/sbin/msfixit-apply-resource-budget
 
@@ -52,9 +60,6 @@ EOF_PLYMOUTH
 for cmdline in /boot/firmware/cmdline.txt /boot/cmdline.txt; do
     [ -f "$cmdline" ] || continue
     current="$(cat "$cmdline")"
-    # Remove any inherited timeout before appending ShopOS' explicit no-blank
-    # policy. The final command line stays on one normalized line as required by
-    # Raspberry Pi firmware.
     current="$(printf '%s\n' "$current" | sed -E 's/(^|[[:space:]])consoleblank=[^[:space:]]+//g; s/[[:space:]]+/ /g; s/^ //; s/ $//')"
     for parameter in quiet splash loglevel=3 systemd.show_status=auto rd.udev.log_level=3 vt.global_cursor_default=0 logo.nologo consoleblank=0; do
         case " $current " in
@@ -79,9 +84,6 @@ for unit in /lib/systemd/system/php*-fpm.service; do
     systemctl disable "$(basename "$unit")" 2>/dev/null || true
 done
 
-# NetworkManager is part of the appliance contract, not an accidental property
-# of the Raspberry Pi base image. Enable it early; first-login will still wait
-# for the actual Wi-Fi device before scanning.
 systemctl enable NetworkManager.service 2>/dev/null || true
 systemctl enable nftables.service 2>/dev/null || true
 systemctl enable msfixit-update-boot-sync.service 2>/dev/null || true
@@ -93,7 +95,7 @@ systemctl enable msfixit-first-login.service 2>/dev/null || true
 systemctl enable msfixit-boot-console.service 2>/dev/null || true
 systemctl enable msfixit-kiosk.service 2>/dev/null || true
 systemctl enable msfixit-resource-budget.service 2>/dev/null || true
-systemctl enable msfixit-thermal-check.timer 2>/dev/null || true
+systemctl enable msfixit-hardware-manager.service 2>/dev/null || true
 systemctl set-default graphical.target 2>/dev/null || true
 
 exit 0
