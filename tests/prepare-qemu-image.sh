@@ -25,11 +25,9 @@ install -d -m 0755 "$mount_dir/var/lib/systemd"
 head -c 512 /dev/urandom > "$mount_dir/var/lib/systemd/random-seed"
 chmod 0600 "$mount_dir/var/lib/systemd/random-seed"
 
-# QEMU's raspi4b model has no emulated Ethernet controller. The real image
-# correctly waits for network-online on physical hardware, but the acceptance
-# guest should provision from its bundled offline payload without pointless
-# wait-online delays. A documentation-only TEST-NET address on loopback also
-# lets first boot determine a local address immediately.
+# QEMU's raspi4b model has no emulated Ethernet controller. Provision the
+# disposable guest from the bundled offline payload. A documentation-only
+# TEST-NET address on loopback lets first boot determine a local address.
 install -d -m 0755 \
     "$mount_dir/etc/systemd/system/msfixit-firstboot.service.d" \
     "$mount_dir/etc/systemd/system/msfixit-brand-shop.service.d"
@@ -58,15 +56,15 @@ Restart=no
 TimeoutStartSec=15min
 EOF_BRAND
 
-# The appliance boot console and Chromium kiosk are physical-display features.
-# Running Chromium under headless TCG would add heavy emulation load without
-# validating pixels or input. Their package and systemd contracts are covered
-# separately; mask both only in this disposable acceptance image.
+# The interactive tty wizard, boot console and Chromium kiosk are physical
+# display/input features. Headless QEMU has no human to answer tty1 prompts and
+# no pixel/input validation, so mask them only in this disposable acceptance
+# copy. Their product contracts are covered by dedicated tests and real-Pi QA.
+ln -sf /dev/null "$mount_dir/etc/systemd/system/msfixit-first-login.service"
 ln -sf /dev/null "$mount_dir/etc/systemd/system/msfixit-boot-console.service"
 ln -sf /dev/null "$mount_dir/etc/systemd/system/msfixit-kiosk.service"
 
 # Keep a runaway driver or service from generating multi-gigabyte evidence.
-# Preserve the bounded journal on disk so it can be inspected after QEMU exits.
 install -d -m 0755 "$mount_dir/etc/systemd/journald.conf.d" "$mount_dir/var/log/journal"
 cat > "$mount_dir/etc/systemd/journald.conf.d/10-qemu-bounded.conf" <<'EOF_JOURNAL'
 [Journal]
@@ -82,4 +80,4 @@ ForwardToConsole=no
 EOF_JOURNAL
 
 sync
-printf 'Prepared QEMU guest with random seed, offline ordering, masked display services and bounded diagnostics.\n'
+printf 'Prepared QEMU guest with random seed, offline provisioning, masked physical UI and bounded diagnostics.\n'
