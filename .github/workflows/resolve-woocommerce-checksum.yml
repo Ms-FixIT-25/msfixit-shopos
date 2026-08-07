@@ -1,0 +1,24 @@
+name: Resolve WooCommerce checksum
+
+on:
+  push:
+    branches: [fix/full-audit-product-defects]
+    paths:
+      - .github/workflows/resolve-woocommerce-checksum.yml
+
+permissions:
+  contents: read
+
+jobs:
+  checksum:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Download official pinned WooCommerce package
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          url='https://downloads.wordpress.org/plugin/woocommerce.10.9.4.zip'
+          curl --fail --location --retry 5 --retry-all-errors "$url" --output woocommerce-10.9.4.zip
+          unzip -tq woocommerce-10.9.4.zip >/dev/null
+          printf 'WOOCOMMERCE_SHA256='
+          sha256sum woocommerce-10.9.4.zip | awk '{print $1}'
