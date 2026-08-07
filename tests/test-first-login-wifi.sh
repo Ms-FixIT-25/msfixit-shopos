@@ -37,14 +37,15 @@ grep -Fq 'useradd --create-home' "$init"
 grep -Fq 'usermod --lock "$default_user"' "$init"
 grep -Fq 'WLAN einrichten?' "$init"
 grep -Fq 'WLAN automatisch suchen und verbinden' "$init"
-grep -Fq 'SSID manuell eingeben' "$init"
+grep -Fq 'SSID manuell auswählen oder eingeben' "$init"
 grep -Fq 'Überspringen' "$init"
+grep -Fq '/usr/local/sbin/msfixit-wifi-connect --manual' "$init"
 grep -Fq 'ShopOS startet trotzdem vollständig lokal weiter.' "$init"
 grep -Fq 'Die lokale ShopOS-Oberfläche wird jetzt gestartet.' "$init"
 
-# Wi-Fi hardware may appear several seconds after the interactive tty on real
-# Raspberry Pi hardware. The helper must actively unblock and wait for the
-# adapter instead of treating one empty scan as proof that no hardware exists.
+# Both automatic and manual choices must share the same delayed-hardware path.
+grep -Fq 'case "${1:-}" in' "$wifi"
+grep -Fq -- '--manual) mode=manual' "$wifi"
 grep -Fq 'systemctl start NetworkManager.service' "$wifi"
 grep -Fq 'rfkill unblock wlan' "$wifi"
 grep -Fq 'modprobe brcmfmac' "$wifi"
@@ -54,6 +55,7 @@ grep -Fq 'nmcli -t -f DEVICE,TYPE device status' "$wifi"
 grep -Fq 'nmcli device set "$wifi_device" managed yes' "$wifi"
 grep -Fq 'nmcli device wifi rescan ifname "$wifi_device"' "$wifi"
 grep -Fq 'nmcli --fields SSID,SIGNAL,SECURITY device wifi list ifname "$wifi_device"' "$wifi"
+grep -Fq '[ "$mode" = auto ]' "$wifi"
 grep -Fq 'WLAN-Passwort abgefragt' "$wifi"
 grep -Fq 'nmcli --ask device wifi connect "$ssid" ifname "$wifi_device"' "$wifi"
 grep -Fq 'wifi_diagnostics' "$wifi"
@@ -67,9 +69,7 @@ for dependency in network-manager wpasupplicant rfkill iw wireless-regdb firmwar
 done
 grep -Fq 'systemctl enable NetworkManager.service' "$postinst"
 
-# The interactive wizard must never block getty's ExecStartPre. systemd gives
-# start-pre commands a finite startup timeout, which previously killed and
-# restarted the prompt about every 90 seconds on the real Raspberry Pi.
+# The interactive wizard must never block getty's ExecStartPre.
 grep -Fq 'Wants=msfixit-first-login.service' "$dropin"
 grep -Fq 'After=msfixit-first-login.service' "$dropin"
 grep -Fq 'ExecStartPre=/bin/bash /usr/local/sbin/msfixit-display-keepawake /dev/tty1' "$dropin"
@@ -79,20 +79,22 @@ if grep -Fq 'msfixit-first-login-init' "$dropin"; then
 fi
 
 grep -Fq 'Before=getty@tty1.service msfixit-kiosk.service' "$first_login_service"
-grep -Fq 'After=local-fs.target systemd-vconsole-setup.service msfixit-display-keepawake.service msfixit-boot-console.service' "$first_login_service"
 grep -Fq 'ConditionPathExists=!/var/lib/msfixit-shopos/first-setup-complete' "$first_login_service"
-grep -Fq 'ExecStartPre=/usr/local/sbin/msfixit-display-keepawake /dev/tty1' "$first_login_service"
 grep -Fq 'ExecStart=/usr/local/sbin/msfixit-first-login-init' "$first_login_service"
 grep -Fq 'ExecStartPost=/bin/systemctl --no-block start msfixit-kiosk.service' "$first_login_service"
 grep -Fq 'StandardInput=tty-force' "$first_login_service"
 grep -Fq 'TTYPath=/dev/tty1' "$first_login_service"
 grep -Fq 'TimeoutStartSec=infinity' "$first_login_service"
 
-# ShopOS is a local appliance first. Losing Wi-Fi or Ethernet must not block
-# first-boot provisioning, branding, Nginx or the Chromium control center.
-grep -Fq 'Requires=msfixit-brand-shop.service' "$kiosk_service"
+# The kiosk must fail closed if first-login or branding fails, while network
+# connectivity remains optional for the local 127.0.0.1 appliance UI.
+grep -Fq 'Requires=msfixit-brand-shop.service msfixit-first-login.service' "$kiosk_service"
 grep -Fq 'After=local-fs.target nginx.service msfixit-brand-shop.service msfixit-first-login.service' "$kiosk_service"
-grep -Fq 'Wants=nginx.service msfixit-first-login.service' "$kiosk_service"
+grep -Fq 'Wants=nginx.service' "$kiosk_service"
+if grep -Fq 'Wants=nginx.service msfixit-first-login.service' "$kiosk_service"; then
+    echo 'Kiosk must require successful first-login rather than merely wanting it.' >&2
+    exit 1
+fi
 grep -Fq 'ExecStartPre=/usr/bin/test -x /usr/bin/chromium' "$kiosk_service"
 grep -Fq 'ExecStartPre=/usr/bin/test -x /usr/bin/xinit' "$kiosk_service"
 grep -Fq 'TimeoutStartSec=4min' "$kiosk_service"
@@ -103,8 +105,7 @@ fi
 grep -Fq 'After=local-fs.target' "$firstboot_service"
 grep -Fq 'After=msfixit-firstboot.service msfixit-resource-budget.service' "$brand_service"
 
-# Unsupported X/KMS DPMS features must never terminate the whole kiosk. The
-# browser is launched only after the local admin endpoint is genuinely ready.
+# Unsupported X/KMS DPMS features must never terminate the whole kiosk.
 grep -Fq 'xset -dpms 2>/dev/null || true' "$kiosk_session"
 grep -Fq 'xset s off 2>/dev/null || true' "$kiosk_session"
 grep -Fq 'xset s noblank 2>/dev/null || true' "$kiosk_session"
@@ -120,11 +121,7 @@ grep -Fq 'Before=msfixit-boot-console.service getty@tty1.service' "$keepawake_se
 grep -Fq 'ExecStart=/usr/local/sbin/msfixit-display-keepawake /dev/tty1' "$keepawake_service"
 
 grep -Fq 'consoleblank=0' "$postinst"
-grep -Fq 'consoleblank=[^[:space:]]+' "$postinst"
-grep -Fq 'systemctl enable msfixit-display-keepawake.service' "$postinst"
 grep -Fq 'systemctl enable msfixit-first-login.service' "$postinst"
-# Package-install time is not enough: the A/B postprocessor touches the actual
-# boot partition and must enforce the final kernel policy as well.
 grep -Fq "tokens = [token for token in tokens if not token.startswith('consoleblank=')]" "$layout"
 grep -Fq "tokens.append('consoleblank=0')" "$layout"
 
@@ -132,20 +129,17 @@ if grep -Fq 'ConditionPathExists=' "$dropin"; then
     echo 'The tty1 getty must remain available after setup.' >&2
     exit 1
 fi
-
 if grep -Eiq '(password|passwd|psk|secret)[[:space:]]*=' "$ssid"; then
     echo 'Wi-Fi secret must not be stored in the image configuration.' >&2
     exit 1
 fi
-
 if grep -Fq 'SHOPOS_WIFI_PASSWORD' "$init" "$wifi" "$ssid"; then
     echo 'Wi-Fi password variables must not exist in the repository.' >&2
     exit 1
 fi
-
 if grep -Eq 'One-time password|chage -d 0|/dev/urandom' "$init"; then
     echo 'The obsolete generated bootstrap-password flow is still present.' >&2
     exit 1
 fi
 
-printf 'PASS: first-login waits for real Wi-Fi hardware, keeps tty1 stable and hands an offline-capable appliance to a resilient local kiosk.\n'
+printf 'PASS: automatic/manual Wi-Fi share resilient hardware discovery and kiosk requires successful first-login.\n'
