@@ -3,11 +3,12 @@ Description=Ms. FixIT ShopOS Cloudflare Tunnel
 Wants=network-online.target
 After=network-online.target nginx.service
 ConditionPathExists=/etc/msfixit-shopos/cloudflared.env
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
 [Service]
 Type=simple
-EnvironmentFile=/etc/msfixit-shopos/cloudflared.env
-ExecStart=/usr/local/bin/cloudflared tunnel --no-autoupdate run --token ${CF_TUNNEL_TOKEN}
+ExecStart=/usr/local/sbin/msfixit-cloudflared-run
 Restart=always
 RestartSec=5s
 NoNewPrivileges=true
