@@ -1,0 +1,9 @@
+[Unit]
+Description=Watch ShopOS performance profile configuration
+
+[Path]
+PathChanged=/etc/msfixit-shopos/performance.env
+Unit=msfixit-performance-profile.service
+
+[Install]
+WantedBy=multi-user.target
