@@ -61,12 +61,10 @@ class HardwareManager:
         undervoltage_occurred = bool(mask & 0x10000) if mask is not None else None
         current_throttling = bool(mask & 0x4) if mask is not None else None
         throttling_occurred = bool(mask & 0x40000) if mask is not None else None
-
         if decision.changed:
             severity = "critical" if decision.level in {"critical", "emergency"} else "warning" if decision.level == "warning" else "info"
             self.store.add_event("thermal-state", severity, f"Temperaturstufe: {decision.previous_level} → {decision.level}", temperature_c=primary, reason=decision.reason)
             LOG.warning("thermal level changed %s -> %s at %s C", decision.previous_level, decision.level, primary)
-
         if mask is not None and mask != self._last_throttled_mask:
             if current_undervoltage:
                 self.store.add_event("undervoltage", "critical", "Aktuelle Raspberry-Pi-Unterspannung erkannt.", mask=hex(mask))
@@ -74,14 +72,12 @@ class HardwareManager:
             elif undervoltage_occurred and self._last_throttled_mask is None:
                 self.store.add_event("undervoltage-history", "warning", "Unterspannung ist seit diesem Start bereits aufgetreten.", mask=hex(mask))
             self._last_throttled_mask = mask
-
         if decision.shutdown_eligible:
             now = time.monotonic()
             if now - self._last_shutdown_eligible_event >= 60:
                 self._last_shutdown_eligible_event = now
                 self.store.add_event("emergency-shutdown-eligible", "critical", "Notfalltemperatur ist lang genug bestätigt; Hardware-Laborfreigabe für automatische Abschaltung fehlt noch.", temperature_c=primary, emergency_seconds=decision.emergency_seconds)
                 LOG.critical("emergency shutdown eligible after %ss at %s C; automatic poweroff intentionally blocked pending real-hardware validation", decision.emergency_seconds, primary)
-
         return ThermalSnapshot(
             sensors=sensors,
             primary_c=primary,
@@ -108,19 +104,9 @@ class HardwareManager:
             services = self.collector.services()
             recommendations = self.rules.evaluate(platform_family=self.platform.platform_family, cpu=cpu, memory=memory, thermal=thermal, storage=storage, network=network, usb=usb, services=services)
             snapshot = Snapshot(
-                timestamp=datetime.now(timezone.utc).isoformat(),
-                platform=self.platform,
-                cpu=cpu,
-                memory=memory,
-                thermal=thermal,
-                storage=storage,
-                network=network,
-                usb=usb,
-                printers=printers,
-                services=services,
-                recommendations=recommendations,
-                capabilities=self.capabilities,
-                mode=self.store.settings.mode,
+                timestamp=datetime.now(timezone.utc).isoformat(), platform=self.platform, cpu=cpu, memory=memory,
+                thermal=thermal, storage=storage, network=network, usb=usb, printers=printers, services=services,
+                recommendations=recommendations, capabilities=self.capabilities, mode=self.store.settings.mode,
             )
             now = time.monotonic()
             persist = now - self._last_persist >= self.store.settings.persist_interval_seconds
@@ -204,7 +190,7 @@ class HardwareManager:
     def start_api(self) -> threading.Thread:
         self._api = HardwareApiServer(self.socket_path, self)
         try:
-            gid = grp.getgrnam("www-data").gr_gid
+            gid = grp.getgrnam("shopos-hwapi").gr_gid
         except KeyError:
             gid = os.getgid()
         self._api.set_permissions(gid)
