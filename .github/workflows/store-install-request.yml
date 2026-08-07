@@ -1,0 +1,22 @@
+name: ShopOS Store install request
+
+on:
+  pull_request:
+    branches: [agent/shopos-app-install-helper]
+    paths:
+      - image/package/usr/share/msfixit-shopos/admin-console/public/store.php
+      - image/package/etc/sudoers.d/msfixit-shopos-app-install
+      - tests/test-shopos-store-install-request.sh
+      - .github/workflows/store-install-request.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-store-install-request:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate safe Store-to-helper handoff
+        run: bash tests/test-shopos-store-install-request.sh
