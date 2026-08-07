@@ -1,0 +1,40 @@
+name: First-login package permissions
+
+on:
+  pull_request:
+    branches:
+      - fix/full-audit-product-defects
+    paths:
+      - scripts/build-package.sh
+      - image/package/usr/local/sbin/msfixit-first-login-init
+      - image/package/etc/systemd/system/msfixit-first-login.service
+      - tests/test-shopos-first-login-package-permissions.sh
+      - .github/workflows/first-login-package-permissions.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: first-login-package-permissions-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  regression:
+    name: Verify first-login executable package contract
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out product fix
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Check shell syntax
+        run: |
+          set -Eeuo pipefail
+          bash -n scripts/build-package.sh
+          bash -n tests/test-shopos-first-login-package-permissions.sh
+
+      - name: Run first-login package regression
+        run: bash tests/test-shopos-first-login-package-permissions.sh
