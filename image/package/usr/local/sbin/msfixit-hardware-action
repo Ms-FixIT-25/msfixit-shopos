@@ -6,11 +6,12 @@ import os
 from pathlib import Path
 import re
 import secrets
+import stat
 import subprocess
 import sys
 from typing import Any
 
-TRANSACTION_DIR = Path("/var/lib/msfixit-shopos/hardware-manager/transactions")
+TRANSACTION_DIR = Path("/var/lib/msfixit-shopos-hardware-transactions")
 TXN_RE = re.compile(r"^[a-f0-9]{24}$")
 POLICY_RE = re.compile(r"^/sys/devices/system/cpu/cpufreq/policy[0-9]+/scaling_governor$")
 GOVERNORS = {"schedutil", "powersave"}
@@ -39,22 +40,30 @@ def audit(action: str, result: str, transaction_id: str = "") -> None:
 
 def ensure_transaction_dir() -> None:
     parent = TRANSACTION_DIR.parent
-    parent.mkdir(parents=True, exist_ok=True)
     try:
-        st = os.lstat(parent)
+        parent_stat = os.lstat(parent)
     except OSError as exc:
-        emit({"ok": False, "error": "state_directory_unavailable", "detail": str(exc)}, 4)
-    if not os.path.isdir(parent) or os.path.islink(parent):
-        emit({"ok": False, "error": "unsafe_state_directory"}, 4)
-    TRANSACTION_DIR.mkdir(mode=0o700, exist_ok=True)
-    os.chmod(TRANSACTION_DIR, 0o700)
-    if os.path.islink(TRANSACTION_DIR):
+        emit({"ok": False, "error": "transaction_parent_unavailable", "detail": str(exc)[:160]}, 4)
+    if not stat.S_ISDIR(parent_stat.st_mode) or stat.S_ISLNK(parent_stat.st_mode) or parent_stat.st_uid != 0:
+        emit({"ok": False, "error": "unsafe_transaction_parent"}, 4)
+
+    try:
+        current = os.lstat(TRANSACTION_DIR)
+    except FileNotFoundError:
+        os.mkdir(TRANSACTION_DIR, 0o700)
+        current = os.lstat(TRANSACTION_DIR)
+    except OSError as exc:
+        emit({"ok": False, "error": "transaction_directory_unavailable", "detail": str(exc)[:160]}, 4)
+    if not stat.S_ISDIR(current.st_mode) or stat.S_ISLNK(current.st_mode) or current.st_uid != 0:
         emit({"ok": False, "error": "unsafe_transaction_directory"}, 4)
+    os.chmod(TRANSACTION_DIR, 0o700, follow_symlinks=False)
 
 
 def atomic_json(path: Path, payload: dict[str, Any]) -> None:
     tmp = TRANSACTION_DIR / f".{path.name}.{os.getpid()}.tmp"
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
     fd = os.open(tmp, flags, 0o600)
     try:
         data = (json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True) + "\n").encode("utf-8")
@@ -91,15 +100,14 @@ def governor_policies() -> list[Path]:
 def available_governors(policy_file: Path) -> set[str]:
     possible = policy_file.parent / "scaling_available_governors"
     text = read_text(possible)
-    result = {item for item in text.split() if re.fullmatch(r"[A-Za-z0-9_-]{1,32}", item)}
-    return result
+    return {item for item in text.split() if re.fullmatch(r"[A-Za-z0-9_-]{1,32}", item)}
 
 
 def write_governor(policy_file: Path, governor: str) -> None:
-    if not POLICY_RE.fullmatch(str(policy_file)) or governor not in GOVERNORS | {"performance", "ondemand", "conservative"}:
+    rollback_governors = {"performance", "ondemand", "conservative", "schedutil", "powersave"}
+    if not POLICY_RE.fullmatch(str(policy_file)) or governor not in rollback_governors:
         raise ValueError("invalid_governor_write")
-    available = available_governors(policy_file)
-    if governor not in available:
+    if governor not in available_governors(policy_file):
         raise ValueError(f"governor_not_available:{governor}")
     with open(policy_file, "w", encoding="ascii") as handle:
         handle.write(governor + "\n")
