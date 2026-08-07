@@ -1,0 +1,12 @@
+[Unit]
+Description=Periodically collect ShopOS hardware and efficiency data
+
+[Timer]
+OnBootSec=8min
+OnUnitActiveSec=6h
+RandomizedDelaySec=20min
+AccuracySec=5min
+Persistent=false
+
+[Install]
+WantedBy=timers.target
