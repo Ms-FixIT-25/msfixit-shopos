@@ -59,40 +59,28 @@ chmod 0644 /etc/msfixit-shopos/admin-user
 printf '\nBenutzer %s wurde eingerichtet.\n\n' "$username"
 printf 'WLAN einrichten?\n'
 printf '  [A] WLAN automatisch suchen und verbinden\n'
-printf '  [M] SSID manuell eingeben\n'
+printf '  [M] SSID manuell auswählen oder eingeben\n'
 printf '  [S] Überspringen\n'
 read -r -p 'Auswahl [A/M/S]: ' wifi_choice
 wifi_choice="${wifi_choice:-A}"
 
 case "${wifi_choice,,}" in
     a)
-        if command -v nmcli >/dev/null 2>&1; then
-            if /usr/local/sbin/msfixit-wifi-connect; then
-                printf 'WLAN wurde erfolgreich verbunden.\n'
-            else
-                printf '\nWLAN konnte noch nicht verbunden werden.\n'
-                printf 'ShopOS startet trotzdem vollständig lokal weiter.\n'
-                printf 'Später erneut versuchen: sudo msfixit-wifi-connect\n'
-            fi
+        if /usr/local/sbin/msfixit-wifi-connect; then
+            printf 'WLAN wurde erfolgreich verbunden.\n'
         else
-            printf '\nNetworkManager ist nicht verfügbar.\n'
+            printf '\nWLAN konnte noch nicht verbunden werden.\n'
             printf 'ShopOS startet trotzdem vollständig lokal weiter.\n'
-            printf 'Nach der Diagnose kann WLAN später erneut eingerichtet werden.\n'
+            printf 'Später erneut versuchen: sudo msfixit-wifi-connect\n'
         fi
         ;;
     m)
-        if command -v nmcli >/dev/null 2>&1; then
-            nmcli radio wifi on
-            printf 'WLAN-Netze werden gesucht ...\n'
-            nmcli device wifi rescan >/dev/null 2>&1 || true
-            sleep 2
-            nmcli --fields SSID,SIGNAL,SECURITY device wifi list || true
-            read -r -p 'SSID: ' manual_ssid
-            if [ -n "$manual_ssid" ]; then
-                nmcli --ask device wifi connect "$manual_ssid" || printf 'WLAN konnte nicht verbunden werden. ShopOS startet lokal weiter.\n'
-            fi
+        if /usr/local/sbin/msfixit-wifi-connect --manual; then
+            printf 'WLAN wurde erfolgreich verbunden.\n'
         else
-            printf 'NetworkManager ist nicht verfügbar. WLAN wird vorerst übersprungen; ShopOS startet lokal weiter.\n'
+            printf '\nWLAN konnte noch nicht verbunden werden.\n'
+            printf 'ShopOS startet trotzdem vollständig lokal weiter.\n'
+            printf 'Später erneut versuchen: sudo msfixit-wifi-connect --manual\n'
         fi
         ;;
     s)
