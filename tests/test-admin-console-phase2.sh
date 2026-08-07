@@ -21,9 +21,15 @@ assert_contains() {
 
 assert_contains "authenticated() && isset(\$_POST['action'])" "$app"
 assert_contains "hash_equals(csrfToken(), \$token)" "$app"
-assert_contains "sudo -n /usr/local/sbin/msfixit-admin-action" "$app"
+assert_contains "\$argv = ['sudo', '-n', '/usr/local/sbin/msfixit-admin-action', \$action];" "$app"
+assert_contains "return runCommand(\$argv," "$app"
 assert_contains "array_slice(\$lines, -200)" "$app"
 assert_contains "latest_backup" "$app"
+
+if grep -Fq "shell_exec('sudo -n /usr/local/sbin/msfixit-admin-action" "$app"; then
+    echo "Admin actions must use argv-based proc_open execution, not a shell command string." >&2
+    exit 1
+fi
 
 assert_contains 'case "$action" in' "$helper"
 assert_contains "cache-flush)" "$helper"
@@ -44,4 +50,4 @@ assert_contains "/usr/local/sbin/msfixit-admin-action service-restart nginx" "$s
 assert_contains "/usr/local/sbin/msfixit-admin-action backup-create" "$sudoers"
 assert_contains "/usr/local/sbin/msfixit-admin-action logs shopos" "$sudoers"
 
-printf 'PASS: admin console Phase 2 allowlisted actions, audit logging, bounded logs and secret filtering checks.\n'
+printf 'PASS: admin console Phase 2 uses argv-based allowlisted actions, audit logging, bounded logs and secret filtering checks.\n'
