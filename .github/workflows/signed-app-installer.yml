@@ -1,0 +1,21 @@
+name: ShopOS signed app installer
+
+on:
+  pull_request:
+    branches: [agent/shopos-app-store-ui]
+    paths:
+      - scripts/shopos-app-install.py
+      - tests/test-shopos-signed-app-installer.sh
+      - .github/workflows/signed-app-installer.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-signed-installer:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Validate signed transactional app installation
+        run: bash tests/test-shopos-signed-app-installer.sh
