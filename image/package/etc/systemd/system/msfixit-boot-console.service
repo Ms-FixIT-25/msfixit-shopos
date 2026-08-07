@@ -7,6 +7,7 @@ ConditionPathExists=!/data/.shopos-ready
 
 [Service]
 Type=oneshot
+ExecStartPre=/bin/bash /usr/local/sbin/msfixit-display-keepawake /dev/tty1
 ExecStart=/usr/local/sbin/msfixit-boot-console
 StandardInput=tty
 StandardOutput=tty

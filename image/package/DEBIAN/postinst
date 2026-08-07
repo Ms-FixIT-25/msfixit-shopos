@@ -8,7 +8,7 @@ install -d -m 0755 /run/msfixit-shopos
 install -d -m 0755 /srv/www
 install -d -m 0755 /etc/nftables.d
 install -d -m 0755 /etc/plymouth
-chmod 0755 /usr/local/sbin/msfixit-update /usr/local/sbin/msfixit-update-agent /usr/local/sbin/msfixit-update-center /usr/local/sbin/msfixit-slot-writer /usr/local/sbin/msfixit-update-boot-sync /usr/local/sbin/msfixit-boot-selector /usr/local/sbin/msfixit-kiosk-session /usr/local/sbin/msfixit-apply-resource-budget /usr/local/sbin/msfixit-finalize-resource-budget /usr/local/sbin/msfixit-thermal-check
+chmod 0755 /usr/local/sbin/msfixit-update /usr/local/sbin/msfixit-update-agent /usr/local/sbin/msfixit-update-center /usr/local/sbin/msfixit-slot-writer /usr/local/sbin/msfixit-update-boot-sync /usr/local/sbin/msfixit-boot-selector /usr/local/sbin/msfixit-kiosk-session /usr/local/sbin/msfixit-display-keepawake /usr/local/sbin/msfixit-apply-resource-budget /usr/local/sbin/msfixit-finalize-resource-budget /usr/local/sbin/msfixit-thermal-check
 chmod 0640 /etc/msfixit-shopos/update-slots.json /etc/msfixit-shopos/update-source.json
 chmod 0440 /etc/sudoers.d/msfixit-shopos-update-center
 
@@ -52,7 +52,11 @@ EOF_PLYMOUTH
 for cmdline in /boot/firmware/cmdline.txt /boot/cmdline.txt; do
     [ -f "$cmdline" ] || continue
     current="$(cat "$cmdline")"
-    for parameter in quiet splash loglevel=3 systemd.show_status=auto rd.udev.log_level=3 vt.global_cursor_default=0 logo.nologo; do
+    # Remove any inherited timeout before appending ShopOS' explicit no-blank
+    # policy. The final command line stays on one normalized line as required by
+    # Raspberry Pi firmware.
+    current="$(printf '%s\n' "$current" | sed -E 's/(^|[[:space:]])consoleblank=[^[:space:]]+//g; s/[[:space:]]+/ /g; s/^ //; s/ $//')"
+    for parameter in quiet splash loglevel=3 systemd.show_status=auto rd.udev.log_level=3 vt.global_cursor_default=0 logo.nologo consoleblank=0; do
         case " $current " in
             *" $parameter "*) ;;
             *) current="$current $parameter" ;;
@@ -80,6 +84,7 @@ systemctl enable msfixit-update-boot-sync.service 2>/dev/null || true
 systemctl enable msfixit-update-agent.timer 2>/dev/null || true
 systemctl enable msfixit-firstboot.service 2>/dev/null || true
 systemctl enable msfixit-brand-shop.service 2>/dev/null || true
+systemctl enable msfixit-display-keepawake.service 2>/dev/null || true
 systemctl enable msfixit-boot-console.service 2>/dev/null || true
 systemctl enable msfixit-kiosk.service 2>/dev/null || true
 systemctl enable msfixit-resource-budget.service 2>/dev/null || true

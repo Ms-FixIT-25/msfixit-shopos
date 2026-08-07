@@ -4,11 +4,15 @@ set -Eeuo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 init="$root/image/package/usr/local/sbin/msfixit-first-login-init"
 wifi="$root/image/package/usr/local/sbin/msfixit-wifi-connect"
+keepawake="$root/image/package/usr/local/sbin/msfixit-display-keepawake"
 ssid="$root/image/package/etc/msfixit-shopos/wifi.env"
 dropin="$root/image/package/etc/systemd/system/getty@tty1.service.d/shopos-first-login.conf"
+keepawake_service="$root/image/package/etc/systemd/system/msfixit-display-keepawake.service"
+postinst="$root/image/package/DEBIAN/postinst"
 
 bash -n "$init"
 bash -n "$wifi"
+bash -n "$keepawake"
 
 grep -Fq 'exec </dev/tty1 >/dev/tty1 2>&1' "$init"
 grep -Fq 'Benutzername [${default_user}]' "$init"
@@ -28,8 +32,25 @@ grep -Fq 'nmcli device wifi rescan' "$wifi"
 grep -Fq 'nmcli --fields SSID,SIGNAL,SECURITY device wifi list' "$wifi"
 grep -Fq 'WLAN-Passwort abgefragt' "$wifi"
 grep -Fq 'nmcli --ask device wifi connect "$ssid"' "$wifi"
+grep -Fq 'ExecStartPre=/bin/bash /usr/local/sbin/msfixit-display-keepawake /dev/tty1' "$dropin"
 grep -Fq 'ExecStartPre=/bin/bash /usr/local/sbin/msfixit-first-login-init' "$dropin"
 grep -Fxq 'SHOPOS_WIFI_SSID=Skynet' "$ssid"
+
+keepawake_line="$(grep -Fn 'msfixit-display-keepawake' "$dropin" | head -n 1 | cut -d: -f1)"
+setup_line="$(grep -Fn 'msfixit-first-login-init' "$dropin" | head -n 1 | cut -d: -f1)"
+if [ -z "$keepawake_line" ] || [ -z "$setup_line" ] || [ "$keepawake_line" -ge "$setup_line" ]; then
+    echo 'Display blanking must be disabled before the password prompt starts.' >&2
+    exit 1
+fi
+
+grep -Fq 'setterm --blank 0 --powerdown 0' "$keepawake"
+grep -Fq 'setterm --powersave off' "$keepawake"
+grep -Fq '\033[0;97;40m\033[?25h' "$keepawake"
+grep -Fq 'Before=msfixit-boot-console.service getty@tty1.service' "$keepawake_service"
+grep -Fq 'ExecStart=/usr/local/sbin/msfixit-display-keepawake /dev/tty1' "$keepawake_service"
+grep -Fq 'consoleblank=0' "$postinst"
+grep -Fq 'consoleblank=[^[:space:]]+' "$postinst"
+grep -Fq 'systemctl enable msfixit-display-keepawake.service' "$postinst"
 
 if grep -Fq 'ConditionPathExists=' "$dropin"; then
     echo 'The tty1 getty must remain available after setup.' >&2
@@ -51,4 +72,4 @@ if grep -Eq 'One-time password|chage -d 0|/dev/urandom' "$init"; then
     exit 1
 fi
 
-printf 'PASS: interactive user creation and active Wi-Fi discovery checks.\n'
+printf 'PASS: interactive setup keeps tty1 bright and awake while discovering Wi-Fi.\n'

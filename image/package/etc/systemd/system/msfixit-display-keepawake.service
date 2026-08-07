@@ -1,0 +1,12 @@
+[Unit]
+Description=Keep the ShopOS local console display awake
+After=systemd-vconsole-setup.service
+Before=msfixit-boot-console.service getty@tty1.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/msfixit-display-keepawake /dev/tty1
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

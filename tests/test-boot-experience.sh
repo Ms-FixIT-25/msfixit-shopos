@@ -17,11 +17,14 @@ bash -n image/package/usr/local/bin/wp
 bash -n image/package/usr/local/bin/shopos-version
 bash -n image/package/usr/local/sbin/msfixit-boot-state
 bash -n image/package/usr/local/sbin/msfixit-boot-console
+bash -n image/package/usr/local/sbin/msfixit-display-keepawake
 bash -n image/package/usr/local/sbin/msfixit-firstboot-progress
+bash -n image/package/usr/local/sbin/msfixit-kiosk-session
 
 for file in \
     image/package/usr/share/plymouth/themes/msfixit-shopos/msfixit-shopos.plymouth \
     image/package/usr/share/plymouth/themes/msfixit-shopos/msfixit-shopos.script \
+    image/package/etc/systemd/system/msfixit-display-keepawake.service \
     image/package/etc/systemd/system/msfixit-boot-console.service \
     image/package/etc/update-motd.d/10-msfixit-shopos; do
     test -s "$file"
@@ -51,15 +54,26 @@ fi
 
 assert_contains 'plymouth-set-default-theme -R msfixit-shopos' image/package/DEBIAN/postinst
 assert_contains 'quiet splash loglevel=3' image/package/DEBIAN/postinst
+assert_contains 'consoleblank=0' image/package/DEBIAN/postinst
+assert_contains 'systemctl enable msfixit-display-keepawake.service' image/package/DEBIAN/postinst
 assert_contains 'systemctl enable msfixit-boot-console.service' image/package/DEBIAN/postinst
 assert_contains 'plymouth, plymouth-themes, initramfs-tools' image/package/DEBIAN/control
 
+assert_contains 'Before=msfixit-boot-console.service getty@tty1.service' image/package/etc/systemd/system/msfixit-display-keepawake.service
+assert_contains 'ExecStart=/usr/local/sbin/msfixit-display-keepawake /dev/tty1' image/package/etc/systemd/system/msfixit-display-keepawake.service
+assert_contains 'ExecStartPre=/bin/bash /usr/local/sbin/msfixit-display-keepawake /dev/tty1' image/package/etc/systemd/system/msfixit-boot-console.service
 assert_contains 'Before=getty@tty1.service' image/package/etc/systemd/system/msfixit-boot-console.service
 assert_contains 'TTYPath=/dev/tty1' image/package/etc/systemd/system/msfixit-boot-console.service
 assert_contains 'ConditionPathExists=!/data/.shopos-ready' image/package/etc/systemd/system/msfixit-boot-console.service
 assert_contains 'ExecStart=/usr/local/sbin/msfixit-firstboot-progress' image/package/etc/systemd/system/msfixit-firstboot.service
 assert_contains '/data/.shopos-ready' image/package/etc/systemd/system/msfixit-brand-shop.service
 assert_contains 'msfixit-boot-state ready 100' image/package/etc/systemd/system/msfixit-brand-shop.service
+
+assert_contains 'setterm --blank 0 --powerdown 0' image/package/usr/local/sbin/msfixit-display-keepawake
+assert_contains 'setterm --powersave off' image/package/usr/local/sbin/msfixit-display-keepawake
+assert_contains 'xset -dpms' image/package/usr/local/sbin/msfixit-kiosk-session
+assert_contains 'xset s off' image/package/usr/local/sbin/msfixit-kiosk-session
+assert_contains 'xset s noblank' image/package/usr/local/sbin/msfixit-kiosk-session
 
 assert_contains 'readonly wordpress_version=7.0.2' scripts/fetch-vendor-assets.sh
 assert_contains 'readonly woocommerce_version=10.9.4' scripts/fetch-vendor-assets.sh
@@ -80,4 +94,4 @@ if grep -Fq 'WORDPRESS_VERSION=latest' image/package/usr/share/msfixit-shopos/sh
     exit 1
 fi
 
-echo 'ShopOS boot experience and offline payload checks passed.'
+echo 'ShopOS boot experience, display wake policy and offline payload checks passed.'
