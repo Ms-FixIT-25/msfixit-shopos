@@ -37,6 +37,8 @@ grep -Fq 'WLAN einrichten?' "$init"
 grep -Fq 'WLAN automatisch suchen und verbinden' "$init"
 grep -Fq 'SSID manuell eingeben' "$init"
 grep -Fq 'Überspringen' "$init"
+grep -Fq 'ShopOS startet trotzdem vollständig lokal weiter.' "$init"
+grep -Fq 'Die lokale ShopOS-Oberfläche wird jetzt gestartet.' "$init"
 
 # Wi-Fi hardware may appear several seconds after the interactive tty on real
 # Raspberry Pi hardware. The helper must actively unblock and wait for the
@@ -130,4 +132,4 @@ if grep -Eq 'One-time password|chage -d 0|/dev/urandom' "$init"; then
     exit 1
 fi
 
-printf 'PASS: first-login waits for real Wi-Fi hardware, keeps tty1 stable and hands an offline-capable appliance to the kiosk.\n'
+printf 'PASS: first-login waits for real Wi-Fi hardware, keeps tty1 stable and always hands an offline-capable appliance to the kiosk.\n'
