@@ -7,6 +7,7 @@ OnUnitActiveSec=12h
 RandomizedDelaySec=15min
 AccuracySec=5min
 Persistent=false
+Unit=msfixit-performance-refresh.service
 
 [Install]
 WantedBy=timers.target
