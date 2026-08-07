@@ -6,7 +6,10 @@ Before=msfixit-resource-budget.service msfixit-kiosk.service
 [Service]
 Type=oneshot
 ExecStart=/usr/local/sbin/msfixit-apply-performance-profile
-RemainAfterExit=yes
+Nice=10
+IOSchedulingClass=idle
+CPUWeight=10
+IOWeight=10
 
 [Install]
 WantedBy=multi-user.target
