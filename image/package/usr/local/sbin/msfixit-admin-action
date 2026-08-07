@@ -31,6 +31,7 @@ resolve_device_request() {
             *) return 1 ;;
         esac
     done < "$record"
+    [ -n "$SEEN_AT" ] || return 1
     requested_device="$(printf '%s' "$DEVICE_B64" | base64 -d)"
     requested_uuid="$(printf '%s' "$UUID_B64" | base64 -d)"
     requested_label="$(printf '%s' "$LABEL_B64" | base64 -d)"
