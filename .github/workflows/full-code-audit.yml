@@ -15,6 +15,8 @@ concurrency:
   group: full-code-audit-${{ github.ref }}
   cancel-in-progress: true
 
+# Audit rules intentionally remain unchanged; this workflow commit only forces
+# GitHub to materialize a fresh merge ref after the stacked product base moves.
 jobs:
   static-audit:
     name: Audit every tracked code/config file
