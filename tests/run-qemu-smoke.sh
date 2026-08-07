@@ -195,7 +195,7 @@ if [ "$finished" != yes ]; then
     printf 'ShopOS did not reach the ready marker before a service failed or the 25-minute guest watchdog expired.\n'
 fi
 
-systemctl --no-pager --full status msfixit-firstboot.service msfixit-brand-shop.service || true
+systemctl --no-pager --full status msfixit-firstboot.service msfixit-brand-shop.service msfixit-first-login.service || true
 check 'boot partition mounted' mountpoint -q /boot/firmware
 check 'initialization marker' test -e /data/.shopos-initialized
 check 'ready marker' test -e /data/.shopos-ready
@@ -203,6 +203,15 @@ check 'credentials file' test -s /boot/firmware/SHOPOS-CREDENTIALS.txt
 check 'MariaDB active' systemctl is-active --quiet mariadb.service
 check 'Redis active' systemctl is-active --quiet redis-server.service
 check 'Nginx active' systemctl is-active --quiet nginx.service
+check 'first-login helper executable' test -x /usr/local/sbin/msfixit-first-login-init
+first_login_state="$(systemctl show -p ActiveState --value msfixit-first-login.service 2>/dev/null || true)"
+first_login_result="$(systemctl show -p Result --value msfixit-first-login.service 2>/dev/null || true)"
+first_login_exec_status="$(systemctl show -p ExecMainStatus --value msfixit-first-login.service 2>/dev/null || true)"
+printf 'First-login runtime: state=%s result=%s exec_status=%s\n' \
+    "$first_login_state" "$first_login_result" "$first_login_exec_status"
+check 'first-login service not failed' test "$first_login_state" != failed
+check 'first-login service did not exit with 203' test "$first_login_exec_status" != 203
+check 'first-login journal has no 203/EXEC' sh -c "! journalctl -b -u msfixit-first-login.service --no-pager 2>/dev/null | grep -Fq 'status=203/EXEC'"
 
 php_service="$(systemctl list-unit-files --type=service --no-legend 'php*-fpm.service' 2>/dev/null | awk 'NR==1 {print $1}')"
 check 'PHP-FPM discovered' test -n "$php_service"
