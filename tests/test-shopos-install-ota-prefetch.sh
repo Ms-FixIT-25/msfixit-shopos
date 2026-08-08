@@ -9,7 +9,7 @@ bash -n "$script"
 grep -Fq 'Before=msfixit-firstboot.service' "$service"
 grep -Fq 'Wants=msfixit-install-update-prefetch.service' "$firstboot"
 grep -Fq 'After=local-fs.target msfixit-install-update-prefetch.service' "$firstboot"
-grep -Fq "--proto '=https'" "$script"
+grep -Fq -- "--proto '=https'" "$script"
 grep -Fq "verify \"\$manifest\" --image \"\$image\"" "$script"
 grep -Fq 'partial prefetch discarded and installation continues' "$script"
 
