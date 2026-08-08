@@ -5,7 +5,7 @@ After=local-fs.target systemd-logind.service msfixit-brand-shop.service msfixit-
 Wants=nginx.service NetworkManager.service
 ConditionPathExists=/usr/bin/chromium
 ConditionPathExists=/usr/bin/xinit
-ConditionPathExists=/usr/bin/xterm
+ConditionPathExists=/usr/local/sbin/msfixit-setup-gui
 
 [Service]
 Type=simple
@@ -15,7 +15,7 @@ Environment=HOME=/root
 Environment=DISPLAY=:0
 ExecStartPre=/usr/bin/test -x /usr/bin/chromium
 ExecStartPre=/usr/bin/test -x /usr/bin/xinit
-ExecStartPre=/usr/bin/test -x /usr/bin/xterm
+ExecStartPre=/usr/bin/test -x /usr/local/sbin/msfixit-setup-gui
 ExecStartPre=-/usr/bin/plymouth quit --retain-splash
 ExecStart=/usr/bin/xinit /usr/local/sbin/msfixit-x-session -- :0 vt7 -keeptty -nolisten tcp
 Restart=on-failure
