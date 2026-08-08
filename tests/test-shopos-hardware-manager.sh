@@ -110,12 +110,84 @@ if grep -Eq '(ip address|ip -j|ifconfig|address$|MAC|mac_address)' "$sensors"; t
     exit 1
 fi
 
-# Diagnostic log text may mention that poweroff is blocked. Reject only code
-# paths that could actually execute a shutdown/poweroff command.
-if grep -Eq '(subprocess\.(run|Popen|call|check_call|check_output)|os\.system)[^\n]*(poweroff|shutdown)|["'"'](/usr)?/s?bin/(poweroff|shutdown)["'"']' "$manager" "$helper"; then
-    echo 'Automatic emergency poweroff must remain blocked until physical hardware validation.' >&2
-    exit 1
-fi
+# Detect executable shutdown paths, not harmless documentation/log strings that
+# explain that shutdown remains blocked. The self-test prevents this guard from
+# regressing back to a plain-text keyword search.
+python3 - "$manager" "$helper" <<'PY'
+import ast
+import pathlib
+import sys
+
+PROCESS_CALLS = {
+    'os.system',
+    'subprocess.call',
+    'subprocess.check_call',
+    'subprocess.check_output',
+    'subprocess.Popen',
+    'subprocess.run',
+}
+DANGEROUS = {'halt', 'poweroff', 'reboot', 'shutdown'}
+
+
+def dotted_name(node: ast.AST) -> str:
+    parts: list[str] = []
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    if isinstance(node, ast.Name):
+        parts.append(node.id)
+    return '.'.join(reversed(parts))
+
+
+def literal_command(node: ast.AST) -> list[str] | None:
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value.split()
+    if isinstance(node, (ast.List, ast.Tuple)):
+        result: list[str] = []
+        for item in node.elts:
+            if not isinstance(item, ast.Constant) or not isinstance(item.value, str):
+                return None
+            result.append(item.value)
+        return result
+    return None
+
+
+def contains_power_action(tokens: list[str]) -> bool:
+    normalized = [pathlib.PurePath(token).name.lower() for token in tokens]
+    if any(token in DANGEROUS for token in normalized):
+        return True
+    return 'systemctl' in normalized and any(token in DANGEROUS for token in normalized)
+
+
+def scan(source: str, label: str) -> list[str]:
+    tree = ast.parse(source, filename=label)
+    findings: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not node.args:
+            continue
+        if dotted_name(node.func) not in PROCESS_CALLS:
+            continue
+        command = literal_command(node.args[0])
+        if command is not None and contains_power_action(command):
+            findings.append(f'{label}:{getattr(node, "lineno", "?")}: {command!r}')
+    return findings
+
+# Regression proof: plain log text is safe, but an actual subprocess poweroff
+# must be rejected by this scanner.
+assert scan("print('automatic poweroff intentionally blocked pending real-hardware validation')\n", 'safe-log.py') == []
+assert scan("import subprocess\nsubprocess.run(['/usr/bin/systemctl','poweroff'])\n", 'unsafe-call.py')
+
+findings: list[str] = []
+for raw in sys.argv[1:]:
+    path = pathlib.Path(raw)
+    findings.extend(scan(path.read_text(encoding='utf-8'), str(path)))
+if findings:
+    print('Automatic emergency poweroff must remain blocked until physical hardware validation.', file=sys.stderr)
+    for finding in findings:
+        print(f'  {finding}', file=sys.stderr)
+    raise SystemExit(1)
+PY
+
 if grep -Eqi '(over_voltage|arm_freq|core_freq|force_turbo|overclock)' "$lib/hardware_manager"/*.py "$helper"; then
     echo 'Hardware Manager must not implement overclock/voltage tuning.' >&2
     exit 1
