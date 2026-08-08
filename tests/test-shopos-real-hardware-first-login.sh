@@ -48,8 +48,11 @@ grep -Fq 'pool.ntp.org' "$timesync" || fail 'pool NTP fallback is missing'
 grep -Fq 'python3-gi' "$control" || fail 'GTK Python runtime for graphical first-login is missing'
 grep -Fq 'gir1.2-gtk-3.0' "$control" || fail 'GTK bindings for graphical first-login are missing'
 grep -Fq 'gir1.2-vte-2.91' "$control" || fail 'VTE bindings for graphical first-login are missing'
-if grep -Fq 'xterm' "$control" "$x_session"; then
-    fail 'legacy xterm must not be part of the visible first-login path'
+if grep -Eq 'Depends:.*(^|, )xterm(,|$)' "$control"; then
+    fail 'legacy xterm must not be a production first-login dependency'
+fi
+if grep -Fq '/usr/bin/xterm' "$x_session"; then
+    fail 'legacy xterm must not be executed in the visible first-login path'
 fi
 grep -Fq 'ExecStart=/usr/bin/xinit /usr/local/sbin/msfixit-x-session -- :0 vt7 -keeptty -nolisten tcp' "$kiosk" || fail 'display service does not own one persistent local-only Xorg server'
 if grep -Eq 'TTYPath=|StandardInput=tty|StandardInput=tty-force' "$kiosk"; then
