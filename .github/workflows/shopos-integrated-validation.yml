@@ -39,8 +39,10 @@ jobs:
           bash -n tests/run-qemu-smoke.sh
           python3 -m py_compile image/package/usr/local/sbin/msfixit-update-agent
           python3 -m py_compile image/package/usr/local/sbin/msfixit-update-center
+          python3 -m py_compile image/package/usr/local/sbin/msfixit-setup-gui
           bash -n image/package/usr/local/sbin/msfixit-boot-console
           bash -n image/package/usr/local/sbin/msfixit-kiosk-session
+          bash -n image/package/usr/local/sbin/msfixit-x-session
           bash -n image/package/usr/local/sbin/msfixit-first-login-init
           bash -n image/package/usr/local/sbin/msfixit-wifi-connect
           bash -n image/package/usr/local/sbin/msfixit-apply-resource-budget
@@ -76,7 +78,10 @@ jobs:
           grep -Fq 'msfixit-kiosk.service' image/package/DEBIAN/postinst
           grep -Fq -- '--kiosk' image/package/usr/local/sbin/msfixit-kiosk-session
           grep -Fq -- '-nolisten tcp' image/package/etc/systemd/system/msfixit-kiosk.service
-          grep -Fq 'User=shopos-kiosk' image/package/etc/systemd/system/msfixit-kiosk.service
+          grep -Fq 'User=root' image/package/etc/systemd/system/msfixit-kiosk.service
+          grep -Fq '/usr/local/sbin/msfixit-setup-gui' image/package/usr/local/sbin/msfixit-x-session
+          grep -Fq 'runuser -u "$kiosk_user"' image/package/usr/local/sbin/msfixit-x-session
+          grep -Fq '/usr/local/sbin/msfixit-kiosk-session' image/package/usr/local/sbin/msfixit-x-session
 
       - name: Validate QEMU release-gate contract
         run: |
