@@ -132,8 +132,8 @@ grep -Fq '[ -e "$setup_marker" ]' "$x_session"
 grep -Fq 'runuser -u "$kiosk_user"' "$x_session"
 grep -Fq '/usr/local/sbin/msfixit-kiosk-session' "$x_session"
 grep -Fq 'xhost +SI:localuser:' "$x_session"
-if grep -Fq 'xterm' "$x_session"; then
-    echo 'Persistent X session must use the GTK setup shell, not xterm.' >&2
+if grep -Eq '^[[:space:]]*(exec[[:space:]]+)?xterm([[:space:]]|$)' "$x_session"; then
+    echo 'Persistent X session must not execute xterm.' >&2
     exit 1
 fi
 
