@@ -81,6 +81,12 @@ if [ -z "$wifi_device" ]; then
 fi
 
 printf 'WLAN-Gerät erkannt: %s\n' "$wifi_device"
+# Clear stale activation state without deleting any saved connection profile.
+nmcli device disconnect "$wifi_device" >/dev/null 2>&1 || true
+nmcli device set "$wifi_device" managed yes >/dev/null 2>&1 || true
+nmcli networking on 2>/dev/null || true
+nmcli radio wifi on 2>/dev/null || true
+
 printf 'WLAN-Netze werden gesucht ...\n'
 available=""
 for attempt in $(seq 1 8); do
@@ -111,7 +117,19 @@ fi
 [ -n "$ssid" ] || { printf 'Keine SSID ausgewählt. WLAN-Einrichtung wird übersprungen.\n' >&2; exit 1; }
 printf 'Verbindung mit %s wird über %s eingerichtet. Falls geschützt, wird jetzt das WLAN-Passwort abgefragt.\n' "$ssid" "$wifi_device"
 
-if ! nmcli --ask --wait 90 device wifi connect "$ssid" ifname "$wifi_device"; then
+connected_command=0
+if nmcli --ask --wait 90 device wifi connect "$ssid" ifname "$wifi_device"; then
+    connected_command=1
+else
+    # A previous attempt can leave a valid profile behind even when activation
+    # timed out. Retry that profile before declaring the first-login setup dead.
+    printf 'Direkter Verbindungsversuch fehlgeschlagen; vorhandenes Profil wird erneut aktiviert ...\n' >&2
+    if nmcli --ask --wait 90 connection up "$ssid" ifname "$wifi_device"; then
+        connected_command=1
+    fi
+fi
+
+if [ "$connected_command" -ne 1 ]; then
     printf 'NetworkManager konnte die WLAN-Verbindung nicht aktivieren.\n' >&2
     wifi_diagnostics
     exit 1
@@ -134,7 +152,12 @@ fi
 
 active_connection="$(nmcli -g GENERAL.CONNECTION device show "$wifi_device" 2>/dev/null | head -n 1 || true)"
 if [ -n "$active_connection" ] && [ "$active_connection" != '--' ]; then
-    nmcli connection modify "$active_connection" connection.autoconnect yes >/dev/null 2>&1 || true
+    nmcli connection modify "$active_connection" \
+        connection.autoconnect yes \
+        connection.autoconnect-priority 100 \
+        802-11-wireless.cloned-mac-address permanent \
+        802-11-wireless.powersave 2 >/dev/null 2>&1 || true
+    nmcli connection up "$active_connection" ifname "$wifi_device" >/dev/null 2>&1 || true
 fi
 
 ip4="$(nmcli -g IP4.ADDRESS device show "$wifi_device" 2>/dev/null | head -n 1 || true)"
