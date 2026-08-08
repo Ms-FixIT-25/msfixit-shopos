@@ -2,8 +2,10 @@ name: ShopOS release gate
 
 on:
   pull_request:
-    branches: [main]
+    branches: [integration/shopos-master-consolidation]
     types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [integration/shopos-master-consolidation]
   workflow_dispatch:
 
 permissions:
@@ -16,26 +18,23 @@ concurrency:
 
 jobs:
   test:
-    name: Test complete ShopOS tree
-    if: >-
-      github.event_name == 'workflow_dispatch' ||
-      github.event.action == 'ready_for_review' ||
-      github.event.pull_request.draft == false
+    name: Test exact PR80/candidate tree
+    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - name: Check out exact PR candidate
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
-      - name: Verify exact PR candidate source
-        if: github.event_name == 'pull_request'
-        run: test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+      - name: Verify exact candidate source
+        run: test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
       - name: Install test dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y php-cli python3 openssl sqlite3 shellcheck
+          sudo rm -f /etc/apt/sources.list.d/azure-cli.list
+          sudo apt-get -o Acquire::Retries=3 update
+          sudo apt-get -o Acquire::Retries=3 install --yes php-cli python3 openssl sqlite3 shellcheck
       - name: Run repository test suite
         run: |
           bash -n scripts/generate-release-metadata.sh
@@ -60,19 +59,18 @@ jobs:
           done
 
   image:
-    name: Build and verify candidate image
+    name: Build and verify exact candidate image
     needs: test
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 120
     steps:
-      - name: Check out exact tested PR candidate
-        uses: actions/checkout@v4
+      - name: Check out exact tested candidate
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
-      - name: Verify exact PR candidate source
-        if: github.event_name == 'pull_request'
-        run: test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+      - name: Verify exact candidate source
+        run: test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
       - name: Reclaim runner disk space
         run: |
           sudo rm -rf /opt/hostedtoolcache || true
@@ -86,7 +84,7 @@ jobs:
       - name: Verify candidate image
         run: bash scripts/generate-release-metadata.sh artifacts candidate "${{ github.event.pull_request.head.sha || github.sha }}" "$GITHUB_RUN_ID"
       - name: Upload candidate image
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: shopos-candidate-${{ github.event.pull_request.head.sha || github.sha }}
           path: artifacts/
@@ -100,14 +98,13 @@ jobs:
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 70
     steps:
-      - name: Check out the exact tested PR candidate
-        uses: actions/checkout@v4
+      - name: Check out exact tested candidate
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
-      - name: Verify exact PR candidate source
-        if: github.event_name == 'pull_request'
-        run: test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+      - name: Verify exact candidate source
+        run: test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
       - name: Reclaim runner disk space
         run: |
           sudo rm -rf /opt/hostedtoolcache || true
@@ -136,7 +133,7 @@ jobs:
           bash -n tests/normalize-qemu-sd-size.sh
           bash tests/normalize-qemu-sd-size.sh --self-test
           bash tests/run-qemu-smoke.sh --self-test
-      - name: Download the candidate from this workflow
+      - name: Download the exact candidate from this workflow
         uses: actions/download-artifact@v4
         with:
           name: shopos-candidate-${{ github.event.pull_request.head.sha || github.sha }}
@@ -171,6 +168,7 @@ jobs:
           sudo env PATH="$qemu_path:$PATH" \
             bash -x tests/run-qemu-smoke.sh vm/shopos-test.img vm \
             2>&1 | tee vm/harness.log
+          grep -Fxq 'MSFIXIT_VM_SMOKE_RESULT=PASS failures=0' vm/msfixit-vm-smoke.result
       - name: Prepare QEMU evidence
         if: always()
         run: |
@@ -180,7 +178,7 @@ jobs:
           find vm -type f -exec chmod u+rw {} + 2>/dev/null || true
       - name: Upload QEMU evidence
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: shopos-candidate-qemu-evidence-ARM64-${{ github.event.pull_request.head.sha || github.sha }}
           path: |
