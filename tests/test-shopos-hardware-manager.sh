@@ -8,6 +8,7 @@ sensors="$lib/hardware_manager/sensors.py"
 rules="$lib/hardware_manager/rules.py"
 thermal="$lib/hardware_manager/thermal.py"
 state="$lib/hardware_manager/state.py"
+actions="$lib/hardware_manager/actions.py"
 service="$root/image/package/etc/systemd/system/msfixit-hardware-manager.service"
 sudoers="$root/image/package/etc/sudoers.d/msfixit-shopos-hardware-manager"
 postinst="$root/image/package/DEBIAN/postinst"
@@ -188,10 +189,16 @@ if findings:
     raise SystemExit(1)
 PY
 
-if grep -Eqi '(over_voltage|arm_freq|core_freq|force_turbo|overclock)' "$lib/hardware_manager"/*.py "$helper"; then
-    echo 'Hardware Manager must not implement overclock/voltage tuning.' >&2
+# Overclock/voltage tuning can only become effective through the privileged
+# Hardware Manager helper. Keep the root helper free of those tunables while
+# allowing user-facing recommendation text to state that overclocking is
+# explicitly excluded. The action layer must remain restricted to governors.
+if grep -Eqi '(over_voltage|arm_freq|core_freq|force_turbo|overclock)' "$helper"; then
+    echo 'Hardware Manager privileged helper must not implement overclock/voltage tuning.' >&2
     exit 1
 fi
+grep -Fq 'allowed = {"set-governor": {"schedutil", "powersave"}}' "$actions"
+grep -Fq 'Aggressives Overclocking ist ausgeschlossen.' "$rules"
 
 grep -Fq 'automatic poweroff intentionally blocked pending real-hardware validation' "$manager"
 printf 'PASS: Hardware Manager is platform-aware, bounded, reversible and fail-safe before physical shutdown validation.\n'
