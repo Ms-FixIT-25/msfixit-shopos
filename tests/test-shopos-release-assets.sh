@@ -70,9 +70,8 @@ if grep -Eq 'curl .*releases/download' "$syncer"; then
     exit 1
 fi
 
-# During PR #80 consolidation, release asset synchronization is deliberately a
-# manual repair tool for releases that already exist. It must not publish from
-# a build completion event or silently follow stale main CI.
+# Release-asset repair remains a manual tool for already-existing releases; it
+# must not silently follow build completion or stale main metadata.
 grep -Fq 'workflow_dispatch:' "$workflow"
 grep -Fq 'version:' "$workflow"
 grep -Fq 'gh release view "v${version}"' "$workflow"
@@ -86,17 +85,24 @@ if grep -Fq "head_branch == 'main'" "$workflow"; then
     exit 1
 fi
 
-# PR #80 is temporarily the authoritative build/test source. Candidate images
-# are built from the exact consolidation SHA, while stable publication remains
-# disabled until the verified consolidation is deliberately merged to main.
+# PR #80 is the authoritative candidate source. A candidate pre-release is
+# allowed only after the exact source has been tested, imaged and ARM64/QEMU
+# boot-validated. This workflow must never publish a stable release or rebuild
+# from main.
 grep -Fq 'branches: [integration/shopos-master-consolidation]' "$acceptance"
 grep -Fq 'Test exact PR80 consolidation commit' "$acceptance"
 grep -Fq 'Build exact PR80 Raspberry Pi image' "$acceptance"
 grep -Fq 'Boot exact PR80 image on ARM64' "$acceptance"
 grep -Fq "test \"\$GITHUB_REF\" = 'refs/heads/integration/shopos-master-consolidation'" "$acceptance"
-grep -Fq 'Stable publishing is intentionally disabled while PR #80 is the authoritative' "$acceptance"
-if grep -Eq 'gh release (create|upload|edit)|Publish boot-verified production release' "$acceptance"; then
-    echo 'PR80 acceptance workflow must not publish a stable release.' >&2
+grep -Fq 'Publish boot-verified PR80 candidate' "$acceptance"
+grep -Fq 'needs: [validate, image, qemu]' "$acceptance"
+grep -Fq 'tag="pr80-v${RELEASE_VERSION}-${SHORT_SHA}"' "$acceptance"
+grep -Fq -- '--target "$SOURCE_SHA"' "$acceptance"
+grep -Fq -- '--prerelease' "$acceptance"
+grep -Fq 'test "$target" = "$SOURCE_SHA"' "$acceptance"
+grep -Fq 'This download is a Pre-Release and not a final production release' "$acceptance" || grep -Fq 'Dieser Download ist ein Pre-Release und noch kein finaler Produktionsrelease' "$acceptance"
+if grep -Eq 'tag="v\$\{RELEASE_VERSION\}"|--latest|Publish boot-verified production release' "$acceptance"; then
+    echo 'PR80 acceptance must publish only a SHA-bound pre-release, never a stable/latest release.' >&2
     exit 1
 fi
 
@@ -120,4 +126,4 @@ PY
 grep -Fq 'msfixit-shopos-<VERSION>-rpi4-usb-windows-macos.zip' "$docs"
 grep -Fq 'msfixit-shopos-<VERSION>-rpi4-usb-linux.img.xz' "$docs"
 
-printf 'PASS: release assets remain versioned while PR80 candidate CI is isolated from stale main publication.\n'
+printf 'PASS: release assets remain versioned and PR80 publishing is limited to exact boot-verified pre-releases.\n'
