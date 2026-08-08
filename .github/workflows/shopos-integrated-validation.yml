@@ -19,6 +19,13 @@ jobs:
     steps:
       - name: Check out combined source
         uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Verify exact PR candidate source
+        if: github.event_name == 'pull_request'
+        run: test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
 
       - name: Validate workflow and script syntax
         shell: bash
@@ -91,6 +98,7 @@ jobs:
           grep -Fq 'actions/download-artifact@v4' .github/workflows/shopos-release-gate.yml
           grep -Fq 'normalize-qemu-sd-size.sh vm/shopos-test.img' .github/workflows/shopos-release-gate.yml
           grep -Fq 'vm/shopos-test.img' .github/workflows/shopos-release-gate.yml
+          grep -Fq 'github.event.pull_request.head.sha || github.sha' .github/workflows/shopos-release-gate.yml
           if grep -Fq 'gh pr merge' .github/workflows/shopos-release-gate.yml; then
             echo 'Automatic merge must remain disabled.' >&2
             exit 1
