@@ -2,8 +2,15 @@ name: First-login package permissions
 
 on:
   pull_request:
-    branches:
-      - main
+    branches: [integration/shopos-master-consolidation]
+    paths:
+      - scripts/build-package.sh
+      - image/package/usr/local/sbin/msfixit-first-login-init
+      - image/package/etc/systemd/system/msfixit-first-login.service
+      - tests/test-shopos-first-login-package-permissions.sh
+      - .github/workflows/first-login-package-permissions.yml
+  push:
+    branches: [integration/shopos-master-consolidation]
     paths:
       - scripts/build-package.sh
       - image/package/usr/local/sbin/msfixit-first-login-init
@@ -25,15 +32,14 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - name: Check out product fix
+      - name: Check out exact source
         uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
 
-      - name: Verify exact PR candidate source
-        if: github.event_name == 'pull_request'
-        run: test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+      - name: Verify exact source identity
+        run: test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
 
       - name: Check shell syntax
         run: |
