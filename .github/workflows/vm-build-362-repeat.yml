@@ -1,4 +1,4 @@
-name: ShopOS build 441 repeated QEMU validation
+name: ShopOS build 449 repeated QEMU validation
 
 on:
   pull_request:
@@ -61,13 +61,13 @@ jobs:
           bash tests/normalize-qemu-sd-size.sh --self-test
           python3 tests/verify-qemu-candidate-metadata.py --self-test
 
-      - name: Download and verify exact Build 441 candidate
+      - name: Download and verify exact Build 449 candidate
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          SHOPOS_ARTIFACT_ID: '9018185750'
-          SHOPOS_ARTIFACT_SHA256: b888ceb3f7ef010c0c2dc4714c1e5875c0a997c8108bd5c1d325edeb1549a610
-          SHOPOS_SOURCE_SHA: 7ae64e8259c4b36cf46a01bdc33a2c35dd5513e1
+          SHOPOS_ARTIFACT_ID: '9019947776'
+          SHOPOS_ARTIFACT_SHA256: 059478f8fd5d3b66abd2f586a73a50eaaffcecae0b0228d3e3735ae7f6bb1afe
+          SHOPOS_SOURCE_SHA: 9c1b9677ffbb18baa25ce3e5e035b5e57274a5dc
         run: |
           set -Eeuo pipefail
           mkdir -p vm
@@ -118,7 +118,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: shopos-build-441-${{ matrix.host }}-repeat-${{ matrix.repetition }}
+          name: shopos-build-449-${{ matrix.host }}-repeat-${{ matrix.repetition }}
           path: |
             vm-qemu-version.txt
             vm-qemu-machines.txt
