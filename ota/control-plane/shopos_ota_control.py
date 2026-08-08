@@ -20,7 +20,7 @@ class H(BaseHTTPRequestHandler):
  def body(self):
   n=int(self.headers.get('Content-Length','0'))
   if n<2 or n>MAX_BODY:raise ValueError()
-  x=json.loads(self.rfile.read(n));
+  x=json.loads(self.rfile.read(n))
   if not isinstance(x,dict):raise ValueError()
   return x
  def bearer(self):
@@ -44,7 +44,10 @@ class H(BaseHTTPRequestHandler):
     if not r:self.out(401,{'error':'unauthorized'});return
     x=self.body();n=int(time.time())
     with LOCK,connect(self.server.db) as d:
-     if q[3]=='heartbeat':d.execute('UPDATE devices SET last_seen=?,shopos_version=? WHERE device_id=?',(n,str(x.get('shopos_version',r['shopos_version']))[:256],i))
+     if q[3]=='heartbeat':
+      v=x.get('shopos_version',r['shopos_version'])
+      if not isinstance(v,str) or not 1<=len(v)<=256:raise ValueError()
+      d.execute('UPDATE devices SET last_seen=?,shopos_version=? WHERE device_id=?',(n,v,i))
      else:
       v=x.get('result')
       if v not in ('success','failed','staged','reboot_pending','rolled_back'):raise ValueError()
