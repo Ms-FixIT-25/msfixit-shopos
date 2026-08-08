@@ -1,0 +1,86 @@
+name: Promote PR80 run 438 candidate
+
+on:
+  push:
+    branches: [integration/shopos-master-consolidation]
+    paths:
+      - .github/workflows/promote-pr80-run438.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+concurrency:
+  group: promote-pr80-run438
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    name: Publish existing PR80 IMG as pre-release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      SOURCE_RUN_ID: "31243427161"
+      SOURCE_SHA: "8e852ed5d1de4d3a0a68c4464a254ab63ee87b42"
+      SHORT_SHA: "8e852ed5d1de"
+      RELEASE_VERSION: "0.15.4"
+      ARTIFACT_NAME: "msfixit-shopos-rpi4-usb-8e852ed5d1de4d3a0a68c4464a254ab63ee87b42"
+
+    steps:
+      - name: Download exact successful run 438 artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: candidate
+          repository: Ms-FixIT-25/msfixit-shopos
+          run-id: ${{ env.SOURCE_RUN_ID }}
+          github-token: ${{ github.token }}
+
+      - name: Verify exact candidate before publishing
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test -s candidate/msfixit-shopos-rpi4-usb.img.xz
+          test -s candidate/msfixit-shopos-rpi4-usb.img.xz.sha256
+          test -s candidate/SHOPOS-VERSION.txt
+          test "$(tr -d '[:space:]' < candidate/SHOPOS-VERSION.txt)" = "$RELEASE_VERSION"
+          (
+            cd candidate
+            sha256sum --check --strict msfixit-shopos-rpi4-usb.img.xz.sha256
+          )
+
+      - name: Publish PR80 run 438 pre-release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          tag="pr80-v${RELEASE_VERSION}-${SHORT_SHA}"
+          title="Ms. FixIT ShopOS ${RELEASE_VERSION} – PR80 Candidate ${SHORT_SHA}"
+          notes="PR-80 Candidate aus dem erfolgreichen IMG-Build Run #438 (${SOURCE_RUN_ID}). Quelle: ${SOURCE_SHA}. Dieses Pre-Release enthält exakt das bereits erfolgreich erzeugte Actions-Artefakt; es ist kein Stable-Produktionsrelease von main."
+
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            target="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" --jq .target_commitish)"
+            test "$target" = "$SOURCE_SHA"
+            gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --title "$title" --notes "$notes" --prerelease
+            gh release upload "$tag" candidate/* --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$tag" candidate/* \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$SOURCE_SHA" \
+              --title "$title" \
+              --notes "$notes" \
+              --prerelease
+          fi
+
+      - name: Verify published release target
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          tag="pr80-v${RELEASE_VERSION}-${SHORT_SHA}"
+          target="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" --jq .target_commitish)"
+          test "$target" = "$SOURCE_SHA"
+          gh release view "$tag" --repo "$GITHUB_REPOSITORY"
