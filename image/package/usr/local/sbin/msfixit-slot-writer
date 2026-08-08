@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import argparse
+import fcntl
 import hashlib
 import json
 import os
 import pathlib
 import stat
+import struct
 import sys
 import tempfile
 from typing import Any
@@ -15,6 +17,7 @@ from typing import Any
 CONFIG = pathlib.Path('/etc/msfixit-shopos/update-slots.json')
 ALLOWED_KEYS = {'schema', 'slots', 'boot_selection', 'allowed_boot_root'}
 ALLOWED_SLOTS = {'A', 'B'}
+BLKGETSIZE64 = 0x80081272
 
 
 class SlotError(RuntimeError):
@@ -47,9 +50,9 @@ def mounted_sources() -> set[str]:
         for line in pathlib.Path('/proc/self/mountinfo').read_text(encoding='utf-8').splitlines():
             fields = line.split()
             if '-' in fields:
-                sep = fields.index('-')
-                if len(fields) > sep + 2:
-                    sources.add(os.path.realpath(fields[sep + 2]))
+                separator = fields.index('-')
+                if len(fields) > separator + 2:
+                    sources.add(os.path.realpath(fields[separator + 2]))
     except OSError as exc:
         raise SlotError('cannot inspect mounted filesystems') from exc
     return sources
@@ -72,6 +75,29 @@ def resolve_target(cfg: dict[str, Any], slot: str) -> pathlib.Path:
     return resolved
 
 
+def target_capacity(path: pathlib.Path) -> int:
+    mode = path.stat().st_mode
+    if stat.S_ISREG(mode) and os.environ.get('SHOPOS_SLOT_WRITER_TEST') == '1':
+        return path.stat().st_size
+    if not stat.S_ISBLK(mode):
+        raise SlotError('slot target is not a block device')
+    try:
+        with path.open('rb', buffering=0) as handle:
+            raw = fcntl.ioctl(handle.fileno(), BLKGETSIZE64, b'\0' * 8)
+    except OSError as exc:
+        raise SlotError('cannot determine slot capacity') from exc
+    capacity = struct.unpack('Q', raw)[0]
+    if capacity < 1:
+        raise SlotError('slot capacity is invalid')
+    return capacity
+
+
+def ensure_capacity(path: pathlib.Path, expected_size: int) -> None:
+    capacity = target_capacity(path)
+    if expected_size > capacity:
+        raise SlotError(f'image size {expected_size} exceeds slot capacity {capacity}')
+
+
 def hash_file(path: pathlib.Path) -> tuple[str, int]:
     digest = hashlib.sha256()
     size = 0
@@ -89,6 +115,7 @@ def write_slot(cfg: dict[str, Any], slot: str, image: pathlib.Path, expected_has
     if digest != expected_hash or size != expected_size:
         raise SlotError('image hash or size does not match the verified manifest')
     target = resolve_target(cfg, slot)
+    ensure_capacity(target, expected_size)
     with image.open('rb') as source, target.open('r+b', buffering=0) as destination:
         destination.seek(0)
         for chunk in iter(lambda: source.read(4 * 1024 * 1024), b''):
@@ -121,22 +148,22 @@ def select_slot(cfg: dict[str, Any], slot: str) -> None:
     boot_file = pathlib.Path(cfg['boot_selection'])
     boot_file.parent.mkdir(parents=True, exist_ok=True)
     data = f'SHOPOS_SLOT={slot}\nSHOPOS_ROOT_LABEL=SHOPOS_ROOT_{slot}\n'.encode()
-    fd, tmp = tempfile.mkstemp(prefix='.shopos-slot.', dir=boot_file.parent)
+    fd, temporary = tempfile.mkstemp(prefix='.shopos-slot.', dir=boot_file.parent)
     try:
         os.fchmod(fd, 0o600)
         with os.fdopen(fd, 'wb') as handle:
             handle.write(data)
             handle.flush()
             os.fsync(handle.fileno())
-        os.replace(tmp, boot_file)
-        dir_fd = os.open(boot_file.parent, os.O_DIRECTORY)
+        os.replace(temporary, boot_file)
+        directory = os.open(boot_file.parent, os.O_DIRECTORY)
         try:
-            os.fsync(dir_fd)
+            os.fsync(directory)
         finally:
-            os.close(dir_fd)
+            os.close(directory)
     finally:
-        if os.path.exists(tmp):
-            os.unlink(tmp)
+        if os.path.exists(temporary):
+            os.unlink(temporary)
 
 
 def main() -> int:
@@ -164,7 +191,7 @@ def main() -> int:
             select_slot(cfg, args.slot)
         print(json.dumps({'ok': True, 'command': args.command}, sort_keys=True))
         return 0
-    except (SlotError, OSError) as exc:
+    except (SlotError, OSError, struct.error) as exc:
         print(f'ERROR: {exc}', file=sys.stderr)
         return 1
 

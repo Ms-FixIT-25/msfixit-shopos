@@ -39,10 +39,65 @@ function authenticated(): bool
     return ($_SESSION['authenticated'] ?? false) === true;
 }
 
-function command(string $command): string
+function runCommand(array $argv, int $timeout = 20): array
 {
-    $output = shell_exec($command . ' 2>/dev/null');
-    return trim((string)$output);
+    if ($argv === [] || array_filter($argv, static fn($v): bool => !is_string($v)) !== []) {
+        return [2, ''];
+    }
+    $process = proc_open(
+        $argv,
+        [1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
+        $pipes,
+        null,
+        ['PATH' => '/usr/sbin:/usr/bin:/sbin:/bin'],
+        ['bypass_shell' => true]
+    );
+    if (!is_resource($process)) {
+        return [127, ''];
+    }
+    stream_set_blocking($pipes[1], false);
+    stream_set_blocking($pipes[2], false);
+    $stdout = '';
+    $stderr = '';
+    $deadline = microtime(true) + max(1, $timeout);
+    $code = null;
+    while (true) {
+        $stdout .= stream_get_contents($pipes[1]);
+        $stderr .= stream_get_contents($pipes[2]);
+        if (strlen($stdout) > 2097152) $stdout = substr($stdout, -2097152);
+        if (strlen($stderr) > 2097152) $stderr = substr($stderr, -2097152);
+        $status = proc_get_status($process);
+        if (!$status['running']) {
+            $code = (int)$status['exitcode'];
+            break;
+        }
+        if (microtime(true) >= $deadline) {
+            proc_terminate($process, 15);
+            $grace = microtime(true) + 1.0;
+            while (microtime(true) < $grace) {
+                usleep(50000);
+                $status = proc_get_status($process);
+                if (!$status['running']) break;
+            }
+            if (($status['running'] ?? false) === true) proc_terminate($process, 9);
+            $code = 124;
+            break;
+        }
+        usleep(50000);
+    }
+    $stdout .= stream_get_contents($pipes[1]);
+    $stderr .= stream_get_contents($pipes[2]);
+    fclose($pipes[1]);
+    fclose($pipes[2]);
+    $closed = proc_close($process);
+    if ($code === null || $code < 0) $code = $closed >= 0 ? $closed : 1;
+    return [$code, trim($code === 0 ? $stdout : ($stderr !== '' ? $stderr : $stdout))];
+}
+
+function command(array $argv, int $timeout = 10): string
+{
+    [$code, $output] = runCommand($argv, $timeout);
+    return $code === 0 ? $output : '';
 }
 
 function serviceState(string $unit): string
@@ -51,8 +106,21 @@ function serviceState(string $unit): string
     if (!in_array($unit, $allowed, true)) {
         return 'unknown';
     }
-    $state = command('systemctl is-active ' . escapeshellarg($unit));
+    $state = command(['systemctl', 'is-active', $unit]);
     return in_array($state, ['active', 'inactive', 'failed', 'activating', 'deactivating'], true) ? $state : 'unknown';
+}
+
+function phpServiceState(): string
+{
+    $listing = command(['systemctl', 'list-unit-files', '--type=service', '--no-legend', 'php*-fpm.service']);
+    foreach (preg_split('/\R/', $listing) ?: [] as $line) {
+        $parts = preg_split('/\s+/', trim($line)) ?: [];
+        $unit = (string)($parts[0] ?? '');
+        if (!preg_match('/^php[0-9]+(?:\.[0-9]+)?-fpm\.service$/', $unit)) continue;
+        $state = command(['systemctl', 'is-active', $unit]);
+        return in_array($state, ['active', 'inactive', 'failed', 'activating', 'deactivating'], true) ? $state : 'unknown';
+    }
+    return 'unknown';
 }
 
 function adminAction(string $action, string $argument = ''): array
@@ -66,19 +134,14 @@ function adminAction(string $action, string $argument = ''): array
     if (!isset($allowed[$action]) || !in_array($argument, $allowed[$action], true)) {
         return [2, 'Aktion abgelehnt.'];
     }
-    $cmd = 'sudo -n /usr/local/sbin/msfixit-admin-action ' . escapeshellarg($action);
-    if ($argument !== '') {
-        $cmd .= ' ' . escapeshellarg($argument);
-    }
-    $lines = [];
-    $code = 1;
-    exec($cmd . ' 2>&1', $lines, $code);
-    return [$code, trim(implode("\n", array_slice($lines, -200)))];
+    $argv = ['sudo', '-n', '/usr/local/sbin/msfixit-admin-action', $action];
+    if ($argument !== '') $argv[] = $argument;
+    return runCommand($argv, $action === 'backup-create' ? 900 : 60);
 }
 
 function statusSnapshot(): array
 {
-    $temperatureRaw = command('cat /sys/class/thermal/thermal_zone0/temp');
+    $temperatureRaw = trim((string)@file_get_contents('/sys/class/thermal/thermal_zone0/temp'));
     $temperature = is_numeric($temperatureRaw) ? round(((float)$temperatureRaw) / 1000, 1) : null;
     $diskFree = @disk_free_space('/data');
     $diskTotal = @disk_total_space('/data');
@@ -86,7 +149,7 @@ function statusSnapshot(): array
     rsort($backups, SORT_STRING);
     $uptimeParts = explode(' ', trim((string)@file_get_contents('/proc/uptime')));
     return [
-        'version' => command('/usr/local/bin/shopos-version') ?: 'unbekannt',
+        'version' => command(['/usr/local/bin/shopos-version']) ?: 'unbekannt',
         'uptime_seconds' => (int)floor((float)($uptimeParts[0] ?? 0)),
         'temperature_c' => $temperature,
         'storage' => [
@@ -98,7 +161,7 @@ function statusSnapshot(): array
             'nginx' => serviceState('nginx.service'),
             'mariadb' => serviceState('mariadb.service'),
             'redis' => serviceState('redis-server.service'),
-            'php_fpm' => command("systemctl is-active 'php*-fpm.service' | head -n1") ?: 'unknown',
+            'php_fpm' => phpServiceState(),
         ],
     ];
 }

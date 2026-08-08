@@ -25,6 +25,10 @@ def select(slot: str, cmdline: pathlib.Path = CMDLINE) -> None:
     if len(root_indexes) != 1:
         raise BootError('kernel cmdline must contain exactly one root parameter')
     tokens[root_indexes[0]] = f'root=LABEL={ALLOWED[slot]}'
+    # Slot changes must never reintroduce a console-blank timeout. Normalize any
+    # inherited value and keep exactly one explicit no-blank parameter.
+    tokens = [token for token in tokens if not token.startswith('consoleblank=')]
+    tokens.append('consoleblank=0')
     data = (' '.join(tokens) + '\n').encode()
     fd, tmp = tempfile.mkstemp(prefix='.cmdline.', dir=cmdline.parent)
     try:

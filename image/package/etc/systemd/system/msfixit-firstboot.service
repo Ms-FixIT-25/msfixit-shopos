@@ -1,7 +1,6 @@
 [Unit]
 Description=Ms. FixIT ShopOS first-boot provisioning
-Wants=network-online.target
-After=network-online.target local-fs.target
+After=local-fs.target
 ConditionPathExists=!/data/.shopos-initialized
 
 [Service]

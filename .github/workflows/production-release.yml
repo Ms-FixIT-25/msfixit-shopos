@@ -9,7 +9,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: shopos-production-${{ github.ref }}
+  group: shopos-production-${{ github.sha }}
   cancel-in-progress: false
 
 jobs:
@@ -17,11 +17,14 @@ jobs:
     name: Build exact main commit
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 180
+    outputs:
+      version: ${{ steps.version.outputs.version }}
     steps:
       - name: Check out exact main commit
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
+          fetch-depth: 0
           persist-credentials: false
 
       - name: Verify checked-out source identity
@@ -40,6 +43,24 @@ jobs:
           tests=(tests/test-shopos-*.sh tests/test-guided-device-wizard.sh tests/test-admin-console-foundation.sh)
           for test_file in "${tests[@]}"; do bash "$test_file"; done
 
+      - name: Resolve deterministic release version for this main commit
+        id: version
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          git fetch --force --tags origin
+          existing_tag="$(git tag --points-at "$GITHUB_SHA" \
+            | grep -E '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' \
+            | sort -V | tail -n 1 || true)"
+          if [ -n "$existing_tag" ]; then
+            version="${existing_tag#v}"
+            echo "Reusing release version already bound to this commit: $version"
+          else
+            version="$(bash scripts/next-release-version.sh image/VERSION)"
+            echo "Resolved next release version: $version"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
       - name: Reclaim runner disk space
         run: |
           sudo rm -rf /opt/hostedtoolcache || true
@@ -47,16 +68,211 @@ jobs:
           df -h
 
       - name: Build production Raspberry Pi 4 USB image
-        run: make image-rpi4-usb
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          env \
+            GITHUB_EVENT_NAME=production \
+            SHOPOS_VERSION="$RELEASE_VERSION" \
+            SHOPOS_ARTIFACT_VERSION="$RELEASE_VERSION" \
+            make image-rpi4-usb
+
+      - name: Verify built version matches resolved release version
+        env:
+          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -Eeuo pipefail
+          test "$(tr -d '[:space:]' < artifacts/SHOPOS-VERSION.txt)" = "$RELEASE_VERSION"
+          sha256sum --check artifacts/msfixit-shopos-rpi4-usb.img.xz.sha256
+          sha256sum --check artifacts/msfixit-shopos-rpi4-usb.img.zip.sha256
 
       - name: Generate verified production metadata and SBOM
         run: bash scripts/generate-release-metadata.sh artifacts production "$GITHUB_SHA" "$GITHUB_RUN_ID"
 
       - name: Upload immutable production artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: shopos-production-${{ github.sha }}
           path: artifacts/
           if-no-files-found: error
           compression-level: 0
           retention-days: 90
+
+  qemu:
+    name: Boot exact production image on ARM64
+    needs: build
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 80
+    steps:
+      - name: Check out exact main commit and QEMU harness
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Reclaim runner disk space
+        run: |
+          sudo rm -rf /opt/hostedtoolcache || true
+          sudo rm -rf /usr/local/lib/android || true
+          df -h
+
+      - name: Restore pinned QEMU build
+        id: qemu-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/shopos-qemu/9.2.4
+          key: shopos-qemu-9.2.4-${{ runner.os }}-${{ runner.arch }}-v1
+
+      - name: Build pinned QEMU with Raspberry Pi 4 support
+        if: steps.qemu-cache.outputs.cache-hit != 'true'
+        run: bash scripts/install-qemu-raspi4.sh "$HOME/.cache/shopos-qemu/9.2.4"
+
+      - name: Validate QEMU and harness
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          export PATH="$HOME/.cache/shopos-qemu/9.2.4/bin:$PATH"
+          mkdir -p vm
+          qemu-system-aarch64 --version | tee vm/qemu-version.txt
+          qemu-system-aarch64 -machine help | tee vm/qemu-machines.txt
+          grep -Eq '^[[:space:]]*raspi4b([[:space:]]|$)' vm/qemu-machines.txt
+          bash -n tests/prepare-qemu-image.sh
+          bash -n tests/normalize-qemu-sd-size.sh
+          bash tests/normalize-qemu-sd-size.sh --self-test
+          bash tests/run-qemu-smoke.sh --self-test
+
+      - name: Download exact production artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: shopos-production-${{ github.sha }}
+          path: production
+
+      - name: Verify and unpack exact production image
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          set -Eeuo pipefail
+          test "$(tr -d '[:space:]' < production/SHOPOS-VERSION.txt)" = "$RELEASE_VERSION"
+          (
+            cd production
+            sha256sum --check --strict msfixit-shopos-rpi4-usb.img.xz.sha256
+          )
+          mkdir -p vm
+          xz --decompress --stdout production/msfixit-shopos-rpi4-usb.img.xz > vm/shopos-test.img
+          test -s vm/shopos-test.img
+          bash tests/normalize-qemu-sd-size.sh vm/shopos-test.img | tee vm/qemu-disk-size.txt
+          df -h .
+
+      - name: Prepare offline QEMU guest
+        run: sudo bash tests/prepare-qemu-image.sh vm/shopos-test.img
+
+      - name: Boot, initialize and validate exact production image
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          qemu_path="$HOME/.cache/shopos-qemu/9.2.4/bin"
+          sudo env PATH="$qemu_path:$PATH" \
+            bash -x tests/run-qemu-smoke.sh vm/shopos-test.img vm \
+            2>&1 | tee vm/harness.log
+          grep -Fxq 'MSFIXIT_VM_SMOKE_RESULT=PASS failures=0' vm/msfixit-vm-smoke.result
+
+      - name: Prepare production QEMU evidence
+        if: always()
+        run: |
+          mkdir -p vm
+          sudo chown -R "$USER:$USER" vm 2>/dev/null || true
+          find vm -type d -exec chmod u+rwx {} + 2>/dev/null || true
+          find vm -type f -exec chmod u+rw {} + 2>/dev/null || true
+
+      - name: Upload production QEMU evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: shopos-production-qemu-evidence-${{ github.sha }}
+          path: |
+            vm/harness.log
+            vm/qemu-version.txt
+            vm/qemu-machines.txt
+            vm/qemu-disk-size.txt
+            vm/qemu-acceleration.txt
+            vm/qemu-console.log
+            vm/qemu-exit.txt
+            vm/partition-identifiers.txt
+            vm/fstab.before
+            vm/fstab.after
+            vm/initramfs-selection.txt
+            vm/kernel-command-line.txt
+            vm/msfixit-vm-smoke.log
+            vm/msfixit-vm-smoke.result
+            vm/msfixit-firstboot.log
+            vm/guest-journal.log
+            vm/guest-filesystem-state.txt
+          if-no-files-found: warn
+          retention-days: 30
+
+  publish:
+    name: Publish boot-verified production release
+    needs: [build, qemu]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: write
+    steps:
+      - name: Check out exact boot-verified source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+
+      - name: Download exact boot-verified production artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: shopos-production-${{ github.sha }}
+          path: artifacts
+
+      - name: Verify release payload and version
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          set -Eeuo pipefail
+          test "$(tr -d '[:space:]' < artifacts/SHOPOS-VERSION.txt)" = "$RELEASE_VERSION"
+          (
+            cd artifacts
+            sha256sum --check --strict msfixit-shopos-rpi4-usb.img.xz.sha256
+            sha256sum --check --strict msfixit-shopos-rpi4-usb.img.zip.sha256
+          )
+
+      - name: Publish only after successful production boot
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          set -Eeuo pipefail
+          tag="v${RELEASE_VERSION}"
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            target="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" --jq .target_commitish)"
+            test "$target" = "$GITHUB_SHA"
+            gh release upload "$tag" artifacts/* --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$tag" artifacts/* \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "Ms. FixIT ShopOS ${RELEASE_VERSION}" \
+              --notes "Boot-verifizierter ShopOS Produktionsrelease ${RELEASE_VERSION}."
+          fi
+          bash scripts/sync-release-assets.sh "$RELEASE_VERSION" "$GITHUB_REPOSITORY"
+
+      - name: Verify published release is bound to this exact main commit
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          set -Eeuo pipefail
+          tag="v${RELEASE_VERSION}"
+          target="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" --jq .target_commitish)"
+          test "$target" = "$GITHUB_SHA"
+          gh release view "$tag" --repo "$GITHUB_REPOSITORY"

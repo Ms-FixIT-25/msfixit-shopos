@@ -2,7 +2,7 @@ name: Admin console foundation
 
 on:
   pull_request:
-    branches: [main, agent/admin-console-phase2, agent/admin-console-product-gui]
+    branches: [main, integration/shopos-master-consolidation, agent/admin-console-phase2, agent/admin-console-product-gui]
     paths:
       - image/package/usr/share/msfixit-shopos/admin-console/**
       - image/package/usr/local/sbin/msfixit-admin-console-init

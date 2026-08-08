@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+umask 077
+
+config=/etc/msfixit-shopos/cloudflared.env
+runtime=/run/msfixit-cloudflared/token
+
+[ -f "$config" ] && [ ! -L "$config" ] || {
+    echo 'Cloudflare tunnel configuration is unavailable or unsafe.' >&2
+    exit 1
+}
+
+line="$(grep -m1 '^CF_TUNNEL_TOKEN=' "$config" || true)"
+token="${line#CF_TUNNEL_TOKEN=}"
+if [ -z "$line" ] || [ -z "$token" ] || [ "$token" = "$line" ]; then
+    echo 'Cloudflare tunnel token is missing.' >&2
+    exit 1
+fi
+case "$token" in
+    *$'\n'*|*$'\r'*)
+        echo 'Cloudflare tunnel token contains an invalid newline.' >&2
+        exit 1
+        ;;
+esac
+
+install -d -o root -g root -m 0700 /run/msfixit-cloudflared
+printf '%s\n' "$token" > "$runtime"
+chmod 0600 "$runtime"
+unset token line
+
+exec /usr/local/bin/cloudflared tunnel --no-autoupdate run --token-file "$runtime"

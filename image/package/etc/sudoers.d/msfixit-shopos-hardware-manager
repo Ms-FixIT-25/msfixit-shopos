@@ -1,0 +1,2 @@
+Defaults:shopos-hwmon !authenticate
+shopos-hwmon ALL=(root) NOPASSWD: /usr/local/sbin/msfixit-hardware-action *

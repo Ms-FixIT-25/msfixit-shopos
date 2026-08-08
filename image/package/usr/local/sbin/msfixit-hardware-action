@@ -1,0 +1,212 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import json
+import os
+from pathlib import Path
+import re
+import secrets
+import stat
+import subprocess
+import sys
+from typing import Any
+
+TRANSACTION_DIR = Path("/var/lib/msfixit-shopos-hardware-transactions")
+TXN_RE = re.compile(r"^[a-f0-9]{24}$")
+POLICY_RE = re.compile(r"^/sys/devices/system/cpu/cpufreq/policy[0-9]+/scaling_governor$")
+GOVERNORS = {"schedutil", "powersave"}
+
+
+def emit(payload: dict[str, Any], code: int = 0) -> None:
+    print(json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True))
+    raise SystemExit(code)
+
+
+def audit(action: str, result: str, transaction_id: str = "") -> None:
+    message = f"action={action} result={result} transaction={transaction_id or '-'}"
+    try:
+        subprocess.run(["/usr/bin/logger", "-t", "msfixit-hardware-action", "--", message], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=2, check=False, env={"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LC_ALL": "C"})
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
+def ensure_transaction_dir() -> None:
+    parent = TRANSACTION_DIR.parent
+    try:
+        parent_stat = os.lstat(parent)
+    except OSError as exc:
+        emit({"ok": False, "error": "transaction_parent_unavailable", "detail": str(exc)[:160]}, 4)
+    if not stat.S_ISDIR(parent_stat.st_mode) or stat.S_ISLNK(parent_stat.st_mode) or parent_stat.st_uid != 0:
+        emit({"ok": False, "error": "unsafe_transaction_parent"}, 4)
+    try:
+        current = os.lstat(TRANSACTION_DIR)
+    except FileNotFoundError:
+        os.mkdir(TRANSACTION_DIR, 0o700)
+        current = os.lstat(TRANSACTION_DIR)
+    except OSError as exc:
+        emit({"ok": False, "error": "transaction_directory_unavailable", "detail": str(exc)[:160]}, 4)
+    if not stat.S_ISDIR(current.st_mode) or stat.S_ISLNK(current.st_mode) or current.st_uid != 0:
+        emit({"ok": False, "error": "unsafe_transaction_directory"}, 4)
+    os.chmod(TRANSACTION_DIR, 0o700, follow_symlinks=False)
+
+
+def atomic_json(path: Path, payload: dict[str, Any]) -> None:
+    tmp = TRANSACTION_DIR / f".{path.name}.{os.getpid()}.tmp"
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    fd = os.open(tmp, flags, 0o600)
+    try:
+        data = (json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True) + "\n").encode("utf-8")
+        os.write(fd, data)
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    os.replace(tmp, path)
+
+
+def read_text(path: Path, max_bytes: int = 4096) -> str:
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    fd = os.open(path, flags)
+    try:
+        data = os.read(fd, max_bytes + 1)
+    finally:
+        os.close(fd)
+    if len(data) > max_bytes:
+        raise ValueError("file_too_large")
+    return data.decode("utf-8", errors="strict").strip()
+
+
+def governor_policies() -> list[Path]:
+    result: list[Path] = []
+    for policy in sorted(Path("/sys/devices/system/cpu/cpufreq").glob("policy[0-9]*")):
+        target = policy / "scaling_governor"
+        if target.is_file() and POLICY_RE.fullmatch(str(target)):
+            result.append(target)
+    return result
+
+
+def available_governors(policy_file: Path) -> set[str]:
+    text = read_text(policy_file.parent / "scaling_available_governors")
+    return {item for item in text.split() if re.fullmatch(r"[A-Za-z0-9_-]{1,32}", item)}
+
+
+def write_governor(policy_file: Path, governor: str) -> None:
+    rollback_governors = {"performance", "ondemand", "conservative", "schedutil", "powersave"}
+    if not POLICY_RE.fullmatch(str(policy_file)) or governor not in rollback_governors:
+        raise ValueError("invalid_governor_write")
+    if governor not in available_governors(policy_file):
+        raise ValueError(f"governor_not_available:{governor}")
+    with open(policy_file, "w", encoding="ascii") as handle:
+        handle.write(governor + "\n")
+        handle.flush()
+    if read_text(policy_file) != governor:
+        raise RuntimeError("governor_verification_failed")
+
+
+def apply_governor(governor: str) -> dict[str, Any]:
+    if governor not in GOVERNORS:
+        emit({"ok": False, "error": "unsupported_governor"}, 2)
+    policies = governor_policies()
+    if not policies:
+        emit({"ok": False, "error": "cpufreq_unavailable"}, 3)
+    before: dict[str, str] = {}
+    for policy in policies:
+        current = read_text(policy)
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,32}", current):
+            emit({"ok": False, "error": "invalid_current_governor", "detail": str(policy)}, 3)
+        if governor not in available_governors(policy):
+            emit({"ok": False, "error": "governor_not_available", "detail": str(policy)}, 3)
+        before[str(policy)] = current
+    transaction_id = secrets.token_hex(12)
+    transaction_path = TRANSACTION_DIR / f"{transaction_id}.json"
+    transaction: dict[str, Any] = {"id": transaction_id, "action": "set-governor", "value": governor, "status": "prepared", "before": {"governors": before}}
+    atomic_json(transaction_path, transaction)
+    changed: list[Path] = []
+    try:
+        for policy in policies:
+            write_governor(policy, governor)
+            changed.append(policy)
+    except Exception as exc:
+        rollback_errors: list[str] = []
+        for policy in reversed(changed):
+            old = before.get(str(policy))
+            if old is None:
+                continue
+            try:
+                write_governor(policy, old)
+            except Exception as rollback_exc:
+                rollback_errors.append(str(rollback_exc)[:120])
+        transaction["status"] = "failed_rolled_back" if not rollback_errors else "failed_rollback_incomplete"
+        transaction["error"] = str(exc)[:240]
+        if rollback_errors:
+            transaction["rollback_errors"] = rollback_errors
+        atomic_json(transaction_path, transaction)
+        audit("set-governor", transaction["status"], transaction_id)
+        emit({"ok": False, "error": "apply_failed", "detail": str(exc)[:240], "transaction_id": transaction_id}, 5)
+    transaction["status"] = "applied"
+    atomic_json(transaction_path, transaction)
+    audit("set-governor", "success", transaction_id)
+    return {"ok": True, "transaction_id": transaction_id, "action": "set-governor", "value": governor}
+
+
+def load_transaction(transaction_id: str) -> tuple[Path, dict[str, Any]]:
+    if not TXN_RE.fullmatch(transaction_id):
+        emit({"ok": False, "error": "invalid_transaction"}, 2)
+    path = TRANSACTION_DIR / f"{transaction_id}.json"
+    try:
+        payload = json.loads(read_text(path, 128 * 1024))
+    except (OSError, ValueError, json.JSONDecodeError) as exc:
+        emit({"ok": False, "error": "transaction_unavailable", "detail": str(exc)[:160]}, 3)
+    if not isinstance(payload, dict) or payload.get("id") != transaction_id:
+        emit({"ok": False, "error": "invalid_transaction_record"}, 3)
+    return path, payload
+
+
+def rollback(transaction_id: str) -> dict[str, Any]:
+    path, transaction = load_transaction(transaction_id)
+    if transaction.get("action") != "set-governor":
+        emit({"ok": False, "error": "unsupported_transaction_action"}, 3)
+    before = transaction.get("before")
+    governors = before.get("governors") if isinstance(before, dict) else None
+    if not isinstance(governors, dict) or not governors:
+        emit({"ok": False, "error": "transaction_missing_backup"}, 3)
+    restored: list[str] = []
+    try:
+        for path_raw, governor_raw in governors.items():
+            if not isinstance(path_raw, str) or not POLICY_RE.fullmatch(path_raw):
+                raise ValueError("unsafe_policy_path")
+            if not isinstance(governor_raw, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,32}", governor_raw):
+                raise ValueError("unsafe_governor_backup")
+            policy = Path(path_raw)
+            write_governor(policy, governor_raw)
+            restored.append(path_raw)
+    except Exception as exc:
+        transaction["status"] = "rollback_failed"
+        transaction["rollback_error"] = str(exc)[:240]
+        atomic_json(path, transaction)
+        audit("rollback", "failed", transaction_id)
+        emit({"ok": False, "error": "rollback_failed", "detail": str(exc)[:240]}, 5)
+    transaction["status"] = "rolled_back"
+    transaction["restored"] = restored
+    atomic_json(path, transaction)
+    audit("rollback", "success", transaction_id)
+    return {"ok": True, "transaction_id": transaction_id, "status": "rolled_back"}
+
+
+def main() -> None:
+    if os.geteuid() != 0:
+        emit({"ok": False, "error": "root_required"}, 4)
+    ensure_transaction_dir()
+    args = sys.argv[1:]
+    if len(args) == 3 and args[0] == "apply" and args[1] == "set-governor":
+        emit(apply_governor(args[2]))
+    if len(args) == 2 and args[0] == "rollback":
+        emit(rollback(args[1]))
+    emit({"ok": False, "error": "unsupported_action"}, 2)
+
+
+if __name__ == "__main__":
+    main()

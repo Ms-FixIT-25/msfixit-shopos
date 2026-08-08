@@ -1,0 +1,30 @@
+#!/usr/bin/env python3
+from __future__ import annotations
+
+import logging
+import signal
+import sys
+
+sys.path.insert(0, "/usr/lib/msfixit-shopos")
+
+from hardware_manager.manager import HardwareManager  # noqa: E402
+
+
+def main() -> int:
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    manager = HardwareManager(socket_path="/run/msfixit-hardware-manager/api.sock")
+
+    def stop(_signum: int, _frame: object) -> None:
+        manager.stop()
+
+    signal.signal(signal.SIGTERM, stop)
+    signal.signal(signal.SIGINT, stop)
+    try:
+        manager.run()
+    finally:
+        manager.stop()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

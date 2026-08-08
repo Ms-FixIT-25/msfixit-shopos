@@ -1,0 +1,41 @@
+[Unit]
+Description=Ms. FixIT ShopOS Hardware Manager
+After=local-fs.target systemd-udev-settle.service
+Wants=systemd-udev-settle.service
+StartLimitIntervalSec=120s
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=shopos-hwmon
+Group=shopos-hwmon
+SupplementaryGroups=shopos-hwapi
+RuntimeDirectory=msfixit-hardware-manager
+RuntimeDirectoryMode=0755
+ExecStart=/usr/local/sbin/msfixit-hardware-manager
+Restart=on-failure
+RestartSec=10s
+UMask=0027
+Nice=10
+CPUWeight=5
+CPUQuota=20%
+MemoryHigh=64M
+MemoryMax=96M
+TasksMax=48
+IOSchedulingClass=idle
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+ReadWritePaths=/var/lib/msfixit-shopos/hardware-manager /run/msfixit-hardware-manager
+
+[Install]
+WantedBy=multi-user.target

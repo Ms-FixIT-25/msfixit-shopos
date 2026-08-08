@@ -1,0 +1,23 @@
+[Unit]
+Description=Ms. FixIT ShopOS interactive first-login setup
+After=local-fs.target systemd-vconsole-setup.service msfixit-display-keepawake.service msfixit-boot-console.service
+Wants=msfixit-display-keepawake.service
+Before=getty@tty1.service msfixit-kiosk.service
+ConditionPathExists=!/var/lib/msfixit-shopos/first-setup-complete
+
+[Service]
+Type=oneshot
+ExecStartPre=/usr/local/sbin/msfixit-display-keepawake /dev/tty1
+ExecStart=/usr/local/sbin/msfixit-first-login-init
+ExecStartPost=/bin/systemctl --no-block start msfixit-kiosk.service
+StandardInput=tty-force
+StandardOutput=tty
+StandardError=tty
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=no
+TimeoutStartSec=infinity
+
+[Install]
+WantedBy=multi-user.target
