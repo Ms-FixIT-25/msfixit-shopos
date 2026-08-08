@@ -14,10 +14,12 @@ time_helper="$root/image/package/usr/local/sbin/msfixit-time-bootstrap"
 timesync="$root/image/package/etc/systemd/timesyncd.conf.d/msfixit-shopos.conf"
 ssh_helper="$root/image/package/usr/local/sbin/msfixit-ssh-recovery-init"
 ssh_service="$root/image/package/etc/systemd/system/msfixit-ssh-recovery.service"
+ssh_auth="$root/image/package/etc/ssh/sshd_config.d/60-msfixit-admin-auth.conf"
+sudo_policy="$root/image/package/etc/sudoers.d/99-msfixit-admin-password"
 
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 
-for path in "$postinst" "$first_login_init" "$first_login" "$kiosk" "$boot_console" "$office_print" "$office_worker" "$time_service" "$time_helper" "$timesync" "$ssh_helper" "$ssh_service"; do
+for path in "$postinst" "$first_login_init" "$first_login" "$kiosk" "$boot_console" "$office_print" "$office_worker" "$time_service" "$time_helper" "$timesync" "$ssh_helper" "$ssh_service" "$ssh_auth" "$sudo_policy"; do
     [ -s "$path" ] || fail "missing required file: $path"
 done
 
@@ -104,9 +106,26 @@ grep -Fq '/usr/local/sbin/msfixit-ssh-recovery-init' "$first_login_init" \
 grep -Fq 'passwd -u "$username"' "$first_login_init" \
     || fail 'new administrator must be explicitly unlocked after password provisioning'
 
-# Never regress into embedding the observed test workstation MAC in public code.
-if grep -RFiq 'd8:43:ae:c8:cd:26' "$root/image" "$root/tests"; then
-    fail 'a concrete administrator workstation MAC was embedded in the repository'
+# The password chosen during first login is the single human administrator
+# password: local login, sudo and SSH password authentication all use it.
+grep -Fxq 'PasswordAuthentication yes' "$ssh_auth" \
+    || fail 'SSH password authentication is not enabled for the first-login administrator'
+grep -Fxq 'PubkeyAuthentication yes' "$ssh_auth" \
+    || fail 'SSH public-key recovery must remain enabled alongside password login'
+grep -Fxq 'UsePAM yes' "$ssh_auth" \
+    || fail 'SSH must use the normal PAM account/password state'
+grep -Fxq 'PermitRootLogin no' "$ssh_auth" \
+    || fail 'root must not become a separate remote administrator account'
+grep -Fxq 'PermitEmptyPasswords no' "$ssh_auth" \
+    || fail 'SSH must never accept an empty administrator password'
+grep -Fxq 'Defaults:%sudo authenticate' "$sudo_policy" \
+    || fail 'human sudo administrators must authenticate'
+grep -Fxq '%sudo ALL=(ALL:ALL) PASSWD: ALL' "$sudo_policy" \
+    || fail 'human administrator commands must use the first-login password'
+
+# Do not embed a concrete workstation MAC in the recovery helper or policy.
+if grep -Eiq '([[:xdigit:]]{2}:){5}[[:xdigit:]]{2}' "$ssh_helper" "$ssh_service" "$ssh_auth" "$sudo_policy"; then
+    fail 'a concrete administrator workstation MAC was embedded in product policy'
 fi
 
-printf 'PASS: real-hardware first-login keeps Wi-Fi executable, seeds time offline, uses NetworkManager only, preserves the Plymouth/VT/kiosk handoff, and provides MAC-gated key-based SSH recovery.\n'
+printf 'PASS: real-hardware first-login keeps Wi-Fi executable, seeds time offline, uses NetworkManager only, preserves the Plymouth/VT/kiosk handoff, and uses one human admin password for sudo/SSH plus MAC-gated key recovery.\n'
