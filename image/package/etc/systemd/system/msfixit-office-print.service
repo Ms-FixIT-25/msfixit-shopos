@@ -1,7 +1,6 @@
 [Unit]
 Description=Ms. FixIT document and label print queue
-After=network-online.target
-Wants=network-online.target
+After=local-fs.target
 ConditionPathExists=/etc/msfixit-shopos/office-worker.env
 
 [Service]
