@@ -2,7 +2,7 @@ name: Build ShopOS image
 
 on:
   push:
-    branches: [main, agent/admin-console-foundation]
+    branches: [main, integration/shopos-master-consolidation, agent/admin-console-foundation]
     paths:
       - image/**
       - scripts/**
@@ -11,7 +11,7 @@ on:
       - Makefile
       - .github/workflows/build-image.yml
   pull_request:
-    branches: [main]
+    branches: [main, integration/shopos-master-consolidation]
     paths:
       - image/**
       - scripts/**
