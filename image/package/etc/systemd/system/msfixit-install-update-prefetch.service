@@ -1,0 +1,15 @@
+[Unit]
+Description=Ms. FixIT ShopOS install-time OTA prefetch
+Wants=network-online.target
+After=network-online.target local-fs.target
+Before=msfixit-firstboot.service
+ConditionPathExists=!/data/.shopos-initialized
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /usr/local/sbin/msfixit-install-update-prefetch
+TimeoutStartSec=90s
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
