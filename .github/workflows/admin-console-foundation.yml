@@ -2,7 +2,23 @@ name: Admin console foundation
 
 on:
   pull_request:
-    branches: [main, integration/shopos-master-consolidation, agent/admin-console-phase2, agent/admin-console-product-gui]
+    branches: [integration/shopos-master-consolidation]
+    paths:
+      - image/package/usr/share/msfixit-shopos/admin-console/**
+      - image/package/usr/local/sbin/msfixit-admin-console-init
+      - image/package/usr/local/sbin/msfixit-admin-action
+      - image/package/usr/local/sbin/msfixit-device-detected
+      - image/package/etc/udev/rules.d/90-msfixit-removable-storage.rules
+      - image/package/etc/sudoers.d/msfixit-admin-console
+      - image/package/etc/systemd/system/msfixit-admin-console-init.service
+      - image/package/etc/nginx/snippets/msfixit-admin-console.conf
+      - image/package/etc/nginx/sites-available/msfixit-shopos.conf
+      - tests/test-admin-console-foundation.sh
+      - tests/test-admin-console-phase2.sh
+      - tests/test-guided-device-wizard.sh
+      - .github/workflows/admin-console-foundation.yml
+  push:
+    branches: [integration/shopos-master-consolidation]
     paths:
       - image/package/usr/share/msfixit-shopos/admin-console/**
       - image/package/usr/local/sbin/msfixit-admin-console-init
@@ -26,13 +42,13 @@ jobs:
   validate:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v7
+      - name: Check out exact source
+        uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
-      - name: Verify exact PR candidate source
-        if: github.event_name == 'pull_request'
-        run: test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
+      - name: Verify exact source identity
+        run: test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
       - name: Validate authentication, security and product GUI
         run: bash tests/test-admin-console-foundation.sh
       - name: Validate controlled operations
