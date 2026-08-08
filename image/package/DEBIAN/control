@@ -4,7 +4,7 @@ Section: admin
 Priority: optional
 Architecture: arm64
 Maintainer: Ms. FixIT <stefaniekilzer@gmail.com>
-Depends: nginx, mariadb-server, redis-server, php-fpm, php-cli, php-mysql, php-curl, php-gd, php-intl, php-mbstring, php-xml, php-zip, php-bcmath, php-imagick, php-redis, php-tcpdf, cups-client, curl, ca-certificates, jq, unzip, rsync, zstd, nftables, openssl, openssh-client, sshpass, logrotate, sudo, plymouth, plymouth-themes, initramfs-tools, fonts-dejavu-core, chromium, xserver-xorg-core, xserver-xorg-video-all, xserver-xorg-input-libinput, xinit, xterm, x11-xserver-utils, network-manager, wpasupplicant, rfkill, iw, wireless-regdb, firmware-brcm80211, avahi-daemon, libnss-mdns
+Depends: nginx, mariadb-server, redis-server, php-fpm, php-cli, php-mysql, php-curl, php-gd, php-intl, php-mbstring, php-xml, php-zip, php-bcmath, php-imagick, php-redis, php-tcpdf, cups-client, curl, ca-certificates, jq, unzip, rsync, zstd, nftables, openssl, openssh-client, sshpass, logrotate, sudo, plymouth, plymouth-themes, initramfs-tools, fonts-dejavu-core, chromium, xserver-xorg-core, xserver-xorg-video-all, xserver-xorg-input-libinput, xinit, x11-xserver-utils, python3-gi, gir1.2-gtk-3.0, gir1.2-vte-2.91, network-manager, wpasupplicant, rfkill, iw, wireless-regdb, firmware-brcm80211, avahi-daemon, libnss-mdns
 Description: Ms. FixIT ShopOS flash-ready Austrian commerce appliance
  Installs a branded Raspberry Pi appliance operating system with a quiet
  Plymouth boot, guided first-start display, local graphical ShopOS kiosk,
