@@ -110,14 +110,25 @@ if [ "$prerelease_flags" -lt 2 ]; then
     exit 1
 fi
 
-grep -Fq 'branches: [integration/shopos-master-consolidation]' "$build_workflow"
 grep -Fq 'github.event.pull_request.head.sha || github.sha' "$build_workflow"
-if grep -Fq 'branches: [main' "$build_workflow"; then
-    echo 'Automatic image builds must use PR80 as the authoritative source during consolidation.' >&2
-    exit 1
-fi
+BUILD_WORKFLOW="$build_workflow" python3 - <<'PY'
+import os
+import re
+from pathlib import Path
+
+text = Path(os.environ['BUILD_WORKFLOW']).read_text(encoding='utf-8')
+if not re.search(r'(?ms)^\s*push:\s*\n\s*branches:\s*\[integration/shopos-master-consolidation\]', text):
+    raise SystemExit('Automatic image pushes must remain restricted to integration/shopos-master-consolidation.')
+if not re.search(r'(?ms)^\s*pull_request:\s*\n\s*branches:\s*\[main\]', text):
+    raise SystemExit('PR image validation must continue to accept feature PRs targeting main.')
+push_block = re.search(r'(?ms)^\s*push:\s*\n(?P<body>.*?)(?=^\s*pull_request:|^\s*workflow_dispatch:)', text)
+if push_block is None:
+    raise SystemExit('Image build workflow is missing its push trigger block.')
+if re.search(r'branches:\s*\[[^\]]*\bmain\b', push_block.group('body')):
+    raise SystemExit('Automatic image pushes must never run from main during PR80 consolidation.')
+PY
 
 grep -Fq 'msfixit-shopos-<VERSION>-rpi4-usb-windows-macos.zip' "$docs"
 grep -Fq 'msfixit-shopos-<VERSION>-rpi4-usb-linux.img.xz' "$docs"
 
-printf 'PASS: release assets remain versioned and PR80 publication stays boot-verified and pre-release-only.\n'
+printf 'PASS: release assets remain versioned, PR80 publication stays pre-release-only, and image push/PR triggers remain separated.\n'
