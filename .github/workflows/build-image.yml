@@ -78,6 +78,12 @@ jobs:
       - name: Check source syntax and cable discovery logic
         run: make check
 
+      - name: Run PR 80 consolidation regressions
+        run: |
+          bash tests/test-shopos-first-login-package-permissions.sh
+          bash tests/test-shopos-admin-credential-ownership.sh
+          bash tests/test-shopos-hardware-manager.sh
+
       - name: Test article master
         env:
           MYSQL_PWD: shopos-ci-root
