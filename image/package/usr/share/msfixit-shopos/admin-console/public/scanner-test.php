@@ -22,6 +22,8 @@ if (($_SESSION['authenticated'] ?? false) !== true) {
     exit;
 }
 
+require_once '/usr/share/msfixit-shopos/admin-console/lib/scanner-validation.php';
+
 function e(string $value): string
 {
     return htmlspecialchars($value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
@@ -35,19 +37,6 @@ function csrfToken(): string
     return (string)$_SESSION['csrf'];
 }
 
-function validEan(string $digits): bool
-{
-    $length = strlen($digits);
-    if (($length !== 8 && $length !== 13) || !ctype_digit($digits)) return false;
-    $sum = 0;
-    for ($i = $length - 2, $position = 1; $i >= 0; $i--, $position++) {
-        $digit = (int)$digits[$i];
-        $sum += ($position % 2 === 1) ? $digit * 3 : $digit;
-    }
-    $check = (10 - ($sum % 10)) % 10;
-    return $check === (int)$digits[$length - 1];
-}
-
 $result = null;
 $scan = '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -55,23 +44,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         http_response_code(403);
         exit('Ungültige Anfrage.');
     }
-    $scan = trim((string)($_POST['scan_code'] ?? ''));
-    if ($scan === '') {
-        $result = ['class' => 'warning', 'title' => 'Kein Scan empfangen', 'detail' => 'Scannerfeld war leer.'];
-    } elseif (strlen($scan) > 256) {
-        $scan = substr($scan, 0, 256);
-        $result = ['class' => 'warning', 'title' => 'Scan zu lang', 'detail' => 'Für den Abnahmetest werden höchstens 256 Bytes verarbeitet.'];
-    } elseif (preg_match('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/', $scan) === 1) {
-        $result = ['class' => 'warning', 'title' => 'Steuerzeichen erkannt', 'detail' => 'Der Scanner sendet unerwartete Steuerzeichen. Konfiguration prüfen.'];
-    } elseif (ctype_digit($scan) && strlen($scan) === 8) {
-        $ok = validEan($scan);
-        $result = ['class' => $ok ? 'success' : 'error', 'title' => $ok ? 'EAN-8 gültig' : 'EAN-8 Prüfziffer ungültig', 'detail' => $ok ? 'Der komplette EAN-8-Code wurde an ShopOS übergeben.' : 'Die Länge passt zu EAN-8, aber die Prüfziffer stimmt nicht.'];
-    } elseif (ctype_digit($scan) && strlen($scan) === 13) {
-        $ok = validEan($scan);
-        $result = ['class' => $ok ? 'success' : 'error', 'title' => $ok ? 'EAN-13 gültig' : 'EAN-13 Prüfziffer ungültig', 'detail' => $ok ? 'Der komplette EAN-13-Code wurde an ShopOS übergeben.' : 'Die Länge passt zu EAN-13, aber die Prüfziffer stimmt nicht.'];
-    } else {
-        $result = ['class' => 'success', 'title' => 'Scannertext empfangen', 'detail' => 'Die Nutzdaten wurden vollständig an das Formular übergeben. Code 128, QR und andere Symbologien lassen sich aus dem ausgegebenen Text allein nicht zuverlässig unterscheiden.'];
-    }
+    $result = shoposEvaluateScannerInput((string)($_POST['scan_code'] ?? ''));
+    $scan = (string)($result['scan'] ?? '');
 }
 ?><!doctype html>
 <html lang="de"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>ShopOS Scanner-Abnahmetest</title><style>
