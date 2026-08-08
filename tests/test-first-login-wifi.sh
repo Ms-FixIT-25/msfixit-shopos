@@ -14,6 +14,7 @@ keepawake_service="$root/image/package/etc/systemd/system/msfixit-display-keepaw
 kiosk_service="$root/image/package/etc/systemd/system/msfixit-kiosk.service"
 firstboot_service="$root/image/package/etc/systemd/system/msfixit-firstboot.service"
 brand_service="$root/image/package/etc/systemd/system/msfixit-brand-shop.service"
+admin_init_service="$root/image/package/etc/systemd/system/msfixit-admin-console-init.service"
 control="$root/image/package/DEBIAN/control"
 postinst="$root/image/package/DEBIAN/postinst"
 layout="$root/scripts/postprocess-ab-image.sh"
@@ -25,6 +26,7 @@ bash -n "$kiosk_session"
 bash -n "$layout"
 
 test -s "$first_login_service"
+test -s "$admin_init_service"
 test -s "$nm_config"
 
 grep -Fq 'exec </dev/tty1 >/dev/tty1 2>&1' "$init"
@@ -82,6 +84,7 @@ grep -Eq 'Depends:.*(^|, )xserver-xorg-input-libinput(,|$)' "$control" || {
     exit 1
 }
 grep -Fq 'systemctl enable NetworkManager.service' "$postinst"
+grep -Fq 'systemctl enable msfixit-admin-console-init.service' "$postinst"
 
 # The interactive wizard must never block getty's ExecStartPre.
 grep -Fq 'Wants=msfixit-first-login.service' "$dropin"
@@ -101,10 +104,12 @@ grep -Fq 'TTYPath=/dev/tty1' "$first_login_service"
 grep -Fq 'TimeoutStartSec=infinity' "$first_login_service"
 grep -Fq 'NetworkManager.service' "$first_login_service"
 
-# The kiosk must fail closed if first-login or branding fails, while Internet
-# connectivity remains optional for the local 127.0.0.1 appliance UI.
-grep -Fq 'Requires=msfixit-brand-shop.service msfixit-first-login.service' "$kiosk_service"
-grep -Fq 'After=local-fs.target nginx.service msfixit-brand-shop.service msfixit-first-login.service' "$kiosk_service"
+# The kiosk must not expose a stale/uninitialized login page. It waits for the
+# application credential initializer, which itself requires successful firstboot.
+grep -Fq 'Requires=msfixit-brand-shop.service msfixit-first-login.service msfixit-admin-console-init.service' "$kiosk_service"
+grep -Fq 'After=local-fs.target nginx.service msfixit-brand-shop.service msfixit-first-login.service msfixit-admin-console-init.service' "$kiosk_service"
+grep -Fq 'Requires=msfixit-firstboot.service' "$admin_init_service"
+grep -Fq 'After=local-fs.target msfixit-firstboot.service' "$admin_init_service"
 grep -Fq 'Wants=nginx.service' "$kiosk_service"
 grep -Fq 'SupplementaryGroups=video render input' "$kiosk_service"
 if grep -Fq 'Wants=nginx.service msfixit-first-login.service' "$kiosk_service"; then
@@ -158,4 +163,4 @@ if grep -Eq 'One-time password|chage -d 0|/dev/urandom' "$init"; then
     exit 1
 fi
 
-printf 'PASS: physical kiosk input driver and persistent, verified Wi-Fi setup are required.\n'
+printf 'PASS: physical kiosk input, persistent Wi-Fi and initialized admin startup are required.\n'
