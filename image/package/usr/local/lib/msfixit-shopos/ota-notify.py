@@ -79,6 +79,17 @@ def validate_endpoint(endpoint: str) -> None:
         raise NotifyError('OTA notification endpoint must not contain query or fragment data')
 
 
+def same_https_origin(requested: str, final: str) -> bool:
+    requested_url = urllib.parse.urlparse(requested)
+    final_url = urllib.parse.urlparse(final)
+    return (
+        requested_url.scheme == 'https'
+        and final_url.scheme == 'https'
+        and requested_url.hostname == final_url.hostname
+        and (requested_url.port or 443) == (final_url.port or 443)
+    )
+
+
 def atomic_write_json(path: pathlib.Path, value: dict[str, Any]) -> None:
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     temp = path.with_suffix(path.suffix + '.new')
@@ -161,8 +172,8 @@ def request_json(url: str, *, method: str = 'GET', payload: dict[str, Any] | Non
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             final = response.geturl()
-            if urllib.parse.urlparse(final).scheme != 'https':
-                raise NotifyError('OTA notification request redirected outside HTTPS')
+            if not same_https_origin(url, final):
+                raise NotifyError('OTA notification request redirected outside its configured HTTPS origin')
             raw = response.read(MAX_RESPONSE + 1)
     except (urllib.error.URLError, TimeoutError, ValueError) as exc:
         raise NotifyError('OTA notification request failed') from exc
@@ -274,13 +285,16 @@ def self_test() -> None:
     state['last_wake_epoch'] = 980
     assert not should_wake(state, {'schema': 1, 'action': 'check', 'nonce': 'b' * 16}, 60, 1000)
     assert not should_wake(state, {'schema': 1, 'action': 'apply', 'nonce': 'c' * 16}, 60, 2000)
+    assert same_https_origin('https://ota.example.test/v1/a', 'https://ota.example.test/v1/b')
+    assert not same_https_origin('https://ota.example.test/v1/a', 'https://other.example.test/v1/b')
+    assert not same_https_origin('https://ota.example.test/v1/a', 'http://ota.example.test/v1/b')
     try:
         validate_endpoint('http://ota.example.test')
     except NotifyError:
         pass
     else:
         raise AssertionError('HTTP endpoint must be rejected')
-    print('PASS: OTA notifications only wake the signed updater, reject replay and enforce HTTPS.')
+    print('PASS: OTA notifications only wake the signed updater, reject replay, cross-origin redirects and HTTP.')
 
 
 def load_config_for_test(value: dict[str, Any]) -> dict[str, Any]:
