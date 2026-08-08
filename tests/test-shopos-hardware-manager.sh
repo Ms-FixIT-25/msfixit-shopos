@@ -110,7 +110,9 @@ if grep -Eq '(ip address|ip -j|ifconfig|address$|MAC|mac_address)' "$sensors"; t
     exit 1
 fi
 
-if grep -Eq '(systemctl|shutdown|poweroff)[^\n]*(poweroff|shutdown)' "$manager" "$helper"; then
+# Diagnostic log text may mention that poweroff is blocked. Reject only code
+# paths that could actually execute a shutdown/poweroff command.
+if grep -Eq '(subprocess\.(run|Popen|call|check_call|check_output)|os\.system)[^\n]*(poweroff|shutdown)|["'"'](/usr)?/s?bin/(poweroff|shutdown)["'"']' "$manager" "$helper"; then
     echo 'Automatic emergency poweroff must remain blocked until physical hardware validation.' >&2
     exit 1
 fi
