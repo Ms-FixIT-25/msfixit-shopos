@@ -1,0 +1,127 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+umask 077
+
+agent="${SHOPOS_UPDATE_AGENT:-/usr/local/sbin/msfixit-update-agent}"
+verifier="${SHOPOS_UPDATE_VERIFIER:-/usr/local/sbin/msfixit-update}"
+curl_bin="${SHOPOS_UPDATE_CURL:-curl}"
+jq_bin="${SHOPOS_UPDATE_JQ:-jq}"
+state_dir="${SHOPOS_UPDATE_PREFETCH_DIR:-/var/lib/msfixit-shopos/update/prefetch}"
+api_url="${SHOPOS_UPDATE_RELEASE_API:-https://api.github.com/repos/Ms-FixIT-25/msfixit-shopos/releases/latest}"
+manifest_name="shopos-update-manifest.json"
+image_name="shopos-rootfs.ext4.xz"
+
+log() {
+    printf '[shopos-install-ota] %s\n' "$*"
+}
+
+cleanup_temp() {
+    rm -rf "${state_dir}.new" 2>/dev/null || true
+}
+
+# Installation must remain usable offline. A failed remote check never makes
+# the known-good embedded image unbootable and never leaves partial payloads.
+cleanup_temp
+
+if ! check_json="$($agent check 2>/dev/null)"; then
+    log 'No verified online update is available; continuing with embedded image.'
+    exit 0
+fi
+
+available="$(printf '%s' "$check_json" | "$jq_bin" -r 'if .available == true then "true" else "false" end' 2>/dev/null || printf false)"
+if [ "$available" != true ]; then
+    log 'Embedded image is current; no install-time OTA prefetch needed.'
+    exit 0
+fi
+
+case "$api_url" in
+    https://api.github.com/*) ;;
+    *)
+        log 'Update API is outside the allowed HTTPS endpoint; ignoring remote update.'
+        exit 0
+        ;;
+esac
+
+work="${state_dir}.new"
+install -d -m 0700 "$work"
+release_json="$work/release.json"
+manifest="$work/$manifest_name"
+image="$work/$image_name"
+
+if ! "$curl_bin" --fail --silent --show-error --location \
+    --proto '=https' --tlsv1.2 --connect-timeout 5 --max-time 30 \
+    -H 'Accept: application/vnd.github+json' -H 'User-Agent: ShopOS-Install-OTA/1' \
+    --output "$release_json" "$api_url"; then
+    log 'Internet/update API unavailable; discarding prefetch and continuing installation.'
+    cleanup_temp
+    exit 0
+fi
+
+is_draft="$("$jq_bin" -r 'if .draft == false then "false" else "true" end' "$release_json" 2>/dev/null || printf true)"
+is_prerelease="$("$jq_bin" -r 'if .prerelease == false then "false" else "true" end' "$release_json" 2>/dev/null || printf true)"
+if [ "$is_draft" != false ] || [ "$is_prerelease" != false ]; then
+    log 'Latest GitHub release is not a stable release; ignoring it.'
+    cleanup_temp
+    exit 0
+fi
+
+asset_url() {
+    local name="$1"
+    "$jq_bin" -r --arg name "$name" '[.assets[]? | select(.name == $name) | .browser_download_url] | if length == 1 then .[0] else empty end' "$release_json"
+}
+
+manifest_url="$(asset_url "$manifest_name")"
+image_url="$(asset_url "$image_name")"
+case "$manifest_url" in https://github.com/*|https://objects.githubusercontent.com/*|https://release-assets.githubusercontent.com/*) ;; *) manifest_url= ;; esac
+case "$image_url" in https://github.com/*|https://objects.githubusercontent.com/*|https://release-assets.githubusercontent.com/*) ;; *) image_url= ;; esac
+if [ -z "$manifest_url" ] || [ -z "$image_url" ]; then
+    log 'Stable release does not expose exactly one trusted manifest and rootfs asset.'
+    cleanup_temp
+    exit 0
+fi
+
+if ! "$curl_bin" --fail --silent --show-error --location \
+    --proto '=https' --tlsv1.2 --connect-timeout 5 --max-time 30 \
+    --output "$manifest" "$manifest_url"; then
+    log 'Manifest download failed; discarding prefetch and continuing installation.'
+    cleanup_temp
+    exit 0
+fi
+
+if ! payload="$($verifier verify "$manifest" 2>/dev/null)"; then
+    log 'Signed manifest verification failed; remote update discarded.'
+    cleanup_temp
+    exit 0
+fi
+
+signed_url="$(printf '%s' "$payload" | "$jq_bin" -r '.image_url // empty')"
+signed_size="$(printf '%s' "$payload" | "$jq_bin" -r '.image_size // 0')"
+signed_hash="$(printf '%s' "$payload" | "$jq_bin" -r '.image_sha256 // empty')"
+if [ "$signed_url" != "$image_url" ] || ! [[ "$signed_size" =~ ^[1-9][0-9]*$ ]] || [ ${#signed_hash} -ne 64 ]; then
+    log 'Release assets do not match the signed manifest; remote update discarded.'
+    cleanup_temp
+    exit 0
+fi
+
+if ! "$curl_bin" --fail --silent --show-error --location \
+    --proto '=https' --tlsv1.2 --connect-timeout 5 --max-time 3600 \
+    --output "$image" "$image_url"; then
+    log 'Rootfs download failed; partial prefetch discarded and installation continues.'
+    cleanup_temp
+    exit 0
+fi
+
+if [ "$(stat -c '%s' "$image")" != "$signed_size" ] || \
+   [ "$(sha256sum "$image" | awk '{print $1}')" != "$signed_hash" ] || \
+   ! "$verifier" verify "$manifest" --image "$image" >/dev/null 2>&1; then
+    log 'Downloaded rootfs failed signed size/hash verification; prefetch discarded.'
+    cleanup_temp
+    exit 0
+fi
+
+printf '%s\n' "$payload" > "$work/payload.json"
+chmod 0600 "$work"/*
+rm -rf "$state_dir"
+mv "$work" "$state_dir"
+log 'Verified OTA update prefetched successfully; installation may continue safely.'
+exit 0
