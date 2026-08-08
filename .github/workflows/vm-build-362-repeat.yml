@@ -6,6 +6,7 @@ on:
     paths:
       - .github/workflows/vm-build-362-repeat.yml
       - tests/prepare-qemu-image.sh
+      - tests/verify-qemu-candidate-metadata.py
   workflow_dispatch:
 
 permissions:
@@ -58,17 +59,24 @@ jobs:
           bash tests/prepare-qemu-image.sh --self-test
           bash tests/run-qemu-smoke.sh --self-test
           bash tests/normalize-qemu-sd-size.sh --self-test
+          python3 tests/verify-qemu-candidate-metadata.py --self-test
 
       - name: Download and verify exact Build 438 candidate
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          SHOPOS_ARTIFACT_ID: '9048240120'
-          SHOPOS_ARTIFACT_SHA256: e3e67ab926195dbec5819321dacec033199897706135dde23194208ed7b1fbb2
+          SHOPOS_ARTIFACT_ID: '9017883115'
+          SHOPOS_ARTIFACT_SHA256: d06cbae534466c285247d2700596230133bc74421d3c346ea4334aed4a818a1b
           SHOPOS_SOURCE_SHA: 8e852ed5d1de4d3a0a68c4464a254ab63ee87b42
         run: |
           set -Eeuo pipefail
           mkdir -p vm
+          gh api "/repos/${GITHUB_REPOSITORY}/actions/artifacts/${SHOPOS_ARTIFACT_ID}" > vm/artifact-metadata.json
+          python3 tests/verify-qemu-candidate-metadata.py \
+            vm/artifact-metadata.json \
+            "$SHOPOS_ARTIFACT_ID" \
+            "sha256:$SHOPOS_ARTIFACT_SHA256" \
+            "$SHOPOS_SOURCE_SHA"
           gh api "/repos/${GITHUB_REPOSITORY}/actions/artifacts/${SHOPOS_ARTIFACT_ID}/zip" > vm/artifact.zip
           printf '%s  %s\n' "$SHOPOS_ARTIFACT_SHA256" vm/artifact.zip | sha256sum --check --strict
           unzip -q vm/artifact.zip -d vm
@@ -115,6 +123,7 @@ jobs:
             vm-qemu-version.txt
             vm-qemu-machines.txt
             vm-sudo-qemu-version.txt
+            vm/artifact-metadata.json
             vm/candidate-binding.txt
             vm/qemu-image-size.txt
             vm/harness.log
