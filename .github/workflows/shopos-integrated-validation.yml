@@ -2,9 +2,9 @@ name: ShopOS integrated validation
 
 on:
   pull_request:
-    branches: [main, integration/shopos-master-consolidation]
+    branches: [integration/shopos-master-consolidation]
   push:
-    branches: [main]
+    branches: [integration/shopos-master-consolidation]
   workflow_dispatch:
 
 permissions:
@@ -12,13 +12,19 @@ permissions:
 
 jobs:
   integrated-platform:
-    name: Validate the combined ShopOS platform
+    name: Validate exact PR80/candidate source
     runs-on: ubuntu-24.04
     timeout-minutes: 30
 
     steps:
-      - name: Check out combined source
+      - name: Check out exact source
         uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Verify exact source identity
+        run: test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
 
       - name: Validate workflow and script syntax
         shell: bash
@@ -83,14 +89,13 @@ jobs:
             exit 1
           fi
           grep -Fq -- '-accel kvm' tests/run-qemu-smoke.sh
-          # The TCG accelerator is intentionally shell-quoted in the qemu_args array.
-          # Match the accelerator value rather than an obsolete unquoted rendering.
           grep -Fq -- 'tcg,thread=multi' tests/run-qemu-smoke.sh
           grep -Fq 'cache=unsafe,aio=threads' tests/run-qemu-smoke.sh
           grep -Fq 'qemu-acceleration.txt' .github/workflows/shopos-release-gate.yml
           grep -Fq 'actions/download-artifact@v4' .github/workflows/shopos-release-gate.yml
           grep -Fq 'normalize-qemu-sd-size.sh vm/shopos-test.img' .github/workflows/shopos-release-gate.yml
           grep -Fq 'vm/shopos-test.img' .github/workflows/shopos-release-gate.yml
+          grep -Fq 'github.event.pull_request.head.sha || github.sha' .github/workflows/shopos-release-gate.yml
           if grep -Fq 'gh pr merge' .github/workflows/shopos-release-gate.yml; then
             echo 'Automatic merge must remain disabled.' >&2
             exit 1
@@ -108,4 +113,4 @@ jobs:
           test -s image/package/usr/lib/msfixit-shopos/hardware_manager/thermal.py
           test -s scripts/install-qemu-raspi4.sh
           test -s tests/normalize-qemu-sd-size.sh
-          echo 'PASS: combined ShopOS platform and release-gate contracts are valid.'
+          echo 'PASS: exact PR80/candidate source and release-gate contracts are valid.'

@@ -2,12 +2,29 @@ name: First login and Wi-Fi bootstrap
 
 on:
   pull_request:
-    branches: [main]
+    branches: [integration/shopos-master-consolidation]
     paths:
       - image/package/usr/local/sbin/msfixit-first-login-init
       - image/package/usr/local/sbin/msfixit-wifi-connect
       - image/package/etc/msfixit-shopos/wifi.env
+      - image/package/etc/NetworkManager/conf.d/**
+      - image/package/etc/X11/xorg.conf.d/**
+      - image/package/etc/udev/rules.d/**
       - image/package/etc/systemd/system/getty@tty1.service.d/shopos-first-login.conf
+      - image/package/etc/systemd/system/msfixit-kiosk.service
+      - tests/test-first-login-wifi.sh
+      - .github/workflows/first-login-wifi.yml
+  push:
+    branches: [integration/shopos-master-consolidation]
+    paths:
+      - image/package/usr/local/sbin/msfixit-first-login-init
+      - image/package/usr/local/sbin/msfixit-wifi-connect
+      - image/package/etc/msfixit-shopos/wifi.env
+      - image/package/etc/NetworkManager/conf.d/**
+      - image/package/etc/X11/xorg.conf.d/**
+      - image/package/etc/udev/rules.d/**
+      - image/package/etc/systemd/system/getty@tty1.service.d/shopos-first-login.conf
+      - image/package/etc/systemd/system/msfixit-kiosk.service
       - tests/test-first-login-wifi.sh
       - .github/workflows/first-login-wifi.yml
   workflow_dispatch:
@@ -19,6 +36,12 @@ jobs:
   validate:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v7
-      - name: Validate first login and Wi-Fi bootstrap
+      - name: Check out exact source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Verify exact source identity
+        run: test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
+      - name: Validate first login, physical kiosk input and Wi-Fi bootstrap
         run: bash tests/test-first-login-wifi.sh

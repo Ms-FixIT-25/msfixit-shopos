@@ -2,26 +2,32 @@ name: First-boot storage permissions
 
 on:
   pull_request:
+    branches: [integration/shopos-master-consolidation]
     paths:
-      - 'image/package/usr/local/sbin/msfixit-firstboot'
-      - 'tests/test-firstboot-storage-permissions.sh'
-      - '.github/workflows/firstboot-storage-permissions.yml'
+      - image/package/usr/local/sbin/msfixit-firstboot
+      - tests/test-firstboot-storage-permissions.sh
+      - .github/workflows/firstboot-storage-permissions.yml
   push:
-    branches:
-      - 'agent/fix-firstboot-mariadb-permissions'
+    branches: [integration/shopos-master-consolidation]
     paths:
-      - 'image/package/usr/local/sbin/msfixit-firstboot'
-      - 'tests/test-firstboot-storage-permissions.sh'
-      - '.github/workflows/firstboot-storage-permissions.yml'
+      - image/package/usr/local/sbin/msfixit-firstboot
+      - tests/test-firstboot-storage-permissions.sh
+      - .github/workflows/firstboot-storage-permissions.yml
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
   validate-storage-permissions:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - name: Check out ShopOS
+      - name: Check out exact source
         uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Verify exact source identity
+        run: test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
       - name: Validate first-boot storage ownership ordering
         run: bash tests/test-firstboot-storage-permissions.sh

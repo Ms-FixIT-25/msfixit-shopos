@@ -57,39 +57,42 @@ printf '%s\n' "$username" > /etc/msfixit-shopos/admin-user
 chmod 0644 /etc/msfixit-shopos/admin-user
 
 printf '\nBenutzer %s wurde eingerichtet.\n\n' "$username"
-printf 'WLAN einrichten?\n'
-printf '  [A] WLAN automatisch suchen und verbinden\n'
-printf '  [M] SSID manuell auswählen oder eingeben\n'
-printf '  [S] Überspringen\n'
-read -r -p 'Auswahl [A/M/S]: ' wifi_choice
-wifi_choice="${wifi_choice:-A}"
 
-case "${wifi_choice,,}" in
-    a)
-        if /usr/local/sbin/msfixit-wifi-connect; then
-            printf 'WLAN wurde erfolgreich verbunden.\n'
-        else
+while true; do
+    printf 'WLAN einrichten?\n'
+    printf '  [A] WLAN automatisch suchen und verbinden\n'
+    printf '  [M] SSID manuell auswählen oder eingeben\n'
+    printf '  [S] Überspringen\n'
+    read -r -p 'Auswahl [A/M/S]: ' wifi_choice
+    wifi_choice="${wifi_choice:-A}"
+
+    case "${wifi_choice,,}" in
+        a)
+            if /usr/local/sbin/msfixit-wifi-connect; then
+                printf 'WLAN wurde erfolgreich verbunden.\n'
+                break
+            fi
             printf '\nWLAN konnte noch nicht verbunden werden.\n'
-            printf 'ShopOS startet trotzdem vollständig lokal weiter.\n'
-            printf 'Später erneut versuchen: sudo msfixit-wifi-connect\n'
-        fi
-        ;;
-    m)
-        if /usr/local/sbin/msfixit-wifi-connect --manual; then
-            printf 'WLAN wurde erfolgreich verbunden.\n'
-        else
+            printf 'Bitte erneut versuchen oder mit S bewusst überspringen.\n\n'
+            ;;
+        m)
+            if /usr/local/sbin/msfixit-wifi-connect --manual; then
+                printf 'WLAN wurde erfolgreich verbunden.\n'
+                break
+            fi
             printf '\nWLAN konnte noch nicht verbunden werden.\n'
+            printf 'Bitte erneut versuchen oder mit S bewusst überspringen.\n\n'
+            ;;
+        s)
+            printf 'WLAN-Einrichtung übersprungen. ShopOS startet lokal weiter. Später: sudo msfixit-wifi-connect\n'
             printf 'ShopOS startet trotzdem vollständig lokal weiter.\n'
-            printf 'Später erneut versuchen: sudo msfixit-wifi-connect --manual\n'
-        fi
-        ;;
-    s)
-        printf 'WLAN-Einrichtung übersprungen. ShopOS startet lokal weiter. Später: sudo msfixit-wifi-connect\n'
-        ;;
-    *)
-        printf 'Unbekannte Auswahl. WLAN-Einrichtung übersprungen; ShopOS startet lokal weiter.\n'
-        ;;
-esac
+            break
+            ;;
+        *)
+            printf 'Unbekannte Auswahl. Bitte A, M oder S eingeben.\n\n'
+            ;;
+    esac
+done
 
 install -d -o root -g root -m 0700 "$(dirname "$marker")"
 touch "$marker"

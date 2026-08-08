@@ -2,7 +2,7 @@ name: Build ShopOS image
 
 on:
   push:
-    branches: [main, agent/admin-console-foundation]
+    branches: [integration/shopos-master-consolidation]
     paths:
       - image/**
       - scripts/**
@@ -43,7 +43,7 @@ concurrency:
 
 jobs:
   validate:
-    name: Validate help, partners, AT pilot, ALSO, Office and compliance cores
+    name: Validate exact PR80/candidate source
     runs-on: ubuntu-24.04
     services:
       mariadb:
@@ -59,10 +59,14 @@ jobs:
           --health-timeout=5s
           --health-retries=10
     steps:
-      - name: Check out ShopOS
+      - name: Check out exact source
         uses: actions/checkout@v7
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+
+      - name: Verify exact source identity
+        run: test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
 
       - name: Install database, PDF, SFTP and PHP test clients
         run: |
@@ -72,6 +76,12 @@ jobs:
 
       - name: Check source syntax and cable discovery logic
         run: make check
+
+      - name: Run PR 80 consolidation regressions
+        run: |
+          bash tests/test-shopos-first-login-package-permissions.sh
+          bash tests/test-shopos-admin-credential-ownership.sh
+          bash tests/test-shopos-hardware-manager.sh
 
       - name: Test article master
         env:
@@ -134,15 +144,19 @@ jobs:
         run: sudo env MYSQL_PWD="$MYSQL_PWD" bash tests/test-compliance-numbering.sh
 
   build:
-    name: Build ShopOS image
+    name: Build exact ShopOS image
     needs: validate
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 180
     steps:
-      - name: Check out ShopOS
+      - name: Check out exact tested source
         uses: actions/checkout@v7
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+
+      - name: Verify exact source identity
+        run: test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
 
       - name: Select target
         shell: bash
@@ -167,7 +181,7 @@ jobs:
       - name: Upload workflow artifact only
         uses: actions/upload-artifact@v7
         with:
-          name: msfixit-shopos-${{ env.DEVICE }}-${{ env.STORAGE }}
+          name: msfixit-shopos-${{ env.DEVICE }}-${{ env.STORAGE }}-${{ github.event.pull_request.head.sha || github.sha }}
           path: artifacts/*
           if-no-files-found: error
           retention-days: 14

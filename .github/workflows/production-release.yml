@@ -1,65 +1,93 @@
-name: Build production ShopOS release
+name: Build and publish PR80 candidate release
 
 on:
   push:
-    branches: [main]
+    branches: [integration/shopos-master-consolidation]
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: shopos-production-${{ github.sha }}
-  cancel-in-progress: false
+  group: shopos-pr80-acceptance-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  build:
-    name: Build exact main commit
-    runs-on: ubuntu-24.04-arm
-    timeout-minutes: 180
+  validate:
+    name: Test exact PR80 consolidation commit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
     outputs:
       version: ${{ steps.version.outputs.version }}
+      source_sha: ${{ steps.source.outputs.sha }}
+      short_sha: ${{ steps.source.outputs.short_sha }}
     steps:
-      - name: Check out exact main commit
+      - name: Check out exact PR80 consolidation commit
         uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Verify checked-out source identity
-        run: test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+      - name: Verify authoritative source identity
+        id: source
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$GITHUB_REF" = 'refs/heads/integration/shopos-master-consolidation'
+          short_sha="${GITHUB_SHA:0:12}"
+          echo "sha=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+          echo "short_sha=$short_sha" >> "$GITHUB_OUTPUT"
 
       - name: Install validation dependencies
         run: |
-          sudo apt-get update
-          sudo apt-get install -y php-cli python3 openssl sqlite3 shellcheck
+          sudo rm -f /etc/apt/sources.list.d/azure-cli.list
+          sudo apt-get -o Acquire::Retries=3 update
+          sudo apt-get -o Acquire::Retries=3 install --yes php-cli python3 openssl sqlite3 shellcheck
 
-      - name: Run complete test suite again on main
+      - name: Run complete test suite on PR80 candidate
+        shell: bash
         run: |
+          set -Eeuo pipefail
           bash -n scripts/generate-release-metadata.sh
           make check
           shopt -s nullglob
           tests=(tests/test-shopos-*.sh tests/test-guided-device-wizard.sh tests/test-admin-console-foundation.sh)
-          for test_file in "${tests[@]}"; do bash "$test_file"; done
+          if (( ${#tests[@]} == 0 )); then
+            echo 'No integrated ShopOS tests found.' >&2
+            exit 1
+          fi
+          for test_file in "${tests[@]}"; do
+            echo "::group::$test_file"
+            bash "$test_file"
+            echo '::endgroup::'
+          done
 
-      - name: Resolve deterministic release version for this main commit
+      - name: Resolve candidate version from PR80 source
         id: version
         shell: bash
         run: |
           set -Eeuo pipefail
-          git fetch --force --tags origin
-          existing_tag="$(git tag --points-at "$GITHUB_SHA" \
-            | grep -E '^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$' \
-            | sort -V | tail -n 1 || true)"
-          if [ -n "$existing_tag" ]; then
-            version="${existing_tag#v}"
-            echo "Reusing release version already bound to this commit: $version"
-          else
-            version="$(bash scripts/next-release-version.sh image/VERSION)"
-            echo "Resolved next release version: $version"
-          fi
+          version="$(tr -d '[:space:]' < image/VERSION)"
+          test -n "$version"
           echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "PR80 candidate version: $version"
+
+  image:
+    name: Build exact PR80 Raspberry Pi image
+    needs: validate
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 180
+    steps:
+      - name: Check out exact tested PR80 source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.validate.outputs.source_sha }}
+          persist-credentials: false
+
+      - name: Verify checked-out source identity
+        run: test "$(git rev-parse HEAD)" = '${{ needs.validate.outputs.source_sha }}'
 
       - name: Reclaim runner disk space
         run: |
@@ -67,47 +95,46 @@ jobs:
           sudo rm -rf /usr/local/lib/android || true
           df -h
 
-      - name: Build production Raspberry Pi 4 USB image
+      - name: Build PR80 Raspberry Pi 4 USB image
         env:
-          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+          SHOPOS_BUILD_DESKTOP_ZIP: "0"
+          SHOPOS_XZ_LEVEL: "1"
         run: |
           env \
-            GITHUB_EVENT_NAME=production \
+            GITHUB_EVENT_NAME=pr80-candidate \
             SHOPOS_VERSION="$RELEASE_VERSION" \
             SHOPOS_ARTIFACT_VERSION="$RELEASE_VERSION" \
             make image-rpi4-usb
 
-      - name: Verify built version matches resolved release version
+      - name: Verify exact candidate payload
         env:
-          RELEASE_VERSION: ${{ steps.version.outputs.version }}
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
         run: |
           set -Eeuo pipefail
           test "$(tr -d '[:space:]' < artifacts/SHOPOS-VERSION.txt)" = "$RELEASE_VERSION"
-          sha256sum --check artifacts/msfixit-shopos-rpi4-usb.img.xz.sha256
-          sha256sum --check artifacts/msfixit-shopos-rpi4-usb.img.zip.sha256
+          sha256sum --check --strict artifacts/msfixit-shopos-rpi4-usb.img.xz.sha256
+          bash scripts/generate-release-metadata.sh artifacts candidate '${{ needs.validate.outputs.source_sha }}' "$GITHUB_RUN_ID"
 
-      - name: Generate verified production metadata and SBOM
-        run: bash scripts/generate-release-metadata.sh artifacts production "$GITHUB_SHA" "$GITHUB_RUN_ID"
-
-      - name: Upload immutable production artifact
+      - name: Upload immutable PR80 candidate artifact
         uses: actions/upload-artifact@v7
         with:
-          name: shopos-production-${{ github.sha }}
+          name: shopos-pr80-${{ needs.validate.outputs.source_sha }}
           path: artifacts/
           if-no-files-found: error
           compression-level: 0
-          retention-days: 90
+          retention-days: 14
 
   qemu:
-    name: Boot exact production image on ARM64
-    needs: build
+    name: Boot exact PR80 image on ARM64
+    needs: [validate, image]
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 80
     steps:
-      - name: Check out exact main commit and QEMU harness
+      - name: Check out exact tested PR80 source and QEMU harness
         uses: actions/checkout@v7
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ needs.validate.outputs.source_sha }}
           persist-credentials: false
 
       - name: Reclaim runner disk space
@@ -136,38 +163,35 @@ jobs:
           qemu-system-aarch64 --version | tee vm/qemu-version.txt
           qemu-system-aarch64 -machine help | tee vm/qemu-machines.txt
           grep -Eq '^[[:space:]]*raspi4b([[:space:]]|$)' vm/qemu-machines.txt
-          bash -n tests/prepare-qemu-image.sh
-          bash -n tests/normalize-qemu-sd-size.sh
           bash tests/normalize-qemu-sd-size.sh --self-test
           bash tests/run-qemu-smoke.sh --self-test
 
-      - name: Download exact production artifact
+      - name: Download exact PR80 candidate artifact
         uses: actions/download-artifact@v4
         with:
-          name: shopos-production-${{ github.sha }}
-          path: production
+          name: shopos-pr80-${{ needs.validate.outputs.source_sha }}
+          path: candidate
 
-      - name: Verify and unpack exact production image
+      - name: Verify and unpack exact PR80 image
         shell: bash
         env:
-          RELEASE_VERSION: ${{ needs.build.outputs.version }}
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
         run: |
           set -Eeuo pipefail
-          test "$(tr -d '[:space:]' < production/SHOPOS-VERSION.txt)" = "$RELEASE_VERSION"
+          test "$(tr -d '[:space:]' < candidate/SHOPOS-VERSION.txt)" = "$RELEASE_VERSION"
           (
-            cd production
+            cd candidate
             sha256sum --check --strict msfixit-shopos-rpi4-usb.img.xz.sha256
           )
           mkdir -p vm
-          xz --decompress --stdout production/msfixit-shopos-rpi4-usb.img.xz > vm/shopos-test.img
+          xz --decompress --stdout candidate/msfixit-shopos-rpi4-usb.img.xz > vm/shopos-test.img
           test -s vm/shopos-test.img
           bash tests/normalize-qemu-sd-size.sh vm/shopos-test.img | tee vm/qemu-disk-size.txt
-          df -h .
 
       - name: Prepare offline QEMU guest
         run: sudo bash tests/prepare-qemu-image.sh vm/shopos-test.img
 
-      - name: Boot, initialize and validate exact production image
+      - name: Boot and validate exact PR80 image
         shell: bash
         run: |
           set -Eeuo pipefail
@@ -177,102 +201,82 @@ jobs:
             2>&1 | tee vm/harness.log
           grep -Fxq 'MSFIXIT_VM_SMOKE_RESULT=PASS failures=0' vm/msfixit-vm-smoke.result
 
-      - name: Prepare production QEMU evidence
-        if: always()
-        run: |
-          mkdir -p vm
-          sudo chown -R "$USER:$USER" vm 2>/dev/null || true
-          find vm -type d -exec chmod u+rwx {} + 2>/dev/null || true
-          find vm -type f -exec chmod u+rw {} + 2>/dev/null || true
-
-      - name: Upload production QEMU evidence
+      - name: Upload PR80 QEMU evidence
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: shopos-production-qemu-evidence-${{ github.sha }}
-          path: |
-            vm/harness.log
-            vm/qemu-version.txt
-            vm/qemu-machines.txt
-            vm/qemu-disk-size.txt
-            vm/qemu-acceleration.txt
-            vm/qemu-console.log
-            vm/qemu-exit.txt
-            vm/partition-identifiers.txt
-            vm/fstab.before
-            vm/fstab.after
-            vm/initramfs-selection.txt
-            vm/kernel-command-line.txt
-            vm/msfixit-vm-smoke.log
-            vm/msfixit-vm-smoke.result
-            vm/msfixit-firstboot.log
-            vm/guest-journal.log
-            vm/guest-filesystem-state.txt
+          name: shopos-pr80-qemu-${{ needs.validate.outputs.source_sha }}
+          path: vm/
           if-no-files-found: warn
-          retention-days: 30
+          retention-days: 14
 
   publish:
-    name: Publish boot-verified production release
-    needs: [build, qemu]
+    name: Publish boot-verified PR80 candidate
+    needs: [validate, image, qemu]
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 20
     permissions:
       contents: write
     steps:
-      - name: Check out exact boot-verified source
-        uses: actions/checkout@v7
-        with:
-          ref: ${{ github.sha }}
-          persist-credentials: false
-
-      - name: Download exact boot-verified production artifact
+      - name: Download exact boot-verified PR80 image
         uses: actions/download-artifact@v4
         with:
-          name: shopos-production-${{ github.sha }}
-          path: artifacts
+          name: shopos-pr80-${{ needs.validate.outputs.source_sha }}
+          path: candidate
 
-      - name: Verify release payload and version
+      - name: Verify release payload one final time
         shell: bash
         env:
-          RELEASE_VERSION: ${{ needs.build.outputs.version }}
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
         run: |
           set -Eeuo pipefail
-          test "$(tr -d '[:space:]' < artifacts/SHOPOS-VERSION.txt)" = "$RELEASE_VERSION"
+          test "$(tr -d '[:space:]' < candidate/SHOPOS-VERSION.txt)" = "$RELEASE_VERSION"
           (
-            cd artifacts
+            cd candidate
             sha256sum --check --strict msfixit-shopos-rpi4-usb.img.xz.sha256
-            sha256sum --check --strict msfixit-shopos-rpi4-usb.img.zip.sha256
           )
 
-      - name: Publish only after successful production boot
+      - name: Publish immutable PR80 pre-release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_VERSION: ${{ needs.build.outputs.version }}
+          SOURCE_SHA: ${{ needs.validate.outputs.source_sha }}
+          SHORT_SHA: ${{ needs.validate.outputs.short_sha }}
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
         run: |
           set -Eeuo pipefail
-          tag="v${RELEASE_VERSION}"
+          tag="pr80-v${RELEASE_VERSION}-${SHORT_SHA}"
+          title="Ms. FixIT ShopOS ${RELEASE_VERSION} – PR80 Candidate ${SHORT_SHA}"
+          notes="Boot-verifizierter ShopOS Candidate aus PR #80. Quelle: ${SOURCE_SHA}. Dieser Download ist ein Pre-Release und noch kein finaler Produktionsrelease. Das veröffentlichte IMG ist exakt das Artefakt, das zuvor in diesem Workflow unter ARM64/QEMU geprüft wurde."
+
           if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             target="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" --jq .target_commitish)"
-            test "$target" = "$GITHUB_SHA"
-            gh release upload "$tag" artifacts/* --repo "$GITHUB_REPOSITORY" --clobber
+            test "$target" = "$SOURCE_SHA"
+            gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --title "$title" --notes "$notes" --prerelease
+            gh release upload "$tag" candidate/* --repo "$GITHUB_REPOSITORY" --clobber
           else
-            gh release create "$tag" artifacts/* \
+            gh release create "$tag" candidate/* \
               --repo "$GITHUB_REPOSITORY" \
-              --target "$GITHUB_SHA" \
-              --title "Ms. FixIT ShopOS ${RELEASE_VERSION}" \
-              --notes "Boot-verifizierter ShopOS Produktionsrelease ${RELEASE_VERSION}."
+              --target "$SOURCE_SHA" \
+              --title "$title" \
+              --notes "$notes" \
+              --prerelease
           fi
-          bash scripts/sync-release-assets.sh "$RELEASE_VERSION" "$GITHUB_REPOSITORY"
 
-      - name: Verify published release is bound to this exact main commit
+      - name: Verify release points to exact PR80 commit
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_VERSION: ${{ needs.build.outputs.version }}
+          SOURCE_SHA: ${{ needs.validate.outputs.source_sha }}
+          SHORT_SHA: ${{ needs.validate.outputs.short_sha }}
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
         run: |
           set -Eeuo pipefail
-          tag="v${RELEASE_VERSION}"
+          tag="pr80-v${RELEASE_VERSION}-${SHORT_SHA}"
           target="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" --jq .target_commitish)"
-          test "$target" = "$GITHUB_SHA"
+          test "$target" = "$SOURCE_SHA"
           gh release view "$tag" --repo "$GITHUB_REPOSITORY"
+
+# PR #80 is the authoritative ShopOS candidate source. Nothing in this workflow
+# rebuilds or publishes from main. A stable release may later promote the exact
+# verified candidate deliberately, rather than creating a different image.

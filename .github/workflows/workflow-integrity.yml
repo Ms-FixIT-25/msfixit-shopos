@@ -2,7 +2,9 @@ name: Workflow integrity gate
 
 on:
   pull_request:
+    branches: [integration/shopos-master-consolidation]
   push:
+    branches: [integration/shopos-master-consolidation]
   workflow_dispatch:
 
 permissions:
@@ -15,8 +17,14 @@ jobs:
     timeout-minutes: 10
 
     steps:
-      - name: Check out repository
+      - name: Check out exact source
         uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Verify exact source identity
+        run: test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
 
       - name: Install pinned actionlint
         shell: bash

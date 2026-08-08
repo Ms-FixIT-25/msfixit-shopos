@@ -11,7 +11,9 @@ bash -n "$firstboot"
 bash -n "$first_login"
 bash -n "$apply_config"
 
-grep -Fq "printf '%s:%s\\n' \"\$username\" \"\$password_one\" | chpasswd" "$first_login"
+# Keep the searched variables literal. Expanding them in this regression test
+# under `set -u` would make the test itself fail before inspecting the product.
+grep -Fq 'printf '\''%s:%s\n'\'' "$username" "$password_one" | chpasswd' "$first_login"
 grep -Fq '/etc/msfixit-shopos/admin-user' "$first_login"
 
 if grep -Fq 'OS_ADMIN_PASSWORD' "$firstboot" "$apply_config" "$example"; then
@@ -28,6 +30,6 @@ if grep -Fq 'SSH password:' "$firstboot"; then
 fi
 
 grep -Fq 'Linux administrator password: never written by firstboot' "$firstboot"
-grep -Fq 'configured interactively' "$example"
+grep -Eq 'Linux/SSH administrator password.*interactiv' "$example"
 
 printf 'PASS: local Linux administrator credentials have one interactive owner and are never persisted by unattended firstboot.\n'
