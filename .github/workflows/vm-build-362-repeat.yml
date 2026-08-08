@@ -1,4 +1,4 @@
-name: ShopOS build 413 repeated QEMU validation
+name: ShopOS build 438 repeated QEMU validation
 
 on:
   pull_request:
@@ -59,13 +59,13 @@ jobs:
           bash tests/run-qemu-smoke.sh --self-test
           bash tests/normalize-qemu-sd-size.sh --self-test
 
-      - name: Download and verify exact Build 413 candidate
+      - name: Download and verify exact Build 438 candidate
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          SHOPOS_ARTIFACT_ID: '9016626805'
-          SHOPOS_ARTIFACT_SHA256: 8368afcd9f475d61663a5e1053dc8bc846a8d407cc8d961e7deda011cfdef6ad
-          SHOPOS_SOURCE_SHA: b749eecb4df502e0d63992e8e6a502397a9aeaa7
+          SHOPOS_ARTIFACT_ID: '9048240120'
+          SHOPOS_ARTIFACT_SHA256: e3e67ab926195dbec5819321dacec033199897706135dde23194208ed7b1fbb2
+          SHOPOS_SOURCE_SHA: 8e852ed5d1de4d3a0a68c4464a254ab63ee87b42
         run: |
           set -Eeuo pipefail
           mkdir -p vm
@@ -110,7 +110,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: shopos-build-413-${{ matrix.host }}-repeat-${{ matrix.repetition }}
+          name: shopos-build-438-${{ matrix.host }}-repeat-${{ matrix.repetition }}
           path: |
             vm-qemu-version.txt
             vm-qemu-machines.txt
