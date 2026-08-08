@@ -1,0 +1,139 @@
+name: Merge conflict issue reporter
+
+on:
+  pull_request_target:
+    branches:
+      - integration/shopos-master-consolidation
+      - main
+    types: [opened, synchronize, reopened, edited, ready_for_review, converted_to_draft]
+
+permissions:
+  contents: read
+  pull-requests: read
+  issues: write
+
+concurrency:
+  group: shopos-merge-conflict-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  report:
+    name: Report merge conflict fail-closed
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out trusted base policy only
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+
+      - name: Fetch current mergeability and existing managed issue
+        id: evidence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          now="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          for attempt in 1 2 3 4 5; do
+            gh api "repos/$REPO/pulls/$PR_NUMBER" > pr-raw.json
+            mergeable="$(jq -r 'if .mergeable == null then "unknown" else (.mergeable|tostring) end' pr-raw.json)"
+            state="$(jq -r '.mergeable_state // "unknown"' pr-raw.json)"
+            if [ "$mergeable" != unknown ] && [ "$state" != unknown ]; then
+              break
+            fi
+            echo "Mergeability not settled yet (attempt ${attempt}/5); retrying."
+            sleep 2
+          done
+          jq --arg now "$now" '{
+            number: .number,
+            title: .title,
+            html_url: .html_url,
+            mergeable: .mergeable,
+            mergeable_state: .mergeable_state,
+            head_ref: .head.ref,
+            head_sha: .head.sha,
+            base_ref: .base.ref,
+            base_sha: .base.sha,
+            detected_at: $now
+          }' pr-raw.json > pr.json
+
+          marker="<!-- shopos-merge-conflict-pr:${PR_NUMBER} -->"
+          gh issue list --repo "$REPO" --state all --limit 200 \
+            --json number,title,body,state > issues.json
+          jq --arg marker "$marker" '[.[] | select((.body // "") | contains($marker))] | sort_by(.number) | first // null' \
+            issues.json > existing.json
+
+      - name: Plan conflict issue action
+        id: plan
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          existing_arg=()
+          if [ "$(cat existing.json)" != null ]; then
+            existing_arg=(--existing-json "$(cat existing.json)")
+          fi
+          python3 scripts/plan-merge-conflict-issue.py \
+            --pr-json "$(cat pr.json)" "${existing_arg[@]}" > plan.json || rc=$?
+          rc="${rc:-0}"
+          cat plan.json
+          action="$(jq -r '.action' plan.json)"
+          blocked="$(jq -r '.blocked' plan.json)"
+          printf 'action=%s\n' "$action" >> "$GITHUB_OUTPUT"
+          printf 'blocked=%s\n' "$blocked" >> "$GITHUB_OUTPUT"
+          if [ "$rc" -ne 0 ] && [ "$action" != block-unknown ]; then
+            exit "$rc"
+          fi
+
+      - name: Apply deduplicated issue action
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          action="$(jq -r '.action' plan.json)"
+          case "$action" in
+            create)
+              title="$(jq -r '.title' plan.json)"
+              jq -r '.body' plan.json > issue-body.md
+              gh issue create --repo "$REPO" --title "$title" --body-file issue-body.md
+              ;;
+            update)
+              number="$(jq -r '.issue_number' plan.json)"
+              title="$(jq -r '.title' plan.json)"
+              jq -r '.body' plan.json > issue-body.md
+              gh issue edit "$number" --repo "$REPO" --title "$title" --body-file issue-body.md
+              ;;
+            reopen-update)
+              number="$(jq -r '.issue_number' plan.json)"
+              title="$(jq -r '.title' plan.json)"
+              jq -r '.body' plan.json > issue-body.md
+              gh issue reopen "$number" --repo "$REPO"
+              gh issue edit "$number" --repo "$REPO" --title "$title" --body-file issue-body.md
+              ;;
+            close)
+              number="$(jq -r '.issue_number' plan.json)"
+              gh issue close "$number" --repo "$REPO" --comment 'GitHub reports that the pull request is mergeable again. Closing the managed conflict blocker.'
+              ;;
+            none)
+              echo 'No managed issue change is required.'
+              ;;
+            block-unknown)
+              echo 'Mergeability is still unknown; fail closed.' >&2
+              exit 1
+              ;;
+            *)
+              echo "Unknown conflict issue action: $action" >&2
+              exit 1
+              ;;
+          esac
+
+      - name: Block conflicting PR
+        if: steps.plan.outputs.blocked == 'true'
+        run: |
+          echo 'PR is not merge-eligible because GitHub reports a conflict or unknown mergeability.' >&2
+          exit 1
