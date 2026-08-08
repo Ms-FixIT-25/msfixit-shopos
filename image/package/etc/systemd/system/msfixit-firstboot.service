@@ -1,6 +1,7 @@
 [Unit]
 Description=Ms. FixIT ShopOS first-boot provisioning
-After=local-fs.target
+Wants=msfixit-install-update-prefetch.service
+After=local-fs.target msfixit-install-update-prefetch.service
 ConditionPathExists=!/data/.shopos-initialized
 
 [Service]
