@@ -7,6 +7,7 @@ wifi="$root/image/package/usr/local/sbin/msfixit-wifi-connect"
 keepawake="$root/image/package/usr/local/sbin/msfixit-display-keepawake"
 kiosk_session="$root/image/package/usr/local/sbin/msfixit-kiosk-session"
 ssid="$root/image/package/etc/msfixit-shopos/wifi.env"
+nm_config="$root/image/package/etc/NetworkManager/conf.d/20-shopos-wifi.conf"
 dropin="$root/image/package/etc/systemd/system/getty@tty1.service.d/shopos-first-login.conf"
 first_login_service="$root/image/package/etc/systemd/system/msfixit-first-login.service"
 keepawake_service="$root/image/package/etc/systemd/system/msfixit-display-keepawake.service"
@@ -24,6 +25,7 @@ bash -n "$kiosk_session"
 bash -n "$layout"
 
 test -s "$first_login_service"
+test -s "$nm_config"
 
 grep -Fq 'exec </dev/tty1 >/dev/tty1 2>&1' "$init"
 grep -Fq 'Benutzername [${default_user}]' "$init"
@@ -50,6 +52,9 @@ grep -Fq 'systemctl start NetworkManager.service' "$wifi"
 grep -Fq 'rfkill unblock wlan' "$wifi"
 grep -Fq 'modprobe brcmfmac' "$wifi"
 grep -Fq 'udevadm settle' "$wifi"
+grep -Fq 'nmcli networking on' "$wifi"
+grep -Fq 'nmcli radio wifi on' "$wifi"
+grep -Fq 'iw reg set "$wifi_country"' "$wifi"
 grep -Fq 'for attempt in $(seq 1 45)' "$wifi"
 grep -Fq 'nmcli -t -f DEVICE,TYPE device status' "$wifi"
 grep -Fq 'nmcli device set "$wifi_device" managed yes' "$wifi"
@@ -57,9 +62,14 @@ grep -Fq 'nmcli device wifi rescan ifname "$wifi_device"' "$wifi"
 grep -Fq 'nmcli --fields SSID,SIGNAL,SECURITY device wifi list ifname "$wifi_device"' "$wifi"
 grep -Fq '[ "$mode" = auto ]' "$wifi"
 grep -Fq 'WLAN-Passwort abgefragt' "$wifi"
-grep -Fq 'nmcli --ask device wifi connect "$ssid" ifname "$wifi_device"' "$wifi"
+grep -Fq 'nmcli --ask --wait 90 device wifi connect "$ssid" ifname "$wifi_device"' "$wifi"
+grep -Fq '100*) connected=1' "$wifi"
+grep -Fq 'connection.autoconnect yes' "$wifi"
 grep -Fq 'wifi_diagnostics' "$wifi"
 grep -Fxq 'SHOPOS_WIFI_SSID=Skynet' "$ssid"
+grep -Fxq 'SHOPOS_WIFI_COUNTRY=AT' "$ssid"
+grep -Fq '[ifupdown]' "$nm_config"
+grep -Fq 'managed=true' "$nm_config"
 
 for dependency in network-manager wpasupplicant rfkill iw wireless-regdb firmware-brcm80211; do
     grep -Eq "Depends:.*(^|, )${dependency}(,|$)" "$control" || {
@@ -67,6 +77,10 @@ for dependency in network-manager wpasupplicant rfkill iw wireless-regdb firmwar
         exit 1
     }
 done
+grep -Eq 'Depends:.*(^|, )xserver-xorg-input-libinput(,|$)' "$control" || {
+    echo 'Missing Xorg libinput driver: physical keyboard and mouse would not work in kiosk mode.' >&2
+    exit 1
+}
 grep -Fq 'systemctl enable NetworkManager.service' "$postinst"
 
 # The interactive wizard must never block getty's ExecStartPre.
@@ -85,12 +99,14 @@ grep -Fq 'ExecStartPost=/bin/systemctl --no-block start msfixit-kiosk.service' "
 grep -Fq 'StandardInput=tty-force' "$first_login_service"
 grep -Fq 'TTYPath=/dev/tty1' "$first_login_service"
 grep -Fq 'TimeoutStartSec=infinity' "$first_login_service"
+grep -Fq 'NetworkManager.service' "$first_login_service"
 
-# The kiosk must fail closed if first-login or branding fails, while network
+# The kiosk must fail closed if first-login or branding fails, while Internet
 # connectivity remains optional for the local 127.0.0.1 appliance UI.
 grep -Fq 'Requires=msfixit-brand-shop.service msfixit-first-login.service' "$kiosk_service"
 grep -Fq 'After=local-fs.target nginx.service msfixit-brand-shop.service msfixit-first-login.service' "$kiosk_service"
 grep -Fq 'Wants=nginx.service' "$kiosk_service"
+grep -Fq 'SupplementaryGroups=video render input' "$kiosk_service"
 if grep -Fq 'Wants=nginx.service msfixit-first-login.service' "$kiosk_service"; then
     echo 'Kiosk must require successful first-login rather than merely wanting it.' >&2
     exit 1
@@ -142,4 +158,4 @@ if grep -Eq 'One-time password|chage -d 0|/dev/urandom' "$init"; then
     exit 1
 fi
 
-printf 'PASS: automatic/manual Wi-Fi share resilient hardware discovery and kiosk requires successful first-login.\n'
+printf 'PASS: physical kiosk input driver and persistent, verified Wi-Fi setup are required.\n'
