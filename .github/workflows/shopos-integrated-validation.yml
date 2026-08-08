@@ -39,11 +39,19 @@ jobs:
           bash -n tests/run-qemu-smoke.sh
           python3 -m py_compile image/package/usr/local/sbin/msfixit-update-agent
           python3 -m py_compile image/package/usr/local/sbin/msfixit-update-center
+          python3 -m py_compile image/package/usr/lib/msfixit-shopos/hardware_manager/models.py
+          python3 -m py_compile image/package/usr/lib/msfixit-shopos/hardware_manager/peripherals.py
+          python3 -m py_compile image/package/usr/lib/msfixit-shopos/hardware_manager/sensors.py
           bash -n image/package/usr/local/sbin/msfixit-boot-console
           bash -n image/package/usr/local/sbin/msfixit-kiosk-session
           bash -n image/package/usr/local/sbin/msfixit-first-login-init
           bash -n image/package/usr/local/sbin/msfixit-wifi-connect
           bash -n image/package/usr/local/sbin/msfixit-apply-resource-budget
+
+      - name: Validate semantic peripheral detection
+        env:
+          PYTHONPATH: image/package/usr/lib/msfixit-shopos
+        run: python3 tests/test-shopos-peripheral-classification.py
 
       - name: Validate Update Center
         run: |
@@ -111,6 +119,8 @@ jobs:
           test -s image/package/usr/local/sbin/msfixit-wifi-connect
           test -s image/package/etc/systemd/system/msfixit-hardware-manager.service
           test -s image/package/usr/lib/msfixit-shopos/hardware_manager/thermal.py
+          test -s image/package/usr/lib/msfixit-shopos/hardware_manager/peripherals.py
+          test -s tests/test-shopos-peripheral-classification.py
           test -s scripts/install-qemu-raspi4.sh
           test -s tests/normalize-qemu-sd-size.sh
           echo 'PASS: exact PR80/candidate source and release-gate contracts are valid.'
