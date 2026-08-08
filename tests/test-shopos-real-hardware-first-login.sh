@@ -7,6 +7,7 @@ control="$root/image/package/DEBIAN/control"
 first_login_init="$root/image/package/usr/local/sbin/msfixit-first-login-init"
 kiosk="$root/image/package/etc/systemd/system/msfixit-kiosk.service"
 x_session="$root/image/package/usr/local/sbin/msfixit-x-session"
+setup_gui="$root/image/package/usr/local/sbin/msfixit-setup-gui"
 office_print="$root/image/package/etc/systemd/system/msfixit-office-print.service"
 office_worker="$root/image/package/etc/systemd/system/msfixit-office-worker.service"
 time_helper="$root/image/package/usr/local/sbin/msfixit-time-bootstrap"
@@ -18,7 +19,7 @@ sudo_policy="$root/image/package/etc/sudoers.d/99-msfixit-admin-password"
 
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 
-for path in "$postinst" "$control" "$first_login_init" "$kiosk" "$x_session" "$office_print" "$office_worker" "$time_helper" "$timesync" "$ssh_helper" "$ssh_service" "$ssh_auth" "$sudo_policy"; do
+for path in "$postinst" "$control" "$first_login_init" "$kiosk" "$x_session" "$setup_gui" "$office_print" "$office_worker" "$time_helper" "$timesync" "$ssh_helper" "$ssh_service" "$ssh_auth" "$sudo_policy"; do
     [ -s "$path" ] || fail "missing required file: $path"
 done
 
@@ -26,9 +27,11 @@ bash -n "$time_helper"
 bash -n "$ssh_helper"
 bash -n "$first_login_init"
 bash -n "$x_session"
+python3 -m py_compile "$setup_gui"
 
 grep -Eq 'chmod 0755 .*msfixit-wifi-connect' "$postinst" || fail 'installed Wi-Fi helper is not forced executable'
 grep -Eq 'chmod 0755 .*msfixit-x-session' "$postinst" || fail 'persistent X session helper is not forced executable'
+grep -Eq 'chmod 0755 .*msfixit-setup-gui' "$postinst" || fail 'graphical setup shell is not forced executable'
 grep -Fq 'systemctl disable systemd-networkd.service' "$postinst" || fail 'systemd-networkd must be disabled'
 grep -Fq 'systemctl enable NetworkManager.service' "$postinst" || fail 'NetworkManager must own networking'
 grep -Fq 'systemctl disable msfixit-first-login.service' "$postinst" || fail 'legacy tty first-login must not auto-start'
@@ -42,7 +45,12 @@ grep -Fq 'pool.ntp.org' "$timesync" || fail 'pool NTP fallback is missing'
 
 # Real hardware must transition Plymouth -> one Xorg instance. First-login and
 # Chromium are clients of that same server; neither may seize a VT itself.
-grep -Fq 'xterm' "$control" || fail 'xterm dependency for graphical first-login is missing'
+grep -Fq 'python3-gi' "$control" || fail 'GTK Python runtime for graphical first-login is missing'
+grep -Fq 'gir1.2-gtk-3.0' "$control" || fail 'GTK bindings for graphical first-login are missing'
+grep -Fq 'gir1.2-vte-2.91' "$control" || fail 'VTE bindings for graphical first-login are missing'
+if grep -Fq 'xterm' "$control" "$x_session"; then
+    fail 'legacy xterm must not be part of the visible first-login path'
+fi
 grep -Fq 'ExecStart=/usr/bin/xinit /usr/local/sbin/msfixit-x-session -- :0 vt7 -keeptty -nolisten tcp' "$kiosk" || fail 'display service does not own one persistent local-only Xorg server'
 if grep -Eq 'TTYPath=|StandardInput=tty|StandardInput=tty-force' "$kiosk"; then
     fail 'persistent X display service must not use systemd tty ownership directives'
@@ -50,8 +58,10 @@ fi
 if grep -Fq '/dev/tty1' "$first_login_init"; then
     fail 'first-login must not seize tty1 when running inside X'
 fi
-grep -Fq 'xterm' "$x_session" || fail 'first-login is not launched inside X'
-grep -Fq '/usr/local/sbin/msfixit-first-login-init' "$x_session" || fail 'X session does not launch first-login'
+grep -Fq '/usr/local/sbin/msfixit-setup-gui' "$x_session" || fail 'first-login is not launched through the GTK setup shell'
+grep -Fq '/usr/local/sbin/msfixit-first-login-init' "$setup_gui" || fail 'GTK shell does not launch the proven first-login logic'
+grep -Fq 'Vte.Terminal' "$setup_gui" || fail 'GTK shell does not provide controlled embedded input'
+grep -Fq 'self.fullscreen()' "$setup_gui" || fail 'setup shell must own the full display instead of exposing raw X background'
 grep -Fq 'runuser -u "$kiosk_user"' "$x_session" || fail 'X session does not drop privileges for kiosk client'
 grep -Fq '/usr/local/sbin/msfixit-kiosk-session' "$x_session" || fail 'same X session does not hand off to kiosk client'
 grep -Fq 'xhost +SI:localuser:' "$x_session" || fail 'X access is not limited to the dedicated local kiosk user'
@@ -79,4 +89,4 @@ if grep -Eiq '([[:xdigit:]]{2}:){5}[[:xdigit:]]{2}' "$ssh_helper" "$ssh_service"
     fail 'a concrete administrator workstation MAC was embedded in product policy'
 fi
 
-printf 'PASS: ShopOS uses one persistent Xorg server from Plymouth handoff through graphical first-login and kiosk, remains offline-capable, and preserves hardened admin recovery.\n'
+printf 'PASS: ShopOS uses one persistent Xorg server from Plymouth handoff through a modern GTK first-login shell and kiosk, remains offline-capable, and preserves hardened admin recovery.\n'
