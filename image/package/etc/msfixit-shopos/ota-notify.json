@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "enabled": false,
+  "endpoint": "",
+  "channel": "stable",
+  "long_poll_seconds": 55,
+  "retry_min_seconds": 5,
+  "retry_max_seconds": 300,
+  "minimum_wake_interval_seconds": 60
+}

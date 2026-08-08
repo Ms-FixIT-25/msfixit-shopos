@@ -3,6 +3,8 @@ Description=Synchronize ShopOS A/B trial boot and rollback selection
 DefaultDependencies=no
 After=local-fs.target
 Before=msfixit-firstboot.service nginx.service mariadb.service redis-server.service
+Wants=msfixit-ota-notify.service
+After=msfixit-ota-notify.service
 ConditionPathExists=/etc/msfixit-shopos/update-slots.json
 
 [Service]

@@ -23,8 +23,14 @@ chmod_block="$(sed -n '/^chmod 0755 \\/,/^chmod 0644 /p' "$build")"
 printf '%s\n' "$chmod_block" | grep -Fq 'msfixit-first-login-init' \
     || fail 'first-login-init is not forced to mode 0755 during package staging'
 
-hash_block="$(sed -n '/^[[:space:]]*sha256sum \\/,/usr\/share\/msfixit-shopos\/wordpress\/assets\/msfixit-service-requests.css/p' "$build")"
-printf '%s\n' "$hash_block" | grep -Fq 'usr/local/sbin/msfixit-first-login-init' \
-    || fail 'first-login-init is absent from packaged build-info integrity hashes'
+python3 - "$build" <<'PY' || fail 'first-login-init is absent from packaged build-info integrity hashes'
+from pathlib import Path
+import re
+import sys
+text = Path(sys.argv[1]).read_text(encoding='utf-8')
+blocks = re.findall(r'sha256sum\s+\\\n(.*?)\n\s*usr/share/msfixit-shopos/vendor/SHA256SUMS\)', text, re.S)
+if not blocks or not any('usr/local/sbin/msfixit-first-login-init' in block for block in blocks):
+    raise SystemExit(1)
+PY
 
 printf 'PASS: first-login helper is packaged executable and integrity-tracked\n'
