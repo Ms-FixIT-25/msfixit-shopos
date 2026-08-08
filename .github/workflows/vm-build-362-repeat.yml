@@ -1,0 +1,144 @@
+name: ShopOS build 449 repeated QEMU validation
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - .github/workflows/vm-build-362-repeat.yml
+      - tests/prepare-qemu-image.sh
+      - tests/verify-qemu-candidate-metadata.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  qemu-smoke:
+    name: ${{ matrix.host }} QEMU system test / repetition ${{ matrix.repetition }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - host: normal-x86_64
+            runner: ubuntu-24.04
+            repetition: 1
+          - host: normal-x86_64
+            runner: ubuntu-24.04
+            repetition: 2
+          - host: arm64
+            runner: ubuntu-24.04-arm
+            repetition: 1
+          - host: arm64
+            runner: ubuntu-24.04-arm
+            repetition: 2
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 75
+    steps:
+      - name: Check out disposable harness
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Install image tools and pinned Raspberry Pi 4 QEMU
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          sudo apt-get -o Acquire::Retries=3 update
+          sudo apt-get -o Acquire::Retries=3 install --yes qemu-utils xz-utils unzip curl util-linux
+          bash scripts/install-qemu-raspi4.sh "$HOME/.cache/shopos-qemu/9.2.4"
+          export PATH="$HOME/.cache/shopos-qemu/9.2.4/bin:$PATH"
+          echo "$HOME/.cache/shopos-qemu/9.2.4/bin" >> "$GITHUB_PATH"
+          qemu-system-aarch64 --version | tee vm-qemu-version.txt
+          grep -Fq '9.2.4' vm-qemu-version.txt
+          qemu-system-aarch64 -machine help | tee vm-qemu-machines.txt
+          grep -Eq '^[[:space:]]*raspi4b([[:space:]]|$)' vm-qemu-machines.txt
+          sudo env "PATH=$PATH" qemu-system-aarch64 --version | tee vm-sudo-qemu-version.txt
+          grep -Fq '9.2.4' vm-sudo-qemu-version.txt
+          bash -n tests/prepare-qemu-image.sh
+          bash tests/prepare-qemu-image.sh --self-test
+          bash tests/run-qemu-smoke.sh --self-test
+          bash tests/normalize-qemu-sd-size.sh --self-test
+          python3 tests/verify-qemu-candidate-metadata.py --self-test
+
+      - name: Download and verify exact Build 449 candidate
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SHOPOS_ARTIFACT_ID: '9019947776'
+          SHOPOS_ARTIFACT_SHA256: 059478f8fd5d3b66abd2f586a73a50eaaffcecae0b0228d3e3735ae7f6bb1afe
+          SHOPOS_SOURCE_SHA: 9c1b9677ffbb18baa25ce3e5e035b5e57274a5dc
+        run: |
+          set -Eeuo pipefail
+          mkdir -p vm
+          gh api "/repos/${GITHUB_REPOSITORY}/actions/artifacts/${SHOPOS_ARTIFACT_ID}" > vm/artifact-metadata.json
+          python3 tests/verify-qemu-candidate-metadata.py \
+            vm/artifact-metadata.json \
+            "$SHOPOS_ARTIFACT_ID" \
+            "sha256:$SHOPOS_ARTIFACT_SHA256" \
+            "$SHOPOS_SOURCE_SHA"
+          gh api "/repos/${GITHUB_REPOSITORY}/actions/artifacts/${SHOPOS_ARTIFACT_ID}/zip" > vm/artifact.zip
+          printf '%s  %s\n' "$SHOPOS_ARTIFACT_SHA256" vm/artifact.zip | sha256sum --check --strict
+          unzip -q vm/artifact.zip -d vm
+          cd vm
+          test "$(tr -d '[:space:]' < SHOPOS-VERSION.txt)" != ''
+          sha256sum --check msfixit-shopos-rpi4-usb.img.xz.sha256
+          xz --decompress --stdout msfixit-shopos-rpi4-usb.img.xz > shopos-test.img
+          rm -f artifact.zip msfixit-shopos-rpi4-usb.img.xz
+          original_bytes="$(stat -c '%s' shopos-test.img)"
+          test "$original_bytes" -gt 0
+          bash ../tests/normalize-qemu-sd-size.sh shopos-test.img | tee qemu-image-size.txt
+          normalized_bytes="$(stat -c '%s' shopos-test.img)"
+          test "$normalized_bytes" -ge "$original_bytes"
+          printf 'SOURCE_SHA=%s\nARTIFACT_ID=%s\nARTIFACT_DIGEST=sha256:%s\nORIGINAL_IMAGE_BYTES=%s\nQEMU_IMAGE_BYTES=%s\n' \
+            "$SHOPOS_SOURCE_SHA" "$SHOPOS_ARTIFACT_ID" "$SHOPOS_ARTIFACT_SHA256" \
+            "$original_bytes" "$normalized_bytes" > candidate-binding.txt
+          ls -lh shopos-test.img
+
+      - name: Prepare offline QEMU guest
+        shell: bash
+        run: sudo bash tests/prepare-qemu-image.sh vm/shopos-test.img
+
+      - name: Boot, initialize and validate ShopOS
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          sudo env "PATH=$PATH" bash tests/run-qemu-smoke.sh vm/shopos-test.img vm 2>&1 | tee vm/harness.log
+          grep -Fxq 'MSFIXIT_VM_SMOKE_RESULT=PASS failures=0' vm/msfixit-vm-smoke.result
+
+      - name: Prepare evidence
+        if: always()
+        shell: bash
+        run: |
+          sudo chown -R "$USER:$USER" vm 2>/dev/null || true
+          find vm -type d -exec chmod u+rwx {} + 2>/dev/null || true
+          find vm -type f -exec chmod u+rw {} + 2>/dev/null || true
+
+      - name: Upload QEMU evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: shopos-build-449-${{ matrix.host }}-repeat-${{ matrix.repetition }}
+          path: |
+            vm-qemu-version.txt
+            vm-qemu-machines.txt
+            vm-sudo-qemu-version.txt
+            vm/artifact-metadata.json
+            vm/candidate-binding.txt
+            vm/qemu-image-size.txt
+            vm/harness.log
+            vm/qemu-version.txt
+            vm/qemu-console.log
+            vm/qemu-exit.txt
+            vm/partition-identifiers.txt
+            vm/fstab.before
+            vm/fstab.after
+            vm/initramfs-selection.txt
+            vm/kernel-command-line.txt
+            vm/msfixit-vm-smoke.log
+            vm/msfixit-vm-smoke.result
+            vm/msfixit-firstboot.log
+            vm/guest-journal.log
+            vm/guest-filesystem-state.txt
+          if-no-files-found: warn
+          retention-days: 14

@@ -1,6 +1,37 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+wait_for_loop_partition() {
+    local partition="$1" attempts="${2:-50}" delay="${3:-0.2}"
+    local attempt
+
+    for ((attempt = 1; attempt <= attempts; attempt++)); do
+        if [ -b "$partition" ]; then
+            return 0
+        fi
+        command -v udevadm >/dev/null 2>&1 && udevadm settle --timeout=1 2>/dev/null || true
+        sleep "$delay"
+    done
+
+    printf 'Timed out waiting for loop partition %s after %s attempts.\n' "$partition" "$attempts" >&2
+    command -v lsblk >/dev/null 2>&1 && lsblk >&2 || true
+    return 1
+}
+
+if [ "${1:-}" = "--self-test" ]; then
+    # Static/behavioral contract for the partition-discovery race: the helper
+    # must reject a path that never becomes a block device within the bounded
+    # retry window instead of falling through to mount immediately.
+    tmp="$(mktemp)"
+    trap 'rm -f "$tmp"' EXIT
+    if wait_for_loop_partition "$tmp" 2 0.01; then
+        echo 'Self-test unexpectedly accepted a regular file as a loop partition.' >&2
+        exit 1
+    fi
+    echo 'prepare-qemu-image partition wait self-test passed.'
+    exit 0
+fi
+
 image="${1:?usage: prepare-qemu-image.sh IMAGE}"
 image="$(readlink -f "$image")"
 loop=''
@@ -16,6 +47,13 @@ cleanup() {
 trap cleanup EXIT
 
 loop="$(losetup --find --show --partscan "$image")"
+# On hosted ARM64 runners the kernel/udev partition nodes can lag slightly
+# behind losetup --partscan. Wait for both real image partitions before the
+# first mount instead of treating that transient discovery race as a product
+# boot failure.
+command -v udevadm >/dev/null 2>&1 && udevadm settle --timeout=10 2>/dev/null || true
+wait_for_loop_partition "${loop}p1"
+wait_for_loop_partition "${loop}p2"
 mount "${loop}p2" "$mount_dir"
 
 install -d -m 0755 "$mount_dir/var/lib/systemd"
