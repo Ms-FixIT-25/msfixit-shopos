@@ -16,6 +16,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
           persist-credentials: false
       - name: Verify exact source identity
         shell: bash
@@ -30,4 +31,12 @@ jobs:
           python3 -m py_compile tests/test-ci-test-hygiene.py
           while IFS= read -r -d '' file; do bash -n "$file"; done < <(find tests -type f -name '*.sh' -print0)
       - name: Audit stale test assumptions
-        run: python3 tests/test-ci-test-hygiene.py
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          base='${{ github.base_ref }}'
+          if [ -n "$base" ]; then
+            python3 tests/test-ci-test-hygiene.py --base-ref "$base"
+          else
+            python3 tests/test-ci-test-hygiene.py
+          fi
