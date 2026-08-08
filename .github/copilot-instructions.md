@@ -3,6 +3,8 @@
 ## Purpose
 ShopOS is a Raspberry-Pi-oriented product. Changes must preserve a production-quality, reproducible and testable ARM64 system image.
 
+When continuing work from an assigned issue, read and follow root `AGENTS.md` in addition to this file. `AGENTS.md` defines the handoff state machine, progress checkpoints and mandatory stop conditions.
+
 ## Safety and branch policy
 - Never merge changes to `main` automatically.
 - Never enable auto-merge.
