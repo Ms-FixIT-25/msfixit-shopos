@@ -24,10 +24,14 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - name: Check out candidate
+      - name: Check out exact PR candidate
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+      - name: Verify exact PR candidate source
+        if: github.event_name == 'pull_request'
+        run: test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
       - name: Install test dependencies
         run: |
           sudo apt-get update
@@ -61,10 +65,14 @@ jobs:
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 120
     steps:
-      - name: Check out tested candidate
+      - name: Check out exact tested PR candidate
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+      - name: Verify exact PR candidate source
+        if: github.event_name == 'pull_request'
+        run: test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
       - name: Reclaim runner disk space
         run: |
           sudo rm -rf /opt/hostedtoolcache || true
@@ -76,7 +84,7 @@ jobs:
           SHOPOS_XZ_LEVEL: "1"
         run: make image-rpi4-usb
       - name: Verify candidate image
-        run: bash scripts/generate-release-metadata.sh artifacts candidate "$GITHUB_SHA" "$GITHUB_RUN_ID"
+        run: bash scripts/generate-release-metadata.sh artifacts candidate "${{ github.event.pull_request.head.sha || github.sha }}" "$GITHUB_RUN_ID"
       - name: Upload candidate image
         uses: actions/upload-artifact@v4
         with:
@@ -92,10 +100,14 @@ jobs:
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 70
     steps:
-      - name: Check out the exact tested candidate
+      - name: Check out the exact tested PR candidate
         uses: actions/checkout@v4
         with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
           persist-credentials: false
+      - name: Verify exact PR candidate source
+        if: github.event_name == 'pull_request'
+        run: test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha }}"
       - name: Reclaim runner disk space
         run: |
           sudo rm -rf /opt/hostedtoolcache || true
