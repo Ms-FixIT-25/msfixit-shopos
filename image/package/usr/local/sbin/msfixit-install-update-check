@@ -4,7 +4,7 @@ umask 077
 
 manifest_url="${SHOPOS_UPDATE_MANIFEST_URL:-https://github.com/Ms-FixIT-25/msfixit-shopos/releases/latest/download/shopos-update-manifest.json}"
 public_key="${SHOPOS_UPDATE_PUBLIC_KEY:-/usr/share/msfixit-shopos/update/update-signing-public.pem}"
-updater="${SHOPOS_UPDATE_RUNTIME:-/usr/local/lib/msfixit-shopos/shopos-update.py}"
+verifier="${SHOPOS_UPDATE_VERIFIER:-/usr/local/lib/msfixit-shopos/shopos-install-update-verify.py}"
 staging_root="${SHOPOS_UPDATE_STAGING_DIR:-/var/lib/msfixit-shopos/update/install-check}"
 connect_timeout="${SHOPOS_UPDATE_CONNECT_TIMEOUT:-5}"
 max_time="${SHOPOS_UPDATE_MAX_TIME:-30}"
@@ -26,8 +26,8 @@ case "$manifest_url" in
         ;;
 esac
 
-if [ ! -x "$updater" ] || [ ! -f "$public_key" ] || [ -L "$public_key" ]; then
-    log 'Trusted update runtime/key is unavailable; continuing with embedded image.'
+if [ ! -f "$verifier" ] || [ ! -f "$public_key" ] || [ -L "$public_key" ]; then
+    log 'Trusted update verifier/key is unavailable; continuing with embedded image.'
     cleanup_candidate
     exit 0
 fi
@@ -48,7 +48,7 @@ if ! curl --fail --silent --show-error --location \
     exit 0
 fi
 
-if ! python3 "$updater" --public-key "$public_key" verify "$manifest" > "$payload_json"; then
+if ! python3 "$verifier" --public-key "$public_key" "$manifest" > "$payload_json"; then
     log 'Remote update manifest failed signature/schema verification; discarding it.'
     cleanup_candidate
     exit 0
@@ -96,7 +96,7 @@ if [ "$actual_size" != "$expected_size" ] || [ "$actual_sha" != "$expected_sha" 
     exit 0
 fi
 
-if ! python3 "$updater" --public-key "$public_key" verify "$manifest" --image "$image" >/dev/null; then
+if ! python3 "$verifier" --public-key "$public_key" "$manifest" --image "$image" >/dev/null; then
     log 'Downloaded update failed final verifier check; discarding candidate.'
     cleanup_candidate
     exit 0
