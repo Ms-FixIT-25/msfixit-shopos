@@ -46,19 +46,19 @@ Tracked by #45.
 
 ## P1 — Product functionality gaps
 
-### Peripheral detection is generic, not semantic
-Current Hardware Manager enumerates USB identity and CUPS queues but does not reliably classify every device as keyboard, mouse, HID barcode scanner, touchscreen, receipt printer, label printer, storage or other peripheral.
+### Semantic peripheral classification exists, but is not yet system- or hardware-approved
+Draft #93 now classifies current USB snapshots as keyboard, mouse, HID barcode scanner, touchscreen, receipt printer, label printer, A4 printer, storage, serial adapter or unknown. It exposes capability flags and a conservative readiness state in the authenticated Hardware Manager admin view. Integrated Validation #153 and Admin Console Foundation #79 passed for this change.
 
-Required:
-- semantic peripheral model
-- stable device IDs derived from non-secret local hardware metadata
-- hotplug state
-- capability flags
-- safe user-facing names
-- no collection of unnecessary IP/MAC/customer identity data
+Still required:
+- consolidate #93 into a fresh product candidate without merging to `main` prematurely
+- build a new checksummed Raspberry Pi image from that exact candidate
+- rerun repeated x86_64 and ARM64 QEMU system validation on that exact image
+- add persistent connect/disconnect history and privacy-safe stable device identity
+- physically validate representative devices
+- keep safe user-facing names and avoid unnecessary IP/MAC/customer identity collection
 
 ### Barcode scanners are not yet end-to-end proven
-Most POS scanners operate as USB HID keyboards, but production acceptance must prove actual barcode entry, not only USB discovery.
+Most POS scanners operate as USB HID keyboards. Draft #93 can classify a scanner and show `barcode-input`, but production acceptance must prove actual barcode entry, not only USB discovery/classification.
 
 Required physical acceptance:
 - EAN-8
@@ -72,23 +72,26 @@ Required physical acceptance:
 - scanner attached before boot
 
 ### Printer plug-and-play is incomplete
-Current CUPS detection proves configured queues, not full printer onboarding.
+Draft #93 can distinguish common printer roles and the Hardware Manager can see CUPS queues, but it deliberately does not claim a USB printer is ready merely because some CUPS queue exists. Exact device-to-queue mapping and real output remain unproven.
 
 Required:
 - discover local USB/network-capable printers without unsafe probing
-- classify receipt/A4/label/other printer role
 - show driver/IPP capability status
 - guided queue creation
+- exact device-to-queue association
 - test page/test receipt
 - safe default-printer assignment and reversal
 
 ### Keyboard/mouse/touch input needs physical acceptance
-The image carries libinput support and kiosk input access, but real hardware must prove:
+The image carries libinput support and kiosk input access; Draft #93 classifies these device types and reports software readiness, but real hardware must prove:
 - keyboard typing, Enter, Backspace and layout
 - mouse movement, left/right click and wheel
 - hotplug
 - reconnect after boot
 - touch input where advertised
+
+### Hotplug inventory is current-state only
+The admin view refreshes the Hardware Manager snapshot every 15 seconds, so newly connected/removed USB devices become visible without a reboot. Persistent connect/disconnect event history and stable privacy-safe device identity are not implemented yet.
 
 ### Thermal emergency shutdown remains intentionally disabled pending physical proof
 The Hardware Manager may warn and classify emergency temperatures, but automatic shutdown must remain disabled until real hardware tests prove thresholds, hysteresis, persistence and clean shutdown behavior.
