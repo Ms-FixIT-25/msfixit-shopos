@@ -1,0 +1,153 @@
+name: Validate latest checksummed ShopOS image
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - tests/prepare-qemu-image.sh
+      - tests/run-qemu-smoke.sh
+      - harness/test-latest-image-pin.sh
+      - .github/workflows/validate-latest-image.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  validate-pin:
+    name: Validate image provenance pin
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check pinned artifact contract
+        run: bash harness/test-latest-image-pin.sh
+
+  qemu:
+    name: ${{ matrix.label }}
+    needs: validate-pin
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: QEMU acceptance on x86_64 host
+            runner: ubuntu-26.04
+          - label: QEMU acceptance on ARM64 host
+            runner: ubuntu-26.04-arm
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 50
+    env:
+      SHOPOS_ARTIFACT_ID: '8957576771'
+      SHOPOS_ARTIFACT_SHA256: 83aacfaf9277de258974349b7136af0f969328f85b2b079ef151432d1758c8cd
+      SHOPOS_SOURCE_SHA: a6545db4c5fe590f4e28cb2b99de46fcce10763e
+
+    steps:
+      - name: Check out test harness
+        uses: actions/checkout@v7
+
+      - name: Install QEMU and image tools
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          sudo apt-get -o Acquire::Retries=3 update
+          sudo apt-get -o Acquire::Retries=3 install --yes qemu-system-arm qemu-utils zstd xz-utils gzip unzip curl util-linux
+          qemu-system-aarch64 --version
+          qemu-system-aarch64 -machine help | grep '^raspi4b '
+          bash harness/test-latest-image-pin.sh
+          bash tests/run-qemu-smoke.sh --self-test
+
+      - name: Download and verify exact Raspberry Pi image
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -Eeuo pipefail
+          artifact_head_sha="$(gh api "/repos/${GITHUB_REPOSITORY}/actions/artifacts/${SHOPOS_ARTIFACT_ID}" --jq '.workflow_run.head_sha')"
+          test "$artifact_head_sha" = "$SHOPOS_SOURCE_SHA"
+          mkdir -p vm
+          gh api "/repos/${GITHUB_REPOSITORY}/actions/artifacts/${SHOPOS_ARTIFACT_ID}/zip" > vm/artifact.zip
+          printf '%s  %s\n' "$SHOPOS_ARTIFACT_SHA256" vm/artifact.zip | sha256sum --check --strict
+          unzip -q vm/artifact.zip -d vm
+          cd vm
+
+          checksum_file=''
+          image_archive=''
+          expected_image_sha=''
+          valid_pairs=0
+          while IFS= read -r candidate_checksum; do
+            candidate_dir="$(dirname "$candidate_checksum")"
+            candidate_entry="$(awk 'NF >= 2 {print $2; exit}' "$candidate_checksum")"
+            candidate_entry="${candidate_entry#\*}"
+            candidate_sha="$(awk 'NF >= 2 {print $1; exit}' "$candidate_checksum")"
+            candidate_archive="$candidate_dir/$candidate_entry"
+            if [ ! -f "$candidate_archive" ]; then
+              candidate_archive="$candidate_dir/$(basename "${candidate_checksum%.sha256}")"
+            fi
+            case "$candidate_archive" in
+              *.img.zst|*.img.xz|*.img.gz) ;;
+              *) continue ;;
+            esac
+            if [ -f "$candidate_archive" ] && [[ "$candidate_sha" =~ ^[0-9a-fA-F]{64}$ ]]; then
+              checksum_file="$candidate_checksum"
+              image_archive="$candidate_archive"
+              expected_image_sha="$candidate_sha"
+              valid_pairs=$((valid_pairs + 1))
+            fi
+          done < <(find . -type f \( -name '*.img.zst.sha256' -o -name '*.img.xz.sha256' -o -name '*.img.gz.sha256' \) -print)
+
+          test "$valid_pairs" -eq 1
+          printf '%s  %s\n' "$expected_image_sha" "$image_archive" | sha256sum --check --strict
+          case "$image_archive" in
+            *.img.zst) unzstd --no-progress "$image_archive" -o shopos-test.img ;;
+            *.img.xz) xz --decompress --stdout "$image_archive" > shopos-test.img ;;
+            *.img.gz) gzip --decompress --stdout "$image_archive" > shopos-test.img ;;
+            *) echo "Unsupported image compression: $image_archive" >&2; exit 1 ;;
+          esac
+          rm -f artifact.zip "$image_archive"
+          truncate -s 16G shopos-test.img
+
+      - name: Prepare offline QEMU guest
+        shell: bash
+        run: sudo bash tests/prepare-qemu-image.sh vm/shopos-test.img
+
+      - name: Boot, initialize and validate ShopOS
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          sudo bash -x tests/run-qemu-smoke.sh vm/shopos-test.img vm 2>&1 | tee vm/harness.log
+
+      - name: Prepare evidence
+        if: always()
+        shell: bash
+        run: |
+          if sudo test -f vm/qemu-console.full.log && ! sudo test -f vm/qemu-console.log; then
+            sudo cp vm/qemu-console.full.log vm/qemu-console.log || true
+          fi
+          if ! sudo test -f vm/qemu-exit.txt; then
+            printf 'QEMU_EXIT=workflow-ended-before-harness-finalization\n' | sudo tee vm/qemu-exit.txt >/dev/null
+          fi
+          sudo chown -R "$USER:$USER" vm 2>/dev/null || true
+
+      - name: Upload validation evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: latest-shopos-${{ matrix.runner }}-evidence
+          path: |
+            vm/harness.log
+            vm/qemu-version.txt
+            vm/qemu-console.log
+            vm/qemu-console.full.log
+            vm/qemu-exit.txt
+            vm/partition-identifiers.txt
+            vm/fstab.before
+            vm/fstab.after
+            vm/initramfs-selection.txt
+            vm/kernel-command-line.txt
+            vm/msfixit-vm-smoke.log
+            vm/msfixit-vm-smoke.result
+            vm/msfixit-firstboot.log
+            vm/guest-journal.log
+            vm/guest-filesystem-state.txt
+          if-no-files-found: warn
+          retention-days: 14
