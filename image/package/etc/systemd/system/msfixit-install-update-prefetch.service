@@ -8,7 +8,7 @@ ConditionPathExists=!/data/.shopos-initialized
 [Service]
 Type=oneshot
 ExecStart=/bin/bash /usr/local/sbin/msfixit-install-update-prefetch
-TimeoutStartSec=90s
+TimeoutStartSec=65min
 RemainAfterExit=yes
 
 [Install]
