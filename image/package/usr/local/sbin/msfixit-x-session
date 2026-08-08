@@ -18,21 +18,15 @@ xsetroot -solid '#0a1930' 2>/dev/null || true
 xhost +SI:localuser:"$kiosk_user" >/dev/null 2>&1 || true
 
 if [ ! -e "$setup_marker" ]; then
-    command -v xterm >/dev/null 2>&1 || {
-        printf 'xterm is required for graphical first-login.\n' >&2
+    command -v /usr/local/sbin/msfixit-setup-gui >/dev/null 2>&1 || {
+        printf 'ShopOS graphical first-login shell is missing.\n' >&2
         exit 1
     }
 
-    # The provisioning script stays privileged because it creates the admin
-    # account and system configuration, but all interaction happens inside X.
-    xterm \
-        -fullscreen \
-        -fa 'DejaVu Sans Mono' \
-        -fs 16 \
-        -bg '#0a1930' \
-        -fg '#ffffff' \
-        -title 'Ms. FixIT ShopOS Ersteinrichtung' \
-        -e /usr/local/sbin/msfixit-first-login-init
+    # Keep provisioning privileged because it creates the administrator and
+    # machine configuration, but present the interaction inside a controlled
+    # full-screen GTK shell instead of xterm or a physical TTY.
+    /usr/local/sbin/msfixit-setup-gui
 fi
 
 [ -e "$setup_marker" ] || {
