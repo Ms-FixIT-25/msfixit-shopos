@@ -10,7 +10,8 @@ install -d -m 0755 /etc/nftables.d
 install -d -m 0755 /etc/plymouth
 chmod 0755 /usr/local/sbin/msfixit-update /usr/local/sbin/msfixit-update-agent /usr/local/sbin/msfixit-update-center /usr/local/sbin/msfixit-slot-writer /usr/local/sbin/msfixit-update-boot-sync /usr/local/sbin/msfixit-boot-selector /usr/local/sbin/msfixit-kiosk-session /usr/local/sbin/msfixit-display-keepawake /usr/local/sbin/msfixit-first-login-init /usr/local/sbin/msfixit-wifi-connect /usr/local/sbin/msfixit-time-bootstrap /usr/local/sbin/msfixit-ssh-recovery-init /usr/local/sbin/msfixit-apply-resource-budget /usr/local/sbin/msfixit-finalize-resource-budget /usr/local/sbin/msfixit-hardware-manager /usr/local/sbin/msfixit-hardware-action /usr/local/sbin/msfixit-cloudflared-run
 chmod 0640 /etc/msfixit-shopos/update-slots.json /etc/msfixit-shopos/update-source.json
-chmod 0440 /etc/sudoers.d/msfixit-shopos-update-center /etc/sudoers.d/msfixit-shopos-hardware-manager
+chmod 0440 /etc/sudoers.d/msfixit-shopos-update-center /etc/sudoers.d/msfixit-shopos-hardware-manager /etc/sudoers.d/99-msfixit-admin-password
+chmod 0644 /etc/ssh/sshd_config.d/60-msfixit-admin-auth.conf
 
 if ! getent passwd shopos-kiosk >/dev/null 2>&1; then
     useradd --system --home-dir /var/lib/msfixit-shopos/kiosk --create-home --shell /usr/sbin/nologin shopos-kiosk
