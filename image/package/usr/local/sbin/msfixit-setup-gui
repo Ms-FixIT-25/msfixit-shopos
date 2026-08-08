@@ -1,0 +1,173 @@
+#!/usr/bin/env python3
+import os
+import sys
+import gi
+
+gi.require_version("Gtk", "3.0")
+gi.require_version("Vte", "2.91")
+from gi.repository import Gdk, GLib, Gtk, Pango, Vte
+
+SETUP_COMMAND = ["/usr/local/sbin/msfixit-first-login-init"]
+
+CSS = b"""
+.setup-window {
+  background: #0a1930;
+}
+.brand {
+  color: #24b8bd;
+  font-size: 34px;
+  font-weight: 800;
+}
+.product {
+  color: #ed3f91;
+  font-size: 20px;
+  font-weight: 700;
+}
+.headline {
+  color: #ffffff;
+  font-size: 26px;
+  font-weight: 700;
+}
+.subtitle {
+  color: #b9c8db;
+  font-size: 14px;
+}
+.card {
+  background: #101f38;
+  border-radius: 18px;
+  border: 1px solid #203552;
+  padding: 22px;
+}
+.status {
+  color: #91a6bf;
+  font-size: 13px;
+}
+.retry {
+  background: #24b8bd;
+  color: #07131f;
+  border-radius: 10px;
+  padding: 10px 18px;
+  font-weight: 700;
+}
+"""
+
+
+class SetupWindow(Gtk.Window):
+    def __init__(self):
+        super().__init__(title="Ms. FixIT ShopOS Einrichtung")
+        self.set_name("shopos-setup")
+        self.get_style_context().add_class("setup-window")
+        self.set_decorated(False)
+        self.fullscreen()
+        self.connect("delete-event", lambda *_: True)
+
+        provider = Gtk.CssProvider()
+        provider.load_from_data(CSS)
+        Gtk.StyleContext.add_provider_for_screen(
+            Gdk.Screen.get_default(), provider, Gtk.STYLE_PROVIDER_PRIORITY_APPLICATION
+        )
+
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=14)
+        outer.set_border_width(38)
+        self.add(outer)
+
+        brand = Gtk.Label(label="MS. FIXIT")
+        brand.set_xalign(0.0)
+        brand.get_style_context().add_class("brand")
+        outer.pack_start(brand, False, False, 0)
+
+        product = Gtk.Label(label="SHOPOS  •  ERSTEINRICHTUNG")
+        product.set_xalign(0.0)
+        product.get_style_context().add_class("product")
+        outer.pack_start(product, False, False, 0)
+
+        headline = Gtk.Label(label="Willkommen – wir machen dein ShopOS startklar")
+        headline.set_xalign(0.0)
+        headline.get_style_context().add_class("headline")
+        outer.pack_start(headline, False, False, 10)
+
+        subtitle = Gtk.Label(
+            label="Admin-Zugang, Netzwerk und lokaler Betrieb werden jetzt eingerichtet. "
+                  "Der Bildschirm bleibt währenddessen in derselben X-Session."
+        )
+        subtitle.set_xalign(0.0)
+        subtitle.set_line_wrap(True)
+        subtitle.get_style_context().add_class("subtitle")
+        outer.pack_start(subtitle, False, False, 0)
+
+        card = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=12)
+        card.get_style_context().add_class("card")
+        outer.pack_start(card, True, True, 18)
+
+        self.terminal = Vte.Terminal()
+        self.terminal.set_scrollback_lines(200)
+        self.terminal.set_cursor_blink_mode(Vte.CursorBlinkMode.ON)
+        self.terminal.set_mouse_autohide(True)
+        self.terminal.set_font(Pango.FontDescription("DejaVu Sans Mono 15"))
+        bg = Gdk.RGBA(); bg.parse("#101f38")
+        fg = Gdk.RGBA(); fg.parse("#f7fbff")
+        self.terminal.set_color_background(bg)
+        self.terminal.set_color_foreground(fg)
+        self.terminal.connect("child-exited", self._on_child_exited)
+        card.pack_start(self.terminal, True, True, 0)
+
+        footer = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=12)
+        outer.pack_start(footer, False, False, 0)
+
+        self.status = Gtk.Label(label="Bereit für die Einrichtung")
+        self.status.set_xalign(0.0)
+        self.status.get_style_context().add_class("status")
+        footer.pack_start(self.status, True, True, 0)
+
+        self.retry = Gtk.Button(label="Einrichtung erneut starten")
+        self.retry.get_style_context().add_class("retry")
+        self.retry.set_no_show_all(True)
+        self.retry.connect("clicked", self._retry)
+        footer.pack_end(self.retry, False, False, 0)
+
+        self._spawn_setup()
+
+    def _spawn_setup(self):
+        self.retry.hide()
+        self.status.set_text("Einrichtung läuft …")
+        self.terminal.reset(True, True)
+        self.terminal.spawn_async(
+            Vte.PtyFlags.DEFAULT,
+            None,
+            SETUP_COMMAND,
+            os.environ.copy(),
+            GLib.SpawnFlags.DEFAULT,
+            None,
+            None,
+            -1,
+            None,
+            None,
+        )
+        GLib.idle_add(self.terminal.grab_focus)
+
+    def _on_child_exited(self, _terminal, status):
+        if os.path.exists("/var/lib/msfixit-shopos/first-setup-complete") and status == 0:
+            self.status.set_text("Einrichtung abgeschlossen – ShopOS wird geöffnet …")
+            GLib.timeout_add(700, self._finish)
+            return
+        self.status.set_text("Einrichtung wurde nicht abgeschlossen. Du kannst sie erneut starten.")
+        self.retry.show()
+
+    def _retry(self, _button):
+        self._spawn_setup()
+
+    def _finish(self):
+        Gtk.main_quit()
+        return False
+
+
+def main():
+    window = SetupWindow()
+    window.show_all()
+    window.retry.hide()
+    Gtk.main()
+    return 0 if os.path.exists("/var/lib/msfixit-shopos/first-setup-complete") else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
