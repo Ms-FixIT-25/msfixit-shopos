@@ -8,7 +8,7 @@ install -d -m 0755 /run/msfixit-shopos
 install -d -m 0755 /srv/www
 install -d -m 0755 /etc/nftables.d
 install -d -m 0755 /etc/plymouth
-chmod 0755 /usr/local/sbin/msfixit-update /usr/local/sbin/msfixit-update-agent /usr/local/sbin/msfixit-update-center /usr/local/sbin/msfixit-slot-writer /usr/local/sbin/msfixit-update-boot-sync /usr/local/sbin/msfixit-boot-selector /usr/local/sbin/msfixit-kiosk-session /usr/local/sbin/msfixit-display-keepawake /usr/local/sbin/msfixit-first-login-init /usr/local/sbin/msfixit-wifi-connect /usr/local/sbin/msfixit-time-bootstrap /usr/local/sbin/msfixit-apply-resource-budget /usr/local/sbin/msfixit-finalize-resource-budget /usr/local/sbin/msfixit-hardware-manager /usr/local/sbin/msfixit-hardware-action /usr/local/sbin/msfixit-cloudflared-run
+chmod 0755 /usr/local/sbin/msfixit-update /usr/local/sbin/msfixit-update-agent /usr/local/sbin/msfixit-update-center /usr/local/sbin/msfixit-slot-writer /usr/local/sbin/msfixit-update-boot-sync /usr/local/sbin/msfixit-boot-selector /usr/local/sbin/msfixit-kiosk-session /usr/local/sbin/msfixit-display-keepawake /usr/local/sbin/msfixit-first-login-init /usr/local/sbin/msfixit-wifi-connect /usr/local/sbin/msfixit-time-bootstrap /usr/local/sbin/msfixit-ssh-recovery-init /usr/local/sbin/msfixit-apply-resource-budget /usr/local/sbin/msfixit-finalize-resource-budget /usr/local/sbin/msfixit-hardware-manager /usr/local/sbin/msfixit-hardware-action /usr/local/sbin/msfixit-cloudflared-run
 chmod 0640 /etc/msfixit-shopos/update-slots.json /etc/msfixit-shopos/update-source.json
 chmod 0440 /etc/sudoers.d/msfixit-shopos-update-center /etc/sudoers.d/msfixit-shopos-hardware-manager
 
@@ -89,6 +89,8 @@ systemctl disable systemd-networkd-wait-online.service 2>/dev/null || true
 systemctl enable NetworkManager.service 2>/dev/null || true
 systemctl enable systemd-timesyncd.service 2>/dev/null || true
 systemctl enable nftables.service 2>/dev/null || true
+systemctl enable ssh.service 2>/dev/null || true
+systemctl enable msfixit-ssh-recovery.service 2>/dev/null || true
 systemctl enable msfixit-time-bootstrap.service 2>/dev/null || true
 systemctl enable msfixit-update-boot-sync.service 2>/dev/null || true
 systemctl enable msfixit-update-agent.timer 2>/dev/null || true
