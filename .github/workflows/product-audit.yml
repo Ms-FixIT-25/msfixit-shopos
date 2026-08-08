@@ -1,0 +1,25 @@
+name: ShopOS product audit
+
+on:
+  pull_request:
+    paths:
+      - 'image/package/**'
+      - 'tests/audit-shopos-product.sh'
+      - '.github/workflows/product-audit.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: Product audit (errors + warnings)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@v4
+
+      - name: Run ShopOS product audit
+        shell: bash
+        run: bash tests/audit-shopos-product.sh
