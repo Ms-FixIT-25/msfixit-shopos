@@ -9,21 +9,26 @@ case "${1:-}" in
 esac
 
 config=/etc/msfixit-shopos/wifi.env
-[ -r "$config" ] || { echo "Missing Wi-Fi configuration: $config" >&2; exit 1; }
-# shellcheck disable=SC1090
-. "$config"
+if [ -r "$config" ]; then
+    # shellcheck disable=SC1090
+    . "$config"
+fi
 preferred_ssid="${SHOPOS_WIFI_SSID:-}"
+wifi_country="${SHOPOS_WIFI_COUNTRY:-AT}"
+wifi_country="${wifi_country^^}"
 
 command -v nmcli >/dev/null 2>&1 || { echo "NetworkManager nmcli is unavailable." >&2; exit 1; }
 
 wifi_diagnostics() {
     printf '\nWLAN-Diagnose:\n' >&2
     nmcli general status >&2 2>/dev/null || true
+    nmcli radio all >&2 2>/dev/null || true
     nmcli device status >&2 2>/dev/null || true
     if command -v rfkill >/dev/null 2>&1; then
         rfkill list >&2 2>/dev/null || true
     fi
     if command -v iw >/dev/null 2>&1; then
+        iw reg get >&2 2>/dev/null || true
         iw dev >&2 2>/dev/null || true
     fi
     ip -brief link >&2 2>/dev/null || true
@@ -35,7 +40,16 @@ if command -v rfkill >/dev/null 2>&1; then
 fi
 modprobe brcmfmac 2>/dev/null || true
 udevadm settle 2>/dev/null || true
+nmcli networking on 2>/dev/null || true
 nmcli radio wifi on 2>/dev/null || true
+
+if [[ "$wifi_country" =~ ^[A-Z]{2}$ ]] && command -v iw >/dev/null 2>&1; then
+    if iw reg set "$wifi_country" 2>/dev/null; then
+        printf 'WLAN-Länderkennung gesetzt: %s\n' "$wifi_country"
+    else
+        printf 'Hinweis: WLAN-Länderkennung %s konnte nicht gesetzt werden; Scan wird trotzdem fortgesetzt.\n' "$wifi_country" >&2
+    fi
+fi
 
 wifi_device=""
 for attempt in $(seq 1 45); do
@@ -52,6 +66,7 @@ for attempt in $(seq 1 45); do
         udevadm trigger --subsystem-match=net 2>/dev/null || true
         udevadm settle 2>/dev/null || true
         nmcli general reload 2>/dev/null || true
+        nmcli networking on 2>/dev/null || true
         nmcli radio wifi on 2>/dev/null || true
     fi
     wifi_device=""
@@ -66,9 +81,16 @@ if [ -z "$wifi_device" ]; then
 fi
 
 printf 'WLAN-Gerät erkannt: %s\n' "$wifi_device"
+# Clear stale activation state without deleting any saved connection profile.
+nmcli device disconnect "$wifi_device" >/dev/null 2>&1 || true
+nmcli device set "$wifi_device" managed yes >/dev/null 2>&1 || true
+nmcli networking on 2>/dev/null || true
+nmcli radio wifi on 2>/dev/null || true
+
 printf 'WLAN-Netze werden gesucht ...\n'
 available=""
 for attempt in $(seq 1 8); do
+    nmcli networking on 2>/dev/null || true
     nmcli radio wifi on 2>/dev/null || true
     nmcli device wifi rescan ifname "$wifi_device" >/dev/null 2>&1 || true
     sleep 2
@@ -94,4 +116,53 @@ fi
 
 [ -n "$ssid" ] || { printf 'Keine SSID ausgewählt. WLAN-Einrichtung wird übersprungen.\n' >&2; exit 1; }
 printf 'Verbindung mit %s wird über %s eingerichtet. Falls geschützt, wird jetzt das WLAN-Passwort abgefragt.\n' "$ssid" "$wifi_device"
-exec nmcli --ask device wifi connect "$ssid" ifname "$wifi_device"
+
+connected_command=0
+if nmcli --ask --wait 90 device wifi connect "$ssid" ifname "$wifi_device"; then
+    connected_command=1
+else
+    # A previous attempt can leave a valid profile behind even when activation
+    # timed out. Retry that profile before declaring the first-login setup dead.
+    printf 'Direkter Verbindungsversuch fehlgeschlagen; vorhandenes Profil wird erneut aktiviert ...\n' >&2
+    if nmcli --ask --wait 90 connection up "$ssid" ifname "$wifi_device"; then
+        connected_command=1
+    fi
+fi
+
+if [ "$connected_command" -ne 1 ]; then
+    printf 'NetworkManager konnte die WLAN-Verbindung nicht aktivieren.\n' >&2
+    wifi_diagnostics
+    exit 1
+fi
+
+connected=0
+for _ in $(seq 1 30); do
+    state="$(nmcli -g GENERAL.STATE device show "$wifi_device" 2>/dev/null || true)"
+    case "$state" in
+        100*) connected=1; break ;;
+    esac
+    sleep 1
+done
+
+if [ "$connected" -ne 1 ]; then
+    printf 'WLAN wurde eingerichtet, erreicht aber nicht den Zustand connected.\n' >&2
+    wifi_diagnostics
+    exit 1
+fi
+
+active_connection="$(nmcli -g GENERAL.CONNECTION device show "$wifi_device" 2>/dev/null | head -n 1 || true)"
+if [ -n "$active_connection" ] && [ "$active_connection" != '--' ]; then
+    nmcli connection modify "$active_connection" \
+        connection.autoconnect yes \
+        connection.autoconnect-priority 100 \
+        802-11-wireless.cloned-mac-address permanent \
+        802-11-wireless.powersave 2 >/dev/null 2>&1 || true
+    nmcli connection up "$active_connection" ifname "$wifi_device" >/dev/null 2>&1 || true
+fi
+
+ip4="$(nmcli -g IP4.ADDRESS device show "$wifi_device" 2>/dev/null | head -n 1 || true)"
+printf 'WLAN verbunden: %s über %s' "$ssid" "$wifi_device"
+if [ -n "$ip4" ]; then
+    printf ' (%s)' "$ip4"
+fi
+printf '\n'

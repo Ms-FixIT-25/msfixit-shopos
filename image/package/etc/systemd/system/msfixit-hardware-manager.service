@@ -23,19 +23,26 @@ MemoryHigh=64M
 MemoryMax=96M
 TasksMax=48
 IOSchedulingClass=idle
-NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
 ProtectHome=true
-ProtectKernelTunables=true
 ProtectKernelModules=true
+ProtectKernelLogs=true
 ProtectControlGroups=true
 ProtectClock=true
 ProtectHostname=true
 RestrictSUIDSGID=true
 LockPersonality=true
 MemoryDenyWriteExecute=true
+RestrictAddressFamilies=AF_UNIX
 ReadWritePaths=/var/lib/msfixit-shopos/hardware-manager /run/msfixit-hardware-manager
+
+# Intentionally do not set NoNewPrivileges=yes or ProtectKernelTunables=yes here.
+# The daemon itself remains an unprivileged shopos-hwmon process, but the one
+# allowlisted sudo helper must be able to gain root and write the validated
+# cpufreq scaling_governor sysfs node transactionally. The sudoers rule limits
+# elevation to /usr/local/sbin/msfixit-hardware-action; arbitrary commands and
+# arbitrary sysfs paths are rejected by that helper.
 
 [Install]
 WantedBy=multi-user.target

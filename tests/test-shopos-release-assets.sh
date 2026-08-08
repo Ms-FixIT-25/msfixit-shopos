@@ -5,11 +5,15 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 renderer="$root/scripts/render-release-notes.sh"
 syncer="$root/scripts/sync-release-assets.sh"
 workflow="$root/.github/workflows/release-assets-sync.yml"
+acceptance="$root/.github/workflows/production-release.yml"
+build_workflow="$root/.github/workflows/build-image.yml"
 docs="$root/docs/INSTALL_IMAGE.md"
 
 bash -n "$renderer"
 bash -n "$syncer"
 test -s "$workflow"
+test -s "$acceptance"
+test -s "$build_workflow"
 test -s "$docs"
 
 work="$(mktemp -d)"
@@ -66,16 +70,44 @@ if grep -Eq 'curl .*releases/download' "$syncer"; then
     exit 1
 fi
 
-grep -Fq 'workflows: ["Build ShopOS image"]' "$workflow"
-grep -Fq "head_branch == 'main'" "$workflow"
-grep -Fq 'repos/${GITHUB_REPOSITORY}/releases?per_page=100' "$workflow"
-grep -Fq '.target_commitish == $sha' "$workflow"
-if grep -Fq 'targetCommitish' "$workflow"; then
-    echo 'gh release list does not expose targetCommitish; use the releases API field target_commitish.' >&2
+# During PR #80 consolidation, release asset synchronization is deliberately a
+# manual repair tool for releases that already exist. It must not publish from
+# a build completion event or silently follow stale main CI.
+grep -Fq 'workflow_dispatch:' "$workflow"
+grep -Fq 'version:' "$workflow"
+grep -Fq 'gh release view "v${version}"' "$workflow"
+grep -Fq 'scripts/sync-release-assets.sh' "$workflow"
+if grep -Fq 'workflow_run:' "$workflow"; then
+    echo 'Release asset repair must not auto-run from image-build completion during PR80 consolidation.' >&2
     exit 1
 fi
-grep -Fq 'scripts/sync-release-assets.sh' "$workflow"
+if grep -Fq "head_branch == 'main'" "$workflow"; then
+    echo 'Release asset repair must not depend on stale main build metadata during PR80 consolidation.' >&2
+    exit 1
+fi
+
+# PR #80 is temporarily the authoritative build/test source. Candidate images
+# are built from the exact consolidation SHA, while stable publication remains
+# disabled until the verified consolidation is deliberately merged to main.
+grep -Fq 'branches: [integration/shopos-master-consolidation]' "$acceptance"
+grep -Fq 'Test exact PR80 consolidation commit' "$acceptance"
+grep -Fq 'Build exact PR80 Raspberry Pi image' "$acceptance"
+grep -Fq 'Boot exact PR80 image on ARM64' "$acceptance"
+grep -Fq "test \"\$GITHUB_REF\" = 'refs/heads/integration/shopos-master-consolidation'" "$acceptance"
+grep -Fq 'Stable publishing is intentionally disabled while PR #80 is the authoritative' "$acceptance"
+if grep -Eq 'gh release (create|upload|edit)|Publish boot-verified production release' "$acceptance"; then
+    echo 'PR80 acceptance workflow must not publish a stable release.' >&2
+    exit 1
+fi
+
+grep -Fq 'branches: [integration/shopos-master-consolidation]' "$build_workflow"
+grep -Fq 'github.event.pull_request.head.sha || github.sha' "$build_workflow"
+if grep -Fq 'branches: [main' "$build_workflow"; then
+    echo 'Automatic image builds must use PR80 as the authoritative source during consolidation.' >&2
+    exit 1
+fi
+
 grep -Fq 'msfixit-shopos-<VERSION>-rpi4-usb-windows-macos.zip' "$docs"
 grep -Fq 'msfixit-shopos-<VERSION>-rpi4-usb-linux.img.xz' "$docs"
 
-printf 'PASS: release assets, checksums and documentation use exact versioned platform names.\n'
+printf 'PASS: release assets remain versioned while PR80 candidate CI is isolated from stale main publication.\n'

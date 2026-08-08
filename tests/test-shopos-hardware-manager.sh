@@ -8,6 +8,7 @@ sensors="$lib/hardware_manager/sensors.py"
 rules="$lib/hardware_manager/rules.py"
 thermal="$lib/hardware_manager/thermal.py"
 state="$lib/hardware_manager/state.py"
+actions="$lib/hardware_manager/actions.py"
 service="$root/image/package/etc/systemd/system/msfixit-hardware-manager.service"
 sudoers="$root/image/package/etc/sudoers.d/msfixit-shopos-hardware-manager"
 postinst="$root/image/package/DEBIAN/postinst"
@@ -73,8 +74,20 @@ grep -Fq 'SupplementaryGroups=shopos-hwapi' "$service"
 grep -Fq 'CPUQuota=20%' "$service"
 grep -Fq 'MemoryMax=96M' "$service"
 grep -Fq 'IOSchedulingClass=idle' "$service"
-grep -Fq 'NoNewPrivileges=true' "$service"
 grep -Fq 'ProtectSystem=strict' "$service"
+grep -Fq 'ProtectKernelModules=true' "$service"
+grep -Fq 'ProtectKernelLogs=true' "$service"
+grep -Fq 'RestrictAddressFamilies=AF_UNIX' "$service"
+# The manager deliberately uses one sudo allowlisted helper for reversible
+# cpufreq writes. These systemd directives would make that helper impossible.
+if grep -Eq '^NoNewPrivileges=(yes|true)$' "$service"; then
+    echo 'NoNewPrivileges would block the allowlisted Hardware Manager sudo helper.' >&2
+    exit 1
+fi
+if grep -Eq '^ProtectKernelTunables=(yes|true)$' "$service"; then
+    echo 'ProtectKernelTunables would make the validated cpufreq sysfs write read-only.' >&2
+    exit 1
+fi
 
 grep -Fq 'shopos-hwmon ALL=(root) NOPASSWD: /usr/local/sbin/msfixit-hardware-action *' "$sudoers"
 if grep -Fq 'NOPASSWD: ALL' "$sudoers"; then echo 'Hardware Manager sudoers must never grant unrestricted root.' >&2; exit 1; fi
@@ -98,14 +111,158 @@ if grep -Eq '(ip address|ip -j|ifconfig|address$|MAC|mac_address)' "$sensors"; t
     exit 1
 fi
 
-if grep -Eq '(systemctl|shutdown|poweroff)[^\n]*(poweroff|shutdown)' "$manager" "$helper"; then
-    echo 'Automatic emergency poweroff must remain blocked until physical hardware validation.' >&2
-    exit 1
-fi
-if grep -Eqi '(over_voltage|arm_freq|core_freq|force_turbo|overclock)' "$lib/hardware_manager"/*.py "$helper"; then
-    echo 'Hardware Manager must not implement overclock/voltage tuning.' >&2
-    exit 1
-fi
+# Detect executable shutdown paths, not harmless documentation/log strings that
+# explain that shutdown remains blocked. The self-test prevents this guard from
+# regressing back to a plain-text keyword search.
+python3 - "$manager" "$helper" <<'PY'
+import ast
+import pathlib
+import sys
+
+PROCESS_CALLS = {
+    'os.system',
+    'subprocess.call',
+    'subprocess.check_call',
+    'subprocess.check_output',
+    'subprocess.Popen',
+    'subprocess.run',
+}
+DANGEROUS = {'halt', 'poweroff', 'reboot', 'shutdown'}
+
+
+def dotted_name(node: ast.AST) -> str:
+    parts: list[str] = []
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    if isinstance(node, ast.Name):
+        parts.append(node.id)
+    return '.'.join(reversed(parts))
+
+
+def literal_command(node: ast.AST) -> list[str] | None:
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value.split()
+    if isinstance(node, (ast.List, ast.Tuple)):
+        result: list[str] = []
+        for item in node.elts:
+            if not isinstance(item, ast.Constant) or not isinstance(item.value, str):
+                return None
+            result.append(item.value)
+        return result
+    return None
+
+
+def contains_power_action(tokens: list[str]) -> bool:
+    normalized = [pathlib.PurePath(token).name.lower() for token in tokens]
+    if any(token in DANGEROUS for token in normalized):
+        return True
+    return 'systemctl' in normalized and any(token in DANGEROUS for token in normalized)
+
+
+def scan(source: str, label: str) -> list[str]:
+    tree = ast.parse(source, filename=label)
+    findings: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call) or not node.args:
+            continue
+        if dotted_name(node.func) not in PROCESS_CALLS:
+            continue
+        command = literal_command(node.args[0])
+        if command is not None and contains_power_action(command):
+            findings.append(f'{label}:{getattr(node, "lineno", "?")}: {command!r}')
+    return findings
+
+assert scan("print('automatic poweroff intentionally blocked pending real-hardware validation')\n", 'safe-log.py') == []
+assert scan("import subprocess\nsubprocess.run(['/usr/bin/systemctl','poweroff'])\n", 'unsafe-call.py')
+
+findings: list[str] = []
+for raw in sys.argv[1:]:
+    path = pathlib.Path(raw)
+    findings.extend(scan(path.read_text(encoding='utf-8'), str(path)))
+if findings:
+    print('Automatic emergency poweroff must remain blocked until physical hardware validation.', file=sys.stderr)
+    for finding in findings:
+        print(f'  {finding}', file=sys.stderr)
+    raise SystemExit(1)
+PY
+
+# Privileged hardware tuning is intentionally narrow. Documentation may mention
+# overclocking, but executable/root paths must remain limited to reversible CPU
+# governor selection. Validate the allowlist first, then scan executable calls
+# and write targets rather than rejecting harmless words in comments/messages.
+grep -Fq 'allowed = {"set-governor": {"schedutil", "powersave"}}' "$actions"
+grep -Fq 'GOVERNORS = {"schedutil", "powersave"}' "$helper"
+grep -Fq 'scaling_governor' "$helper"
+python3 - "$actions" "$helper" <<'PY'
+import ast
+import pathlib
+import sys
+
+PROCESS_CALLS = {
+    'os.system',
+    'subprocess.call',
+    'subprocess.check_call',
+    'subprocess.check_output',
+    'subprocess.Popen',
+    'subprocess.run',
+}
+DANGEROUS = ('over_voltage', 'arm_freq', 'core_freq', 'force_turbo', 'config.txt')
+
+
+def dotted_name(node: ast.AST) -> str:
+    parts: list[str] = []
+    while isinstance(node, ast.Attribute):
+        parts.append(node.attr)
+        node = node.value
+    if isinstance(node, ast.Name):
+        parts.append(node.id)
+    return '.'.join(reversed(parts))
+
+
+def literal_strings(node: ast.AST) -> list[str]:
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return [node.value]
+    if isinstance(node, (ast.List, ast.Tuple)):
+        result: list[str] = []
+        for item in node.elts:
+            if isinstance(item, ast.Constant) and isinstance(item.value, str):
+                result.append(item.value)
+            else:
+                return []
+        return result
+    return []
+
+
+def dangerous(values: list[str]) -> bool:
+    joined = ' '.join(values).lower()
+    return any(token in joined for token in DANGEROUS)
+
+
+def scan(path: pathlib.Path) -> list[str]:
+    tree = ast.parse(path.read_text(encoding='utf-8'), filename=str(path))
+    findings: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        name = dotted_name(node.func)
+        if name in PROCESS_CALLS and node.args and dangerous(literal_strings(node.args[0])):
+            findings.append(f'{path}:{getattr(node, "lineno", "?")}: dangerous process command')
+        if name in {'open', 'pathlib.Path.write_text', 'pathlib.Path.write_bytes'} and node.args:
+            values = literal_strings(node.args[0])
+            if dangerous(values):
+                findings.append(f'{path}:{getattr(node, "lineno", "?")}: dangerous tuning write target')
+    return findings
+
+findings: list[str] = []
+for raw in sys.argv[1:]:
+    findings.extend(scan(pathlib.Path(raw)))
+if findings:
+    print('Hardware Manager must not implement executable overclock/voltage tuning.', file=sys.stderr)
+    for finding in findings:
+        print(f'  {finding}', file=sys.stderr)
+    raise SystemExit(1)
+PY
 
 grep -Fq 'automatic poweroff intentionally blocked pending real-hardware validation' "$manager"
 printf 'PASS: Hardware Manager is platform-aware, bounded, reversible and fail-safe before physical shutdown validation.\n'

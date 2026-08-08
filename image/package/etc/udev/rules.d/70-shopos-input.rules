@@ -1,0 +1,5 @@
+# ShopOS kiosk runs as the unprivileged shopos-kiosk account. Physical input
+# stays root-owned but is explicitly available to members of the input group.
+SUBSYSTEM=="input", KERNEL=="event*", GROUP="input", MODE="0660"
+SUBSYSTEM=="input", KERNEL=="mouse*", GROUP="input", MODE="0660"
+SUBSYSTEM=="input", KERNEL=="mice", GROUP="input", MODE="0660"
