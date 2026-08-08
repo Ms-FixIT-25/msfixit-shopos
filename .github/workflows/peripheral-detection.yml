@@ -1,0 +1,31 @@
+name: Peripheral detection contract
+
+on:
+  pull_request:
+    branches: [integration/shopos-master-consolidation]
+    paths:
+      - image/package/DEBIAN/control
+      - image/package/usr/lib/msfixit-shopos/hardware_manager/**
+      - image/package/etc/systemd/system/msfixit-kiosk.service
+      - tests/test-first-login-wifi.sh
+      - tests/test-shopos-hardware-manager.sh
+      - tests/test-shopos-peripheral-detection.sh
+      - .github/workflows/peripheral-detection.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out exact source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Verify exact source identity
+        run: test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
+      - name: Validate keyboard, mouse, scanner and printer support contract
+        run: bash tests/test-shopos-peripheral-detection.sh
