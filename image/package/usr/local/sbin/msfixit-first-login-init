@@ -6,8 +6,9 @@ default_user=shopadmin
 
 [ -e "$marker" ] && exit 0
 
-exec </dev/tty1 >/dev/tty1 2>&1
-clear
+# Deliberately use the caller's terminal. On physical hardware this script is
+# launched inside xterm by the persistent X session; it must never seize tty1.
+clear 2>/dev/null || true
 printf '\nMs. FixIT ShopOS Ersteinrichtung\n'
 printf '================================\n\n'
 
@@ -51,18 +52,12 @@ else
 fi
 printf '%s:%s\n' "$username" "$password_one" | chpasswd
 unset password_one password_two
-# A successfully provisioned administrator must never remain locked because
-# SSH/PAM would reject the account before either password or key auth runs.
 passwd -u "$username" >/dev/null 2>&1 || true
 
 install -d -o root -g root -m 0755 /etc/msfixit-shopos
 printf '%s\n' "$username" > /etc/msfixit-shopos/admin-user
 chmod 0644 /etc/msfixit-shopos/admin-user
 
-# Import an optional boot-partition recovery key and trusted LAN MAC now,
-# before Wi-Fi setup. This deliberately makes remote diagnosis survive a
-# later first-login/Wi-Fi/kiosk failure without embedding private identifiers
-# or keys in the image/repository.
 /usr/local/sbin/msfixit-ssh-recovery-init || {
     printf 'Hinweis: SSH-Rettungszugang konnte nicht aktiviert werden; lokale Einrichtung läuft weiter.\n' >&2
 }
@@ -109,5 +104,6 @@ install -d -o root -g root -m 0700 "$(dirname "$marker")"
 touch "$marker"
 chmod 0600 "$marker"
 
-printf '\nErsteinrichtung abgeschlossen. Die lokale ShopOS-Oberfläche wird jetzt gestartet.\n'
+printf '\nErsteinrichtung abgeschlossen. Die lokale ShopOS-Oberfläche wird jetzt im selben X-Server gestartet.\n'
 printf 'Falls kein WLAN verbunden ist, bleibt die Oberfläche trotzdem auf diesem Gerät verfügbar.\n\n'
+sleep 2
