@@ -1,0 +1,33 @@
+name: OTA control-plane validation
+
+on:
+  pull_request:
+    branches: [integration/shopos-master-consolidation]
+    paths:
+      - 'ota/control-plane/**'
+      - 'image/package/etc/msfixit-shopos/ota-notify.json'
+      - 'image/package/etc/systemd/system/msfixit-ota-notify.service'
+      - 'image/package/etc/systemd/system/msfixit-update-boot-sync.service'
+      - 'image/package/usr/local/lib/msfixit-shopos/ota-notify.py'
+      - 'tests/test-shopos-ota-*.sh'
+      - '.github/workflows/ota-control-plane.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ota-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Verify exact source identity
+        run: test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
+      - name: Run OTA client regression tests
+        run: bash tests/test-shopos-ota-device-notify.sh
+      - name: Run OTA control-plane regression tests
+        run: bash tests/test-shopos-ota-control-plane.sh
