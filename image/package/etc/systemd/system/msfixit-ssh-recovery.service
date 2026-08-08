@@ -1,0 +1,12 @@
+[Unit]
+Description=Ms. FixIT ShopOS MAC-gated SSH recovery bootstrap
+After=local-fs.target
+Before=ssh.service nftables.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/msfixit-ssh-recovery-init
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
