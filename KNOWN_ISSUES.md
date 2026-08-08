@@ -47,29 +47,28 @@ Tracked by #45.
 ## P1 — Product functionality gaps
 
 ### Semantic peripheral classification exists, but is not yet system- or hardware-approved
-Draft #93 now classifies current USB snapshots as keyboard, mouse, HID barcode scanner, touchscreen, receipt printer, label printer, A4 printer, storage, serial adapter or unknown. It exposes capability flags and a conservative readiness state in the authenticated Hardware Manager admin view. Integrated Validation #153 and Admin Console Foundation #79 passed for this change.
+Draft #93 now classifies current USB snapshots as keyboard, mouse, HID barcode scanner, touchscreen, receipt printer, label printer, A4 printer, storage, serial adapter or unknown. It exposes capability flags and a conservative readiness state in the authenticated Hardware Manager admin view. The change has passed integrated and Admin Console CI, but still requires a fresh built image plus repeated QEMU and physical hardware evidence.
 
 Still required:
-- consolidate #93 into a fresh product candidate without merging to `main` prematurely
-- build a new checksummed Raspberry Pi image from that exact candidate
+- complete the fresh Build #445 product candidate and bind its artifact/checksum to #93
 - rerun repeated x86_64 and ARM64 QEMU system validation on that exact image
 - add persistent connect/disconnect history and privacy-safe stable device identity
 - physically validate representative devices
 - keep safe user-facing names and avoid unnecessary IP/MAC/customer identity collection
 
-### Barcode scanners are not yet end-to-end proven
-Most POS scanners operate as USB HID keyboards. Draft #93 can classify a scanner and show `barcode-input`, but production acceptance must prove actual barcode entry, not only USB discovery/classification.
+### Barcode scanner software acceptance exists; physical end-to-end proof is still open
+Draft #93 now includes authenticated `/admin/scanner-test`. Its validation helper is CI-tested with known-valid/invalid EAN-8 and EAN-13 values, bounded generic scanner text, unexpected control characters and overlong input. The page deliberately does not persist scanned payloads and does not falsely infer Code 128/QR symbology from output text alone.
 
-Required physical acceptance:
-- EAN-8
-- EAN-13
-- Code 128
-- QR where supported by the physical scanner
-- fast repeated scans without lost characters
-- scanner suffix Enter/Tab
+Still required on real release hardware:
+- actual EAN-8 and EAN-13 scans into the browser
+- Code 128 and QR payload completeness where supported by the scanner
+- scanner suffix Enter submits correctly
+- scanner suffix Tab moves focus correctly
 - keyboard-layout correctness
+- at least 50 rapid repeated scans without lost characters
 - unplug/replug without reboot
 - scanner attached before boot
+- representative real POS/article workflow after the local acceptance page passes
 
 ### Printer plug-and-play is incomplete
 Draft #93 can distinguish common printer roles and the Hardware Manager can see CUPS queues, but it deliberately does not claim a USB printer is ready merely because some CUPS queue exists. Exact device-to-queue mapping and real output remain unproven.
