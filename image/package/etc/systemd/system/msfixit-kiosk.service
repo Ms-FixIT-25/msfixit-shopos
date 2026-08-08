@@ -1,10 +1,11 @@
 [Unit]
 Description=Ms. FixIT ShopOS local graphical interface
-Requires=msfixit-brand-shop.service msfixit-first-login.service msfixit-admin-console-init.service
-After=local-fs.target nginx.service msfixit-brand-shop.service msfixit-first-login.service msfixit-admin-console-init.service
+Requires=msfixit-brand-shop.service msfixit-admin-console-init.service
+After=local-fs.target nginx.service msfixit-brand-shop.service msfixit-admin-console-init.service
 After=systemd-udev-settle.service systemd-logind.service
 Wants=nginx.service systemd-udev-settle.service
 ConditionPathExists=/usr/bin/chromium
+ConditionPathExists=/var/lib/msfixit-shopos/first-setup-complete
 
 [Service]
 Type=simple
