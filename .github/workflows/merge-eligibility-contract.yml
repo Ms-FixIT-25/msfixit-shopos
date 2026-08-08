@@ -30,7 +30,10 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          ! grep -Eq 'merge_pull|gh pr merge|enable-auto-merge|contents:[[:space:]]*write' scripts/check-merge-eligibility.py
+          if grep -Eq 'merge_pull|gh pr merge|enable-auto-merge|contents:[[:space:]]*write' scripts/check-merge-eligibility.py; then
+            echo 'Eligibility evaluator must not contain repository write or merge capability.' >&2
+            exit 1
+          fi
           grep -Fq 'contents: read' .github/workflows/merge-eligibility-contract.yml
           if grep -Eq 'contents:[[:space:]]*write|pull-requests:[[:space:]]*write' .github/workflows/merge-eligibility-contract.yml; then
             echo 'Eligibility contract must remain read-only.' >&2
