@@ -2,7 +2,8 @@
 Description=Ms. FixIT ShopOS local graphical interface
 Requires=msfixit-brand-shop.service msfixit-first-login.service msfixit-admin-console-init.service
 After=local-fs.target nginx.service msfixit-brand-shop.service msfixit-first-login.service msfixit-admin-console-init.service
-Wants=nginx.service
+After=systemd-udev-settle.service systemd-logind.service
+Wants=nginx.service systemd-udev-settle.service
 ConditionPathExists=/usr/bin/chromium
 
 [Service]
@@ -21,6 +22,7 @@ StandardError=journal
 PAMName=login
 ExecStartPre=/usr/bin/test -x /usr/bin/chromium
 ExecStartPre=/usr/bin/test -x /usr/bin/xinit
+ExecStartPre=/usr/bin/udevadm settle --timeout=20
 ExecStart=/usr/bin/xinit /usr/local/sbin/msfixit-kiosk-session -- :0 vt7 -keeptty -nolisten tcp
 Restart=on-failure
 RestartSec=5
