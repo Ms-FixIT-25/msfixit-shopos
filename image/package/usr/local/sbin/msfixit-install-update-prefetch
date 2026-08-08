@@ -28,7 +28,7 @@ if ! check_json="$($agent check 2>/dev/null)"; then
     exit 0
 fi
 
-available="$(printf '%s' "$check_json" | "$jq_bin" -r '.available // false' 2>/dev/null || printf false)"
+available="$(printf '%s' "$check_json" | "$jq_bin" -r 'if .available == true then "true" else "false" end' 2>/dev/null || printf false)"
 if [ "$available" != true ]; then
     log 'Embedded image is current; no install-time OTA prefetch needed.'
     exit 0
@@ -57,8 +57,9 @@ if ! "$curl_bin" --fail --silent --show-error --location \
     exit 0
 fi
 
-if [ "$("$jq_bin" -r '.draft // true' "$release_json")" != false ] || \
-   [ "$("$jq_bin" -r '.prerelease // true' "$release_json")" != false ]; then
+is_draft="$("$jq_bin" -r 'if .draft == false then "false" else "true" end' "$release_json" 2>/dev/null || printf true)"
+is_prerelease="$("$jq_bin" -r 'if .prerelease == false then "false" else "true" end' "$release_json" 2>/dev/null || printf true)"
+if [ "$is_draft" != false ] || [ "$is_prerelease" != false ]; then
     log 'Latest GitHub release is not a stable release; ignoring it.'
     cleanup_temp
     exit 0
