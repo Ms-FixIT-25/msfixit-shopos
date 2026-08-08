@@ -14,9 +14,9 @@ This is the prioritized execution list for moving ShopOS from release-candidate 
 
 ## P1 — Peripheral/product readiness
 
-- [ ] Add semantic peripheral classification: keyboard, mouse, HID scanner, touchscreen, receipt printer, label printer, A4 printer, storage, serial adapter and unknown.
+- [ ] Add semantic peripheral classification: keyboard, mouse, HID scanner, touchscreen, receipt printer, label printer, A4 printer, storage, serial adapter and unknown. **In progress: #93**
 - [ ] Add hotplug-aware peripheral inventory to the Hardware Manager API and admin GUI.
-- [ ] Add regression fixtures for USB HID keyboard, mouse and barcode scanner classification.
+- [ ] Add regression fixtures for USB HID keyboard, mouse and barcode scanner classification. **In progress: #93**
 - [ ] Add end-to-end barcode acceptance harness for EAN-8, EAN-13 and Code 128 input with Enter/Tab suffix behavior.
 - [ ] Add physical scanner acceptance checklist for layout correctness and rapid repeated scans.
 - [ ] Extend printer onboarding from CUPS queue visibility to discovery, capability check, role selection, test print and reversible default assignment.
@@ -35,6 +35,6 @@ This is the prioritized execution list for moving ShopOS from release-candidate 
 
 - [x] Document the production blockers and current known limitations.
 - [x] Create an explicit peripheral acceptance draft (#91) without mixing product and QEMU harness code.
-- [ ] Implement semantic peripheral classification on a separate product branch.
-- [ ] Add regression tests first, then expose classification through the Hardware Manager snapshot/API.
+- [ ] Implement semantic peripheral classification on a separate product branch. **In progress: #93**
+- [ ] Add regression tests first, then expose classification through the Hardware Manager snapshot/API. **In progress: #93; CI execution gap found and corrected.**
 - [ ] Extend the admin hardware view to show device type, readiness and actionable setup state.
