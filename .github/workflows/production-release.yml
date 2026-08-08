@@ -1,4 +1,4 @@
-name: Validate PR80 consolidation image
+name: Build and publish PR80 candidate release
 
 on:
   push:
@@ -20,6 +20,7 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
       source_sha: ${{ steps.source.outputs.sha }}
+      short_sha: ${{ steps.source.outputs.short_sha }}
     steps:
       - name: Check out exact PR80 consolidation commit
         uses: actions/checkout@v7
@@ -35,7 +36,9 @@ jobs:
           set -Eeuo pipefail
           test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
           test "$GITHUB_REF" = 'refs/heads/integration/shopos-master-consolidation'
+          short_sha="${GITHUB_SHA:0:12}"
           echo "sha=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+          echo "short_sha=$short_sha" >> "$GITHUB_OUTPUT"
 
       - name: Install validation dependencies
         run: |
@@ -207,6 +210,73 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-# Stable publishing is intentionally disabled while PR #80 is the authoritative
-# consolidation source. Production publishing is restored only after the
-# verified consolidation is merged to main.
+  publish:
+    name: Publish boot-verified PR80 candidate
+    needs: [validate, image, qemu]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - name: Download exact boot-verified PR80 image
+        uses: actions/download-artifact@v4
+        with:
+          name: shopos-pr80-${{ needs.validate.outputs.source_sha }}
+          path: candidate
+
+      - name: Verify release payload one final time
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          set -Eeuo pipefail
+          test "$(tr -d '[:space:]' < candidate/SHOPOS-VERSION.txt)" = "$RELEASE_VERSION"
+          (
+            cd candidate
+            sha256sum --check --strict msfixit-shopos-rpi4-usb.img.xz.sha256
+          )
+
+      - name: Publish immutable PR80 pre-release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ needs.validate.outputs.source_sha }}
+          SHORT_SHA: ${{ needs.validate.outputs.short_sha }}
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          set -Eeuo pipefail
+          tag="pr80-v${RELEASE_VERSION}-${SHORT_SHA}"
+          title="Ms. FixIT ShopOS ${RELEASE_VERSION} – PR80 Candidate ${SHORT_SHA}"
+          notes="Boot-verifizierter ShopOS Candidate aus PR #80. Quelle: ${SOURCE_SHA}. Dieser Download ist ein Pre-Release und noch kein finaler Produktionsrelease. Das veröffentlichte IMG ist exakt das Artefakt, das zuvor in diesem Workflow unter ARM64/QEMU geprüft wurde."
+
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            target="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" --jq .target_commitish)"
+            test "$target" = "$SOURCE_SHA"
+            gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --title "$title" --notes "$notes" --prerelease
+            gh release upload "$tag" candidate/* --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$tag" candidate/* \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$SOURCE_SHA" \
+              --title "$title" \
+              --notes "$notes" \
+              --prerelease
+          fi
+
+      - name: Verify release points to exact PR80 commit
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_SHA: ${{ needs.validate.outputs.source_sha }}
+          SHORT_SHA: ${{ needs.validate.outputs.short_sha }}
+          RELEASE_VERSION: ${{ needs.validate.outputs.version }}
+        run: |
+          set -Eeuo pipefail
+          tag="pr80-v${RELEASE_VERSION}-${SHORT_SHA}"
+          target="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" --jq .target_commitish)"
+          test "$target" = "$SOURCE_SHA"
+          gh release view "$tag" --repo "$GITHUB_REPOSITORY"
+
+# PR #80 is the authoritative ShopOS candidate source. Nothing in this workflow
+# rebuilds or publishes from main. A stable release may later promote the exact
+# verified candidate deliberately, rather than creating a different image.
