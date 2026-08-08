@@ -13,6 +13,8 @@ permissions:
   contents: read
   actions: read
 
+# Harness-only touchpoint: keeps synchronize-triggered validation bound to the current PR head.
+
 jobs:
   qemu-smoke:
     name: ${{ matrix.host }} QEMU system test / repetition ${{ matrix.repetition }}
