@@ -45,6 +45,7 @@ jobs:
             if [ "$mergeable" != unknown ] && [ "$state" != unknown ]; then
               break
             fi
+            echo "Mergeability not settled yet (attempt ${attempt}/5); retrying."
             sleep 2
           done
           jq --arg now "$now" '{
