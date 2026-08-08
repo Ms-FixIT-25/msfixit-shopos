@@ -100,12 +100,22 @@ if grep -Eq 'gh release (create|upload|edit)|Publish boot-verified production re
     exit 1
 fi
 
+# Automatic push builds remain restricted to the integration branch. Pull
+# requests may target main as an additional validation path, but this must not
+# turn main into an automatic image publication source.
 grep -Fq 'branches: [integration/shopos-master-consolidation]' "$build_workflow"
+grep -Fq 'branches: [main, integration/shopos-master-consolidation]' "$build_workflow"
 grep -Fq 'github.event.pull_request.head.sha || github.sha' "$build_workflow"
-if grep -Fq 'branches: [main' "$build_workflow"; then
-    echo 'Automatic image builds must use PR80 as the authoritative source during consolidation.' >&2
-    exit 1
-fi
+python3 - "$build_workflow" <<'PY'
+from pathlib import Path
+import sys
+text = Path(sys.argv[1]).read_text()
+push, rest = text.split('  pull_request:\n', 1)
+if 'branches: [main' in push:
+    raise SystemExit('Automatic push image builds must not use main during PR80 consolidation.')
+if 'branches: [main, integration/shopos-master-consolidation]' not in rest:
+    raise SystemExit('PR image validation must cover both main and the integration branch.')
+PY
 
 grep -Fq 'msfixit-shopos-<VERSION>-rpi4-usb-windows-macos.zip' "$docs"
 grep -Fq 'msfixit-shopos-<VERSION>-rpi4-usb-linux.img.xz' "$docs"
