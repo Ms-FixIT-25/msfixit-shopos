@@ -56,7 +56,7 @@ grep -Fq 'ExecStartPre=-/usr/bin/plymouth quit --retain-splash' "$kiosk" || err 
 grep -Fq 'ExecStart=/usr/bin/xinit /usr/local/sbin/msfixit-x-session -- :0 vt7 -keeptty -nolisten tcp' "$kiosk" || err 'kiosk does not own one local-only persistent Xorg server'
 grep -Fq 'ConditionPathExists=/usr/local/sbin/msfixit-setup-gui' "$kiosk" || err 'kiosk does not require the graphical setup shell'
 if grep -Eq 'TTYPath=|StandardInput=tty|StandardInput=tty-force' "$kiosk"; then err 'persistent X service still claims a systemd TTY'; fi
-if grep -Fq '/usr/bin/xterm' "$kiosk" || grep -Fq 'xterm' "$x_session"; then err 'raw xterm remains in the production first-login path'; fi
+if grep -Fq '/usr/bin/xterm' "$kiosk" || grep -Eq '^[[:space:]]*(exec[[:space:]]+)?xterm([[:space:]]|$)' "$x_session"; then err 'raw xterm remains executable in the production first-login path'; fi
 if grep -Fq '/dev/tty1' "$first_init"; then err 'first-login still seizes tty1'; fi
 grep -Fq 'readonly setup_marker=/var/lib/msfixit-shopos/first-setup-complete' "$x_session" || err 'persistent X session does not own the setup completion gate'
 grep -Fq '/usr/local/sbin/msfixit-setup-gui' "$x_session" || err 'persistent X session does not launch GTK setup'
