@@ -85,6 +85,7 @@ grep -Eq 'Depends:.*(^|, )xserver-xorg-input-libinput(,|$)' "$control" || {
 }
 grep -Fq 'systemctl enable NetworkManager.service' "$postinst"
 grep -Fq 'systemctl enable msfixit-admin-console-init.service' "$postinst"
+grep -Eq 'chmod 0755 .*msfixit-wifi-connect' "$postinst"
 
 # The interactive wizard must never block getty's ExecStartPre.
 grep -Fq 'Wants=msfixit-first-login.service' "$dropin"
@@ -95,27 +96,35 @@ if grep -Fq 'msfixit-first-login-init' "$dropin"; then
     exit 1
 fi
 
-grep -Fq 'Before=getty@tty1.service msfixit-kiosk.service' "$first_login_service"
+grep -Fq 'Before=getty@tty1.service' "$first_login_service"
 grep -Fq 'ConditionPathExists=!/var/lib/msfixit-shopos/first-setup-complete' "$first_login_service"
 grep -Fq 'ExecStart=/usr/local/sbin/msfixit-first-login-init' "$first_login_service"
 grep -Fq 'ExecStartPost=/bin/systemctl --no-block start msfixit-kiosk.service' "$first_login_service"
 grep -Fq 'StandardInput=tty-force' "$first_login_service"
 grep -Fq 'TTYPath=/dev/tty1' "$first_login_service"
+grep -Fq 'TTYReset=no' "$first_login_service"
+grep -Fq 'TTYVHangup=no' "$first_login_service"
 grep -Fq 'TimeoutStartSec=infinity' "$first_login_service"
 grep -Fq 'NetworkManager.service' "$first_login_service"
 
-# The kiosk must not expose a stale/uninitialized login page. It waits for the
-# application credential initializer, which itself requires successful firstboot.
-grep -Fq 'Requires=msfixit-brand-shop.service msfixit-first-login.service msfixit-admin-console-init.service' "$kiosk_service"
-grep -Fq 'After=local-fs.target nginx.service msfixit-brand-shop.service msfixit-first-login.service msfixit-admin-console-init.service' "$kiosk_service"
+# The kiosk must not be held in an ordering cycle by the interactive wizard.
+# It starts only after first-login creates the completion marker, while still
+# requiring the local application/credential initialization services.
+grep -Fq 'Requires=msfixit-brand-shop.service msfixit-admin-console-init.service' "$kiosk_service"
+grep -Fq 'After=local-fs.target nginx.service msfixit-brand-shop.service msfixit-admin-console-init.service' "$kiosk_service"
+grep -Fq 'ConditionPathExists=/var/lib/msfixit-shopos/first-setup-complete' "$kiosk_service"
+if grep -Fq 'Requires=msfixit-brand-shop.service msfixit-first-login.service' "$kiosk_service"; then
+    echo 'Kiosk must not hard-require the interactive first-login unit; use the completion marker handoff.' >&2
+    exit 1
+fi
+if grep -Fq 'After=local-fs.target nginx.service msfixit-brand-shop.service msfixit-first-login.service' "$kiosk_service"; then
+    echo 'Kiosk must not wait on the first-login unit after the completion marker exists.' >&2
+    exit 1
+fi
 grep -Fq 'Requires=msfixit-firstboot.service' "$admin_init_service"
 grep -Fq 'After=local-fs.target msfixit-firstboot.service' "$admin_init_service"
 grep -Fq 'Wants=nginx.service' "$kiosk_service"
 grep -Fq 'SupplementaryGroups=video render input' "$kiosk_service"
-if grep -Fq 'Wants=nginx.service msfixit-first-login.service' "$kiosk_service"; then
-    echo 'Kiosk must require successful first-login rather than merely wanting it.' >&2
-    exit 1
-fi
 grep -Fq 'ExecStartPre=/usr/bin/test -x /usr/bin/chromium' "$kiosk_service"
 grep -Fq 'ExecStartPre=/usr/bin/test -x /usr/bin/xinit' "$kiosk_service"
 grep -Fq 'TimeoutStartSec=4min' "$kiosk_service"
@@ -163,4 +172,4 @@ if grep -Eq 'One-time password|chage -d 0|/dev/urandom' "$init"; then
     exit 1
 fi
 
-printf 'PASS: physical kiosk input, persistent Wi-Fi and initialized admin startup are required.\n'
+printf 'PASS: physical kiosk input, persistent Wi-Fi and marker-gated initialized admin startup are required.\n'
