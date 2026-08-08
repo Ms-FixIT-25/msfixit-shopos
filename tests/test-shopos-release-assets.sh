@@ -87,16 +87,26 @@ if grep -Fq "head_branch == 'main'" "$workflow"; then
 fi
 
 # PR #80 is temporarily the authoritative build/test source. Candidate images
-# are built from the exact consolidation SHA, while stable publication remains
-# disabled until the verified consolidation is deliberately merged to main.
+# are built from the exact consolidation SHA. Publication is allowed only as a
+# boot-verified PR80 pre-release; the workflow must not mark it stable/latest.
 grep -Fq 'branches: [integration/shopos-master-consolidation]' "$acceptance"
 grep -Fq 'Test exact PR80 consolidation commit' "$acceptance"
 grep -Fq 'Build exact PR80 Raspberry Pi image' "$acceptance"
 grep -Fq 'Boot exact PR80 image on ARM64' "$acceptance"
 grep -Fq "test \"\$GITHUB_REF\" = 'refs/heads/integration/shopos-master-consolidation'" "$acceptance"
-grep -Fq 'Stable publishing is intentionally disabled while PR #80 is the authoritative' "$acceptance"
-if grep -Eq 'gh release (create|upload|edit)|Publish boot-verified production release' "$acceptance"; then
-    echo 'PR80 acceptance workflow must not publish a stable release.' >&2
+grep -Fq 'Publish boot-verified PR80 candidate' "$acceptance"
+grep -Fq 'gh release create "$tag" candidate/*' "$acceptance"
+grep -Fq 'gh release upload "$tag" candidate/*' "$acceptance"
+grep -Fq -- '--prerelease' "$acceptance"
+if grep -Eq -- '--latest|--prerelease=false|make_latest[=:][[:space:]]*true' "$acceptance"; then
+    echo 'PR80 candidate publication must remain a pre-release and must never become latest/stable.' >&2
+    exit 1
+fi
+
+# Both the create and edit paths must explicitly preserve pre-release state.
+prerelease_flags="$(grep -c -- '--prerelease' "$acceptance")"
+if [ "$prerelease_flags" -lt 2 ]; then
+    echo 'Both PR80 release create and edit paths must enforce --prerelease.' >&2
     exit 1
 fi
 
@@ -110,4 +120,4 @@ fi
 grep -Fq 'msfixit-shopos-<VERSION>-rpi4-usb-windows-macos.zip' "$docs"
 grep -Fq 'msfixit-shopos-<VERSION>-rpi4-usb-linux.img.xz' "$docs"
 
-printf 'PASS: release assets remain versioned while PR80 candidate CI is isolated from stale main publication.\n'
+printf 'PASS: release assets remain versioned and PR80 publication stays boot-verified and pre-release-only.\n'
