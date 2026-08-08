@@ -5,13 +5,14 @@ root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 postinst="$root/image/package/DEBIAN/postinst"
 first_login="$root/image/package/etc/systemd/system/msfixit-first-login.service"
 kiosk="$root/image/package/etc/systemd/system/msfixit-kiosk.service"
+boot_console="$root/image/package/etc/systemd/system/msfixit-boot-console.service"
 time_service="$root/image/package/etc/systemd/system/msfixit-time-bootstrap.service"
 time_helper="$root/image/package/usr/local/sbin/msfixit-time-bootstrap"
 timesync="$root/image/package/etc/systemd/timesyncd.conf.d/msfixit-shopos.conf"
 
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 
-for path in "$postinst" "$first_login" "$kiosk" "$time_service" "$time_helper" "$timesync"; do
+for path in "$postinst" "$first_login" "$kiosk" "$boot_console" "$time_service" "$time_helper" "$timesync"; do
     [ -s "$path" ] || fail "missing required file: $path"
 done
 
@@ -47,4 +48,16 @@ grep -Fq 'TTYReset=no' "$first_login" \
 grep -Fq 'TTYVHangup=no' "$first_login" \
     || fail 'first-login handoff must not hang up the keyboard VT'
 
-printf 'PASS: real-hardware first-login keeps Wi-Fi executable, seeds time offline, syncs NTP online, and hands off cleanly to kiosk.\n'
+if grep -Fq 'network-online.target' "$boot_console"; then
+    fail 'boot console must never wait for network-online on an offline appliance'
+fi
+grep -Fq 'Before=getty@tty1.service msfixit-first-login.service' "$boot_console" \
+    || fail 'boot console must hand tty1 to first login in a defined order'
+grep -Fq 'TTYReset=no' "$boot_console" \
+    || fail 'boot console must not reset VT state during Plymouth/first-login handoff'
+grep -Fq 'TTYVHangup=no' "$boot_console" \
+    || fail 'boot console must not hang up physical keyboard input'
+grep -Fq 'TTYVTDisallocate=no' "$boot_console" \
+    || fail 'boot console must preserve framebuffer/VT state for the next owner'
+
+printf 'PASS: real-hardware first-login keeps Wi-Fi executable, seeds time offline, syncs NTP online, and preserves the Plymouth/VT/kiosk handoff.\n'
