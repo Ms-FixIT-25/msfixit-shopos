@@ -1,8 +1,8 @@
 [Unit]
 Description=Ms. FixIT ShopOS interactive first-login setup
-After=local-fs.target systemd-vconsole-setup.service msfixit-display-keepawake.service msfixit-boot-console.service NetworkManager.service
-Wants=msfixit-display-keepawake.service NetworkManager.service
-Before=getty@tty1.service msfixit-kiosk.service
+After=local-fs.target systemd-vconsole-setup.service msfixit-display-keepawake.service msfixit-boot-console.service msfixit-time-bootstrap.service NetworkManager.service
+Wants=msfixit-display-keepawake.service msfixit-time-bootstrap.service NetworkManager.service
+Before=getty@tty1.service
 ConditionPathExists=!/var/lib/msfixit-shopos/first-setup-complete
 
 [Service]
@@ -14,8 +14,8 @@ StandardInput=tty-force
 StandardOutput=tty
 StandardError=tty
 TTYPath=/dev/tty1
-TTYReset=yes
-TTYVHangup=yes
+TTYReset=no
+TTYVHangup=no
 TTYVTDisallocate=no
 TimeoutStartSec=infinity
 
