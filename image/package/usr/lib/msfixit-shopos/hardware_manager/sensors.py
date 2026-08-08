@@ -16,6 +16,7 @@ from hardware_manager.models import (
     ThermalSensor,
     UsbDevice,
 )
+from hardware_manager.peripherals import classify_usb
 from hardware_manager.platforms.base import read_text, run_command
 
 _NUMERIC_RE = re.compile(r"^-?[0-9]+(?:\.[0-9]+)?$")
@@ -314,14 +315,19 @@ class SensorCollector:
             usb_spec = read_text(entry / "bcdUSB")
             if usb_spec and not re.fullmatch(r"[0-9.]{3,8}", usb_spec):
                 usb_spec = None
+            manufacturer = (read_text(entry / "manufacturer") or "")[:128] or None
+            product = (read_text(entry / "product") or "")[:128] or None
+            classification = classify_usb(entry, manufacturer, product)
             devices.append(UsbDevice(
                 sysfs_name=entry.name[:64],
                 vendor_id=vendor.lower(),
                 product_id=product_id.lower(),
-                manufacturer=(read_text(entry / "manufacturer") or "")[:128] or None,
-                product=(read_text(entry / "product") or "")[:128] or None,
+                manufacturer=manufacturer,
+                product=product,
                 usb_spec=usb_spec,
                 negotiated_mbps=round(speed, 1) if speed is not None else None,
+                kind=classification.kind,
+                capabilities=list(classification.capabilities),
             ))
         return devices
 
@@ -361,24 +367,24 @@ class SensorCollector:
 
     @staticmethod
     def services() -> list[ServiceSnapshot]:
-        snapshots: list[ServiceSnapshot] = []
+        if not Path("/usr/bin/systemctl").exists():
+            return []
+        result: list[ServiceSnapshot] = []
         for unit in SensorCollector._shopos_units():
             output = run_command([
-                "/usr/bin/systemctl", "show", unit,
-                "--property=ActiveState", "--property=MemoryCurrent", "--property=CPUUsageNSec",
+                "/usr/bin/systemctl",
+                "show",
+                unit,
+                "--property=ActiveState,MemoryCurrent,CPUUsageNSec",
+                "--value",
             ], timeout=2.0)
-            values: dict[str, str] = {}
-            for line in (output or "").splitlines():
-                if "=" in line:
-                    key, value = line.split("=", 1)
-                    values[key] = value
-            state = values.get("ActiveState", "unknown")
-            if state not in {"active", "inactive", "failed", "activating", "deactivating", "unknown"}:
-                state = "unknown"
-            snapshots.append(ServiceSnapshot(
-                unit=unit,
-                active_state=state,
-                memory_bytes=_safe_int(values.get("MemoryCurrent")),
-                cpu_usage_nsec=_safe_int(values.get("CPUUsageNSec")),
-            ))
-        return snapshots
+            if output is None:
+                continue
+            values = output.splitlines()
+            if not values:
+                continue
+            state = values[0][:32] if values else "unknown"
+            memory_bytes = _safe_int(values[1]) if len(values) > 1 else None
+            cpu_usage_nsec = _safe_int(values[2]) if len(values) > 2 else None
+            result.append(ServiceSnapshot(unit, state, memory_bytes, cpu_usage_nsec))
+        return result

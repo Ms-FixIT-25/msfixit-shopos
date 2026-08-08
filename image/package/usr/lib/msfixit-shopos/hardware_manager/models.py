@@ -6,6 +6,18 @@ from typing import Any, Literal
 Availability = Literal["available", "unavailable", "unsupported", "error"]
 ThermalLevel = Literal["normal", "elevated", "warning", "critical", "emergency"]
 OperatingMode = Literal["observe", "recommend", "automatic"]
+PeripheralKind = Literal[
+    "keyboard",
+    "mouse",
+    "barcode_scanner",
+    "touchscreen",
+    "receipt_printer",
+    "label_printer",
+    "a4_printer",
+    "storage",
+    "serial_adapter",
+    "unknown",
+]
 
 
 @dataclass(slots=True)
@@ -108,6 +120,8 @@ class UsbDevice:
     product: str | None
     usb_spec: str | None
     negotiated_mbps: float | None
+    kind: PeripheralKind = "unknown"
+    capabilities: list[str] = field(default_factory=list)
 
 
 @dataclass(slots=True)

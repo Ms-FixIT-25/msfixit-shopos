@@ -3,7 +3,7 @@ name: ShopOS release gate
 on:
   pull_request:
     branches: [integration/shopos-master-consolidation]
-    types: [opened, synchronize, reopened, ready_for_review]
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft]
   push:
     branches: [integration/shopos-master-consolidation]
   workflow_dispatch:
@@ -19,7 +19,6 @@ concurrency:
 jobs:
   test:
     name: Test exact PR80/candidate tree
-    if: github.event_name != 'pull_request' || github.event.pull_request.draft == false
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -109,7 +108,7 @@ jobs:
         run: |
           sudo rm -rf /opt/hostedtoolcache || true
           sudo rm -rf /usr/local/lib/android || true
-          df -h
+          df -h .
       - name: Restore pinned QEMU build
         id: qemu-cache
         uses: actions/cache@v4
@@ -199,5 +198,5 @@ jobs:
             vm/msfixit-firstboot.log
             vm/guest-journal.log
             vm/guest-filesystem-state.txt
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 14

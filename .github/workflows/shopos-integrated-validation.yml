@@ -37,13 +37,28 @@ jobs:
           bash -n tests/normalize-qemu-sd-size.sh
           bash -n tests/prepare-qemu-image.sh
           bash -n tests/run-qemu-smoke.sh
+          bash -n tests/test-shopos-peripheral-ui.sh
+          php -l tests/test-shopos-scanner-acceptance.php >/dev/null
+          php -l image/package/usr/share/msfixit-shopos/admin-console/lib/scanner-validation.php >/dev/null
+          php -l image/package/usr/share/msfixit-shopos/admin-console/public/scanner-test.php >/dev/null
           python3 -m py_compile image/package/usr/local/sbin/msfixit-update-agent
           python3 -m py_compile image/package/usr/local/sbin/msfixit-update-center
+          python3 -m py_compile image/package/usr/lib/msfixit-shopos/hardware_manager/models.py
+          python3 -m py_compile image/package/usr/lib/msfixit-shopos/hardware_manager/peripherals.py
+          python3 -m py_compile image/package/usr/lib/msfixit-shopos/hardware_manager/sensors.py
           bash -n image/package/usr/local/sbin/msfixit-boot-console
           bash -n image/package/usr/local/sbin/msfixit-kiosk-session
           bash -n image/package/usr/local/sbin/msfixit-first-login-init
           bash -n image/package/usr/local/sbin/msfixit-wifi-connect
           bash -n image/package/usr/local/sbin/msfixit-apply-resource-budget
+
+      - name: Validate semantic peripheral detection and scanner acceptance
+        env:
+          PYTHONPATH: image/package/usr/lib/msfixit-shopos
+        run: |
+          python3 tests/test-shopos-peripheral-classification.py
+          php tests/test-shopos-scanner-acceptance.php
+          bash tests/test-shopos-peripheral-ui.sh
 
       - name: Validate Update Center
         run: |
@@ -106,11 +121,18 @@ jobs:
       - name: Verify integrated feature files
         run: |
           test -s image/package/usr/share/msfixit-shopos/admin-console/public/updates.php
+          test -s image/package/usr/share/msfixit-shopos/admin-console/public/hardware.php
+          test -s image/package/usr/share/msfixit-shopos/admin-console/public/scanner-test.php
+          test -s image/package/usr/share/msfixit-shopos/admin-console/lib/scanner-validation.php
           test -s docs/INSTALL_IMAGE.md
           test -s image/package/etc/systemd/system/msfixit-kiosk.service
           test -s image/package/usr/local/sbin/msfixit-wifi-connect
           test -s image/package/etc/systemd/system/msfixit-hardware-manager.service
           test -s image/package/usr/lib/msfixit-shopos/hardware_manager/thermal.py
+          test -s image/package/usr/lib/msfixit-shopos/hardware_manager/peripherals.py
+          test -s tests/test-shopos-peripheral-classification.py
+          test -s tests/test-shopos-peripheral-ui.sh
+          test -s tests/test-shopos-scanner-acceptance.php
           test -s scripts/install-qemu-raspi4.sh
           test -s tests/normalize-qemu-sd-size.sh
           echo 'PASS: exact PR80/candidate source and release-gate contracts are valid.'
