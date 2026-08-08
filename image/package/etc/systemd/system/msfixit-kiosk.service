@@ -1,38 +1,32 @@
 [Unit]
-Description=Ms. FixIT ShopOS local graphical interface
-Requires=msfixit-brand-shop.service msfixit-first-login.service msfixit-admin-console-init.service
-After=local-fs.target nginx.service msfixit-brand-shop.service msfixit-first-login.service msfixit-admin-console-init.service
-After=systemd-udev-settle.service systemd-logind.service
-Wants=nginx.service systemd-udev-settle.service
+Description=Ms. FixIT ShopOS persistent X display session
+Requires=msfixit-brand-shop.service msfixit-admin-console-init.service
+After=local-fs.target systemd-logind.service msfixit-brand-shop.service msfixit-admin-console-init.service
+Wants=nginx.service NetworkManager.service
 ConditionPathExists=/usr/bin/chromium
+ConditionPathExists=/usr/bin/xinit
+ConditionPathExists=/usr/local/sbin/msfixit-setup-gui
 
 [Service]
 Type=simple
-User=shopos-kiosk
-Group=shopos-kiosk
-SupplementaryGroups=video render input
-Environment=HOME=/var/lib/msfixit-shopos/kiosk
-Environment=XDG_RUNTIME_DIR=/run/msfixit-shopos-kiosk
-RuntimeDirectory=msfixit-shopos-kiosk
-RuntimeDirectoryMode=0700
-TTYPath=/dev/tty7
-StandardInput=tty-force
-StandardOutput=journal
-StandardError=journal
-PAMName=login
+User=root
+Group=root
+Environment=HOME=/root
+Environment=DISPLAY=:0
 ExecStartPre=/usr/bin/test -x /usr/bin/chromium
 ExecStartPre=/usr/bin/test -x /usr/bin/xinit
-ExecStartPre=/usr/bin/udevadm settle --timeout=20
-ExecStart=/usr/bin/xinit /usr/local/sbin/msfixit-kiosk-session -- :0 vt7 -keeptty -nolisten tcp
+ExecStartPre=/usr/bin/test -x /usr/local/sbin/msfixit-setup-gui
+ExecStartPre=-/usr/bin/plymouth quit --retain-splash
+ExecStart=/usr/bin/xinit /usr/local/sbin/msfixit-x-session -- :0 vt7 -keeptty -nolisten tcp
 Restart=on-failure
 RestartSec=5
 TimeoutStartSec=4min
-TimeoutStopSec=10
+TimeoutStopSec=15
 CPUWeight=20
 CPUQuota=150%
 MemoryHigh=640M
 MemoryMax=896M
-TasksMax=160
+TasksMax=180
 OOMPolicy=stop
 Nice=5
 

@@ -4,13 +4,11 @@ set -Eeuo pipefail
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 init="$root/image/package/usr/local/sbin/msfixit-first-login-init"
 wifi="$root/image/package/usr/local/sbin/msfixit-wifi-connect"
-keepawake="$root/image/package/usr/local/sbin/msfixit-display-keepawake"
+x_session="$root/image/package/usr/local/sbin/msfixit-x-session"
+setup_gui="$root/image/package/usr/local/sbin/msfixit-setup-gui"
 kiosk_session="$root/image/package/usr/local/sbin/msfixit-kiosk-session"
 ssid="$root/image/package/etc/msfixit-shopos/wifi.env"
 nm_config="$root/image/package/etc/NetworkManager/conf.d/20-shopos-wifi.conf"
-dropin="$root/image/package/etc/systemd/system/getty@tty1.service.d/shopos-first-login.conf"
-first_login_service="$root/image/package/etc/systemd/system/msfixit-first-login.service"
-keepawake_service="$root/image/package/etc/systemd/system/msfixit-display-keepawake.service"
 kiosk_service="$root/image/package/etc/systemd/system/msfixit-kiosk.service"
 firstboot_service="$root/image/package/etc/systemd/system/msfixit-firstboot.service"
 brand_service="$root/image/package/etc/systemd/system/msfixit-brand-shop.service"
@@ -19,17 +17,19 @@ control="$root/image/package/DEBIAN/control"
 postinst="$root/image/package/DEBIAN/postinst"
 layout="$root/scripts/postprocess-ab-image.sh"
 
+for file in "$init" "$wifi" "$x_session" "$setup_gui" "$kiosk_session" "$ssid" "$nm_config" "$kiosk_service" "$admin_init_service" "$control" "$postinst"; do
+    test -s "$file"
+done
+
 bash -n "$init"
 bash -n "$wifi"
-bash -n "$keepawake"
+bash -n "$x_session"
 bash -n "$kiosk_session"
 bash -n "$layout"
+python3 -m py_compile "$setup_gui"
 
-test -s "$first_login_service"
-test -s "$admin_init_service"
-test -s "$nm_config"
-
-grep -Fq 'exec </dev/tty1 >/dev/tty1 2>&1' "$init"
+# Human administrator provisioning remains the same contract even though the
+# interaction is now presented by the graphical X/GTK shell.
 grep -Fq 'Benutzername [${default_user}]' "$init"
 grep -Fq 'Passwort wiederholen' "$init"
 grep -Fq 'mindestens 8 Zeichen' "$init"
@@ -39,15 +39,21 @@ if grep -Fq 'mindestens 12 Zeichen' "$init"; then
 fi
 grep -Fq 'useradd --create-home' "$init"
 grep -Fq 'usermod --lock "$default_user"' "$init"
+grep -Fq 'passwd -u "$username"' "$init"
+grep -Fq '/usr/local/sbin/msfixit-ssh-recovery-init' "$init"
 grep -Fq 'WLAN einrichten?' "$init"
 grep -Fq 'WLAN automatisch suchen und verbinden' "$init"
 grep -Fq 'SSID manuell auswählen oder eingeben' "$init"
 grep -Fq 'Überspringen' "$init"
 grep -Fq '/usr/local/sbin/msfixit-wifi-connect --manual' "$init"
 grep -Fq 'ShopOS startet trotzdem vollständig lokal weiter.' "$init"
-grep -Fq 'Die lokale ShopOS-Oberfläche wird jetzt gestartet.' "$init"
+grep -Fq 'im selben X-Server gestartet' "$init"
+if grep -Fq '/dev/tty1' "$init"; then
+    echo 'Graphical first-login must never seize tty1.' >&2
+    exit 1
+fi
 
-# Both automatic and manual choices must share the same delayed-hardware path.
+# Both automatic and manual Wi-Fi choices must share the same delayed-hardware path.
 grep -Fq 'case "${1:-}" in' "$wifi"
 grep -Fq -- '--manual) mode=manual' "$wifi"
 grep -Fq 'systemctl start NetworkManager.service' "$wifi"
@@ -79,46 +85,70 @@ for dependency in network-manager wpasupplicant rfkill iw wireless-regdb firmwar
         exit 1
     }
 done
-grep -Eq 'Depends:.*(^|, )xserver-xorg-input-libinput(,|$)' "$control" || {
-    echo 'Missing Xorg libinput driver: physical keyboard and mouse would not work in kiosk mode.' >&2
+for dependency in xserver-xorg-input-libinput python3-gi gir1.2-gtk-3.0 gir1.2-vte-2.91; do
+    grep -Eq "Depends:.*(^|, )${dependency}(,|$)" "$control" || {
+        echo "Missing graphical first-login dependency: $dependency" >&2
+        exit 1
+    }
+done
+if grep -Eq 'Depends:.*(^|, )xterm(,|$)' "$control"; then
+    echo 'Raw xterm must not be a production first-login dependency.' >&2
     exit 1
-}
+fi
+
 grep -Fq 'systemctl enable NetworkManager.service' "$postinst"
 grep -Fq 'systemctl enable msfixit-admin-console-init.service' "$postinst"
+grep -Fq 'systemctl disable msfixit-first-login.service' "$postinst"
+grep -Fq 'systemctl disable msfixit-boot-console.service' "$postinst"
+grep -Fq 'systemctl enable msfixit-kiosk.service' "$postinst"
+grep -Eq 'chmod 0755 .*msfixit-wifi-connect' "$postinst"
+grep -Eq 'chmod 0755 .*msfixit-x-session' "$postinst"
+grep -Eq 'chmod 0755 .*msfixit-setup-gui' "$postinst"
 
-# The interactive wizard must never block getty's ExecStartPre.
-grep -Fq 'Wants=msfixit-first-login.service' "$dropin"
-grep -Fq 'After=msfixit-first-login.service' "$dropin"
-grep -Fq 'ExecStartPre=/bin/bash /usr/local/sbin/msfixit-display-keepawake /dev/tty1' "$dropin"
-if grep -Fq 'msfixit-first-login-init' "$dropin"; then
-    echo 'Interactive first-login setup must not run as a getty ExecStartPre.' >&2
+# One Xorg instance owns the display from Plymouth handoff through setup and
+# kiosk. The completion marker is deliberately enforced inside that session,
+# not as a ConditionPathExists on the service, because the service must start
+# before first-login exists in order to display the GUI.
+grep -Fq 'Requires=msfixit-brand-shop.service msfixit-admin-console-init.service' "$kiosk_service"
+grep -Fq 'After=local-fs.target systemd-logind.service msfixit-brand-shop.service msfixit-admin-console-init.service' "$kiosk_service"
+grep -Fq 'Wants=nginx.service NetworkManager.service' "$kiosk_service"
+grep -Fq 'ConditionPathExists=/usr/local/sbin/msfixit-setup-gui' "$kiosk_service"
+grep -Fq 'ExecStartPre=/usr/bin/test -x /usr/local/sbin/msfixit-setup-gui' "$kiosk_service"
+grep -Fq 'ExecStartPre=-/usr/bin/plymouth quit --retain-splash' "$kiosk_service"
+grep -Fq 'ExecStart=/usr/bin/xinit /usr/local/sbin/msfixit-x-session -- :0 vt7 -keeptty -nolisten tcp' "$kiosk_service"
+grep -Fq 'TimeoutStartSec=4min' "$kiosk_service"
+if grep -Eq 'TTYPath=|StandardInput=tty|StandardInput=tty-force' "$kiosk_service"; then
+    echo 'Persistent X display service must not claim a systemd TTY.' >&2
+    exit 1
+fi
+if grep -Fq '/usr/bin/xterm' "$kiosk_service"; then
+    echo 'Persistent X display service must not require xterm.' >&2
     exit 1
 fi
 
-grep -Fq 'Before=getty@tty1.service msfixit-kiosk.service' "$first_login_service"
-grep -Fq 'ConditionPathExists=!/var/lib/msfixit-shopos/first-setup-complete' "$first_login_service"
-grep -Fq 'ExecStart=/usr/local/sbin/msfixit-first-login-init' "$first_login_service"
-grep -Fq 'ExecStartPost=/bin/systemctl --no-block start msfixit-kiosk.service' "$first_login_service"
-grep -Fq 'StandardInput=tty-force' "$first_login_service"
-grep -Fq 'TTYPath=/dev/tty1' "$first_login_service"
-grep -Fq 'TimeoutStartSec=infinity' "$first_login_service"
-grep -Fq 'NetworkManager.service' "$first_login_service"
+grep -Fq 'readonly setup_marker=/var/lib/msfixit-shopos/first-setup-complete' "$x_session"
+grep -Fq '/usr/local/sbin/msfixit-setup-gui' "$x_session"
+grep -Fq '[ -e "$setup_marker" ]' "$x_session"
+grep -Fq 'runuser -u "$kiosk_user"' "$x_session"
+grep -Fq '/usr/local/sbin/msfixit-kiosk-session' "$x_session"
+grep -Fq 'xhost +SI:localuser:' "$x_session"
+if grep -Eq '^[[:space:]]*(exec[[:space:]]+)?xterm([[:space:]]|$)' "$x_session"; then
+    echo 'Persistent X session must not execute xterm.' >&2
+    exit 1
+fi
 
-# The kiosk must not expose a stale/uninitialized login page. It waits for the
-# application credential initializer, which itself requires successful firstboot.
-grep -Fq 'Requires=msfixit-brand-shop.service msfixit-first-login.service msfixit-admin-console-init.service' "$kiosk_service"
-grep -Fq 'After=local-fs.target nginx.service msfixit-brand-shop.service msfixit-first-login.service msfixit-admin-console-init.service' "$kiosk_service"
+# The visible setup shell must be full-screen, branded and embed the tested
+# provisioning process instead of exposing a raw virtual terminal.
+grep -Fq 'class SetupWindow(Gtk.Window)' "$setup_gui"
+grep -Fq 'self.fullscreen()' "$setup_gui"
+grep -Fq 'MS. FIXIT' "$setup_gui"
+grep -Fq 'SHOPOS  •  ERSTEINRICHTUNG' "$setup_gui"
+grep -Fq 'Vte.Terminal()' "$setup_gui"
+grep -Fq 'SETUP_COMMAND = ["/usr/local/sbin/msfixit-first-login-init"]' "$setup_gui"
+grep -Fq 'first-setup-complete' "$setup_gui"
+
 grep -Fq 'Requires=msfixit-firstboot.service' "$admin_init_service"
 grep -Fq 'After=local-fs.target msfixit-firstboot.service' "$admin_init_service"
-grep -Fq 'Wants=nginx.service' "$kiosk_service"
-grep -Fq 'SupplementaryGroups=video render input' "$kiosk_service"
-if grep -Fq 'Wants=nginx.service msfixit-first-login.service' "$kiosk_service"; then
-    echo 'Kiosk must require successful first-login rather than merely wanting it.' >&2
-    exit 1
-fi
-grep -Fq 'ExecStartPre=/usr/bin/test -x /usr/bin/chromium' "$kiosk_service"
-grep -Fq 'ExecStartPre=/usr/bin/test -x /usr/bin/xinit' "$kiosk_service"
-grep -Fq 'TimeoutStartSec=4min' "$kiosk_service"
 if grep -Fq 'network-online.target' "$kiosk_service" "$firstboot_service" "$brand_service"; then
     echo 'Local ShopOS provisioning and kiosk must not depend on network-online.target.' >&2
     exit 1
@@ -127,29 +157,17 @@ grep -Fq 'After=local-fs.target' "$firstboot_service"
 grep -Fq 'After=msfixit-firstboot.service msfixit-resource-budget.service' "$brand_service"
 
 # Unsupported X/KMS DPMS features must never terminate the whole kiosk.
-grep -Fq 'xset -dpms 2>/dev/null || true' "$kiosk_session"
-grep -Fq 'xset s off 2>/dev/null || true' "$kiosk_session"
-grep -Fq 'xset s noblank 2>/dev/null || true' "$kiosk_session"
+grep -Fq 'xset -dpms 2>/dev/null || true' "$x_session"
+grep -Fq 'xset s off 2>/dev/null || true' "$x_session"
+grep -Fq 'xset s noblank 2>/dev/null || true' "$x_session"
 grep -Fq 'curl --silent --fail --max-time 2 "$target_url"' "$kiosk_session"
 grep -Fq 'local_ready=1' "$kiosk_session"
 grep -Fq 'restarting kiosk session' "$kiosk_session"
 
-grep -Fq 'setterm --blank 0 --powerdown 0' "$keepawake"
-grep -Fq 'setterm --powersave off' "$keepawake"
-grep -Fq 'setterm --blank poke' "$keepawake"
-grep -Fq '\033[0;97;40m\033[2J\033[H\033[?25h' "$keepawake"
-grep -Fq 'Before=msfixit-boot-console.service getty@tty1.service' "$keepawake_service"
-grep -Fq 'ExecStart=/usr/local/sbin/msfixit-display-keepawake /dev/tty1' "$keepawake_service"
-
 grep -Fq 'consoleblank=0' "$postinst"
-grep -Fq 'systemctl enable msfixit-first-login.service' "$postinst"
 grep -Fq "tokens = [token for token in tokens if not token.startswith('consoleblank=')]" "$layout"
 grep -Fq "tokens.append('consoleblank=0')" "$layout"
 
-if grep -Fq 'ConditionPathExists=' "$dropin"; then
-    echo 'The tty1 getty must remain available after setup.' >&2
-    exit 1
-fi
 if grep -Eiq '(password|passwd|psk|secret)[[:space:]]*=' "$ssid"; then
     echo 'Wi-Fi secret must not be stored in the image configuration.' >&2
     exit 1
@@ -163,4 +181,4 @@ if grep -Eq 'One-time password|chage -d 0|/dev/urandom' "$init"; then
     exit 1
 fi
 
-printf 'PASS: physical kiosk input, persistent Wi-Fi and initialized admin startup are required.\n'
+printf 'PASS: graphical first-login, physical X input, persistent Wi-Fi and same-X kiosk handoff are required.\n'

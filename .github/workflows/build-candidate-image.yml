@@ -1,0 +1,94 @@
+name: Build ShopOS candidate image
+
+on:
+  pull_request:
+    branches: [integration/shopos-master-consolidation]
+    paths:
+      - image/**
+      - scripts/**
+      - tests/**
+      - docs/**
+      - Makefile
+      - .github/workflows/build-candidate-image.yml
+      - .github/workflows/build-image.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: shopos-candidate-image-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Validate exact candidate source
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out exact PR source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Verify exact source identity
+        run: test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
+
+      - name: Validate test harness semantics
+        env:
+          SHOPOS_TEST_DEBUG: "1"
+        run: bash tests/test-test-harness-quality.sh
+
+      - name: Run candidate regression gates
+        env:
+          SHOPOS_TEST_DEBUG: "1"
+        run: |
+          set -Eeuo pipefail
+          bash tests/test-shopos-first-login-package-permissions.sh
+          bash tests/test-first-login-wifi.sh
+          bash tests/test-boot-experience.sh
+          bash tests/test-shopos-real-hardware-first-login.sh
+          bash tests/test-pi-resource-budget.sh
+          bash tests/audit-shopos-product.sh
+
+  build:
+    name: Build checksum-secured Raspberry Pi candidate image
+    needs: validate
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 180
+    steps:
+      - name: Check out exact validated source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+
+      - name: Verify exact source identity
+        run: test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
+
+      - name: Build Raspberry Pi 4 SD candidate
+        env:
+          DEVICE: rpi4
+          STORAGE: sd
+        run: bash scripts/build-image.sh "$DEVICE" "$STORAGE"
+
+      - name: Verify image checksums exist and pass
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          shopt -s nullglob
+          checksums=(artifacts/*.sha256)
+          ((${#checksums[@]} > 0)) || { echo 'No SHA256 checksum file was produced.' >&2; exit 1; }
+          for checksum in "${checksums[@]}"; do
+            (cd "$(dirname "$checksum")" && sha256sum --check --strict "$(basename "$checksum")")
+          done
+          cat artifacts/*.sha256
+
+      - name: Upload exact candidate artifact only
+        uses: actions/upload-artifact@v7
+        with:
+          name: msfixit-shopos-rpi4-sd-${{ github.event.pull_request.head.sha || github.sha }}
+          path: artifacts/*
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
