@@ -71,8 +71,9 @@ assert_contains '/usr/local/sbin/msfixit-setup-gui' image/package/usr/local/sbin
 assert_contains 'runuser -u "$kiosk_user"' image/package/usr/local/sbin/msfixit-x-session
 assert_contains 'fullscreen()' image/package/usr/local/sbin/msfixit-setup-gui
 assert_contains 'Vte.Terminal()' image/package/usr/local/sbin/msfixit-setup-gui
-if grep -Fq '/usr/bin/xterm' image/package/etc/systemd/system/msfixit-kiosk.service || grep -Fq 'xterm' image/package/usr/local/sbin/msfixit-x-session; then
-    echo 'Production boot must not fall back to a raw xterm first-login path.' >&2
+if grep -Fq '/usr/bin/xterm' image/package/etc/systemd/system/msfixit-kiosk.service || \
+   grep -Eq '^[[:space:]]*(exec[[:space:]]+)?xterm([[:space:]]|$)' image/package/usr/local/sbin/msfixit-x-session; then
+    echo 'Production boot must not execute a raw xterm first-login path.' >&2
     exit 1
 fi
 
