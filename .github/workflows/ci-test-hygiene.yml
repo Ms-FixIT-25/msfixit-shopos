@@ -1,0 +1,42 @@
+name: CI test hygiene
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  stale-assumption-audit:
+    name: Audit tests for stale assumptions
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out current PR source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Verify exact source identity
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          expected='${{ github.event.pull_request.head.sha || github.sha }}'
+          test "$(git rev-parse HEAD)" = "$expected"
+      - name: Check test and workflow syntax
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 -m py_compile tests/test-ci-test-hygiene.py
+          while IFS= read -r -d '' file; do bash -n "$file"; done < <(find tests -type f -name '*.sh' -print0)
+      - name: Audit stale test assumptions
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          base='${{ github.base_ref }}'
+          if [ -n "$base" ]; then
+            python3 tests/test-ci-test-hygiene.py --base-ref "$base"
+          else
+            python3 tests/test-ci-test-hygiene.py
+          fi
