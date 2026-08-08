@@ -1,7 +1,6 @@
 [Unit]
 Description=Ms. FixIT Office event worker
-After=mariadb.service network-online.target
-Wants=network-online.target
+After=mariadb.service
 ConditionPathExists=/etc/msfixit-shopos/office-worker.env
 
 [Service]
