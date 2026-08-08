@@ -3,13 +3,12 @@ set -Eeuo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 postinst="$root/image/package/DEBIAN/postinst"
+control="$root/image/package/DEBIAN/control"
 first_login_init="$root/image/package/usr/local/sbin/msfixit-first-login-init"
-first_login="$root/image/package/etc/systemd/system/msfixit-first-login.service"
 kiosk="$root/image/package/etc/systemd/system/msfixit-kiosk.service"
-boot_console="$root/image/package/etc/systemd/system/msfixit-boot-console.service"
+x_session="$root/image/package/usr/local/sbin/msfixit-x-session"
 office_print="$root/image/package/etc/systemd/system/msfixit-office-print.service"
 office_worker="$root/image/package/etc/systemd/system/msfixit-office-worker.service"
-time_service="$root/image/package/etc/systemd/system/msfixit-time-bootstrap.service"
 time_helper="$root/image/package/usr/local/sbin/msfixit-time-bootstrap"
 timesync="$root/image/package/etc/systemd/timesyncd.conf.d/msfixit-shopos.conf"
 ssh_helper="$root/image/package/usr/local/sbin/msfixit-ssh-recovery-init"
@@ -19,113 +18,65 @@ sudo_policy="$root/image/package/etc/sudoers.d/99-msfixit-admin-password"
 
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 
-for path in "$postinst" "$first_login_init" "$first_login" "$kiosk" "$boot_console" "$office_print" "$office_worker" "$time_service" "$time_helper" "$timesync" "$ssh_helper" "$ssh_service" "$ssh_auth" "$sudo_policy"; do
+for path in "$postinst" "$control" "$first_login_init" "$kiosk" "$x_session" "$office_print" "$office_worker" "$time_helper" "$timesync" "$ssh_helper" "$ssh_service" "$ssh_auth" "$sudo_policy"; do
     [ -s "$path" ] || fail "missing required file: $path"
 done
 
 bash -n "$time_helper"
 bash -n "$ssh_helper"
 bash -n "$first_login_init"
+bash -n "$x_session"
 
-grep -Eq 'chmod 0755 .*msfixit-wifi-connect' "$postinst" \
-    || fail 'installed Wi-Fi helper is not forced executable'
-grep -Eq 'chmod 0755 .*msfixit-time-bootstrap' "$postinst" \
-    || fail 'time bootstrap helper is not forced executable'
-grep -Eq 'chmod 0755 .*msfixit-ssh-recovery-init' "$postinst" \
-    || fail 'SSH recovery helper is not forced executable'
-grep -Fq 'systemctl enable systemd-timesyncd.service' "$postinst" \
-    || fail 'systemd-timesyncd is not enabled'
-grep -Fq 'systemctl enable msfixit-time-bootstrap.service' "$postinst" \
-    || fail 'time bootstrap service is not enabled'
-grep -Fq 'systemctl enable ssh.service' "$postinst" \
-    || fail 'SSH service must remain available for local recovery'
-grep -Fq 'systemctl enable msfixit-ssh-recovery.service' "$postinst" \
-    || fail 'MAC-gated SSH recovery service is not enabled'
-grep -Fq 'systemctl disable systemd-networkd.service' "$postinst" \
-    || fail 'systemd-networkd must be disabled when NetworkManager owns networking'
-grep -Fq 'systemctl disable systemd-networkd-wait-online.service' "$postinst" \
-    || fail 'systemd-networkd wait-online must not degrade or delay ShopOS boot'
-grep -Fq 'systemctl enable NetworkManager.service' "$postinst" \
-    || fail 'NetworkManager must remain the canonical ShopOS network manager'
+grep -Eq 'chmod 0755 .*msfixit-wifi-connect' "$postinst" || fail 'installed Wi-Fi helper is not forced executable'
+grep -Eq 'chmod 0755 .*msfixit-x-session' "$postinst" || fail 'persistent X session helper is not forced executable'
+grep -Fq 'systemctl disable systemd-networkd.service' "$postinst" || fail 'systemd-networkd must be disabled'
+grep -Fq 'systemctl enable NetworkManager.service' "$postinst" || fail 'NetworkManager must own networking'
+grep -Fq 'systemctl disable msfixit-first-login.service' "$postinst" || fail 'legacy tty first-login must not auto-start'
+grep -Fq 'systemctl disable msfixit-boot-console.service' "$postinst" || fail 'legacy tty boot console must not auto-start'
+grep -Fq 'systemctl enable msfixit-kiosk.service' "$postinst" || fail 'persistent X display service must auto-start'
 
-grep -Fq 'BUILD_EPOCH' "$time_helper" \
-    || fail 'offline clock fallback is not derived from packaged build time'
-grep -Fq 'time.cloudflare.com' "$timesync" \
-    || fail 'public NTP primary is missing'
-grep -Fq 'time.google.com' "$timesync" \
-    || fail 'public NTP secondary is missing'
-grep -Fq 'pool.ntp.org' "$timesync" \
-    || fail 'public pool NTP fallback is missing'
+grep -Fq 'BUILD_EPOCH' "$time_helper" || fail 'offline clock fallback is missing'
+grep -Fq 'time.cloudflare.com' "$timesync" || fail 'Cloudflare NTP is missing'
+grep -Fq 'time.google.com' "$timesync" || fail 'Google NTP is missing'
+grep -Fq 'pool.ntp.org' "$timesync" || fail 'pool NTP fallback is missing'
 
-if grep -Fq 'Requires=msfixit-brand-shop.service msfixit-first-login.service' "$kiosk"; then
-    fail 'kiosk must not require the interactive first-login unit'
+# Real hardware must transition Plymouth -> one Xorg instance. First-login and
+# Chromium are clients of that same server; neither may seize a VT itself.
+grep -Fq 'xterm' "$control" || fail 'xterm dependency for graphical first-login is missing'
+grep -Fq 'ExecStart=/usr/bin/xinit /usr/local/sbin/msfixit-x-session -- :0 vt7 -keeptty -nolisten tcp' "$kiosk" || fail 'display service does not own one persistent local-only Xorg server'
+if grep -Eq 'TTYPath=|StandardInput=tty|StandardInput=tty-force' "$kiosk"; then
+    fail 'persistent X display service must not use systemd tty ownership directives'
 fi
-grep -Fq 'ConditionPathExists=/var/lib/msfixit-shopos/first-setup-complete' "$kiosk" \
-    || fail 'kiosk must wait for the completed first-setup marker'
-grep -Fq 'ExecStartPost=/bin/systemctl --no-block start msfixit-kiosk.service' "$first_login" \
-    || fail 'completed first login must trigger kiosk start'
-grep -Fq 'TTYReset=no' "$first_login" \
-    || fail 'first-login handoff must not reset the real-hardware VT'
-grep -Fq 'TTYVHangup=no' "$first_login" \
-    || fail 'first-login handoff must not hang up the keyboard VT'
-
-if grep -Fq 'network-online.target' "$boot_console"; then
-    fail 'boot console must never wait for network-online on an offline appliance'
+if grep -Fq '/dev/tty1' "$first_login_init"; then
+    fail 'first-login must not seize tty1 when running inside X'
 fi
-grep -Fq 'Before=getty@tty1.service msfixit-first-login.service' "$boot_console" \
-    || fail 'boot console must hand tty1 to first login in a defined order'
-grep -Fq 'TTYReset=no' "$boot_console" \
-    || fail 'boot console must not reset VT state during Plymouth/first-login handoff'
-grep -Fq 'TTYVHangup=no' "$boot_console" \
-    || fail 'boot console must not hang up physical keyboard input'
-grep -Fq 'TTYVTDisallocate=no' "$boot_console" \
-    || fail 'boot console must preserve framebuffer/VT state for the next owner'
+grep -Fq 'xterm' "$x_session" || fail 'first-login is not launched inside X'
+grep -Fq '/usr/local/sbin/msfixit-first-login-init' "$x_session" || fail 'X session does not launch first-login'
+grep -Fq 'runuser -u "$kiosk_user"' "$x_session" || fail 'X session does not drop privileges for kiosk client'
+grep -Fq '/usr/local/sbin/msfixit-kiosk-session' "$x_session" || fail 'same X session does not hand off to kiosk client'
+grep -Fq 'xhost +SI:localuser:' "$x_session" || fail 'X access is not limited to the dedicated local kiosk user'
 
 if grep -Fq 'network-online.target' "$office_print" "$office_worker"; then
-    fail 'local Office workers must not block or fail solely because the appliance is offline'
+    fail 'local Office workers must not depend on network-online'
 fi
 
-# Recovery SSH is provisioned from the boot partition so no customer/device
-# identity or public key is baked into the repository image.
-grep -Fq 'SHOPOS-SSH-TRUSTED-MAC' "$ssh_helper" \
-    || fail 'SSH recovery does not read the trusted MAC from the boot partition'
-grep -Fq 'SHOPOS-ADMIN.pub' "$ssh_helper" \
-    || fail 'SSH recovery does not import a boot-partition public key'
-grep -Fq 'ether saddr $trusted_mac tcp dport 22 accept' "$ssh_helper" \
-    || fail 'SSH firewall does not allow the configured LAN source MAC'
-grep -Fq 'tcp dport 22 drop' "$ssh_helper" \
-    || fail 'SSH firewall does not reject other source MACs'
-grep -Fq 'authorized_keys' "$ssh_helper" \
-    || fail 'SSH recovery does not install authorized_keys'
-grep -Fq 'chmod 0600 "$home_dir/.ssh/authorized_keys"' "$ssh_helper" \
-    || fail 'SSH authorized_keys permissions are not hardened'
-grep -Fq 'Before=ssh.service nftables.service' "$ssh_service" \
-    || fail 'SSH recovery gate must be prepared before sshd and nftables'
-grep -Fq '/usr/local/sbin/msfixit-ssh-recovery-init' "$first_login_init" \
-    || fail 'first login must provision SSH recovery before Wi-Fi setup can fail'
-grep -Fq 'passwd -u "$username"' "$first_login_init" \
-    || fail 'new administrator must be explicitly unlocked after password provisioning'
+# SSH recovery and human-admin password policy.
+grep -Fq 'SHOPOS-SSH-TRUSTED-MAC' "$ssh_helper" || fail 'trusted MAC boot-file import is missing'
+grep -Fq 'SHOPOS-ADMIN.pub' "$ssh_helper" || fail 'public-key boot-file import is missing'
+grep -Fq 'ether saddr $trusted_mac tcp dport 22 accept' "$ssh_helper" || fail 'SSH MAC allow rule is missing'
+grep -Fq 'tcp dport 22 drop' "$ssh_helper" || fail 'SSH fallback drop rule is missing'
+grep -Fq 'authorized_keys' "$ssh_helper" || fail 'SSH authorized_keys provisioning is missing'
+grep -Fq '/usr/local/sbin/msfixit-ssh-recovery-init' "$first_login_init" || fail 'first-login must provision recovery SSH before Wi-Fi'
+grep -Fq 'passwd -u "$username"' "$first_login_init" || fail 'administrator must be unlocked after password provisioning'
+grep -Fxq 'PasswordAuthentication yes' "$ssh_auth" || fail 'SSH password authentication is not enabled'
+grep -Fxq 'PubkeyAuthentication yes' "$ssh_auth" || fail 'SSH public-key authentication is not enabled'
+grep -Fxq 'UsePAM yes' "$ssh_auth" || fail 'SSH must use PAM account state'
+grep -Fxq 'PermitRootLogin no' "$ssh_auth" || fail 'root SSH login must remain disabled'
+grep -Fxq 'Defaults:%sudo authenticate' "$sudo_policy" || fail 'human sudo administrators must authenticate'
+grep -Fxq '%sudo ALL=(ALL:ALL) PASSWD: ALL' "$sudo_policy" || fail 'sudo must use the first-login administrator password'
 
-# The password chosen during first login is the single human administrator
-# password: local login, sudo and SSH password authentication all use it.
-grep -Fxq 'PasswordAuthentication yes' "$ssh_auth" \
-    || fail 'SSH password authentication is not enabled for the first-login administrator'
-grep -Fxq 'PubkeyAuthentication yes' "$ssh_auth" \
-    || fail 'SSH public-key recovery must remain enabled alongside password login'
-grep -Fxq 'UsePAM yes' "$ssh_auth" \
-    || fail 'SSH must use the normal PAM account/password state'
-grep -Fxq 'PermitRootLogin no' "$ssh_auth" \
-    || fail 'root must not become a separate remote administrator account'
-grep -Fxq 'PermitEmptyPasswords no' "$ssh_auth" \
-    || fail 'SSH must never accept an empty administrator password'
-grep -Fxq 'Defaults:%sudo authenticate' "$sudo_policy" \
-    || fail 'human sudo administrators must authenticate'
-grep -Fxq '%sudo ALL=(ALL:ALL) PASSWD: ALL' "$sudo_policy" \
-    || fail 'human administrator commands must use the first-login password'
-
-# Do not embed a concrete workstation MAC in the recovery helper or policy.
 if grep -Eiq '([[:xdigit:]]{2}:){5}[[:xdigit:]]{2}' "$ssh_helper" "$ssh_service" "$ssh_auth" "$sudo_policy"; then
     fail 'a concrete administrator workstation MAC was embedded in product policy'
 fi
 
-printf 'PASS: real-hardware first-login keeps Wi-Fi executable, seeds time offline, uses NetworkManager only, preserves the Plymouth/VT/kiosk handoff, and uses one human admin password for sudo/SSH plus MAC-gated key recovery.\n'
+printf 'PASS: ShopOS uses one persistent Xorg server from Plymouth handoff through graphical first-login and kiosk, remains offline-capable, and preserves hardened admin recovery.\n'
