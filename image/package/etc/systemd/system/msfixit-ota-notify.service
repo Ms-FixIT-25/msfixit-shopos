@@ -1,0 +1,31 @@
+[Unit]
+Description=ShopOS OTA device notification listener
+After=network-online.target
+Wants=network-online.target
+ConditionPathExists=/etc/msfixit-shopos/ota-notify.json
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 /usr/local/lib/msfixit-shopos/ota-notify.py daemon
+Restart=on-failure
+RestartSec=10s
+User=root
+Group=root
+UMask=0077
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictRealtime=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+RestrictAddressFamilies=AF_INET AF_INET6
+ReadWritePaths=/var/lib/msfixit-shopos/update
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target
