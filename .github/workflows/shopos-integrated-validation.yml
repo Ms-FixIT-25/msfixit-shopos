@@ -80,7 +80,7 @@ jobs:
           grep -Fq -- '-nolisten tcp' image/package/etc/systemd/system/msfixit-kiosk.service
           grep -Fq 'User=root' image/package/etc/systemd/system/msfixit-kiosk.service
           grep -Fq '/usr/local/sbin/msfixit-setup-gui' image/package/usr/local/sbin/msfixit-x-session
-          grep -Fq 'runuser -u "$kiosk_user"' image/package/usr/local/sbin/msfixit-x-session
+          grep -Fq "runuser -u \"\$kiosk_user\"" image/package/usr/local/sbin/msfixit-x-session
           grep -Fq '/usr/local/sbin/msfixit-kiosk-session' image/package/usr/local/sbin/msfixit-x-session
 
       - name: Validate QEMU release-gate contract
