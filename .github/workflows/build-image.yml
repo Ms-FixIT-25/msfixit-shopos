@@ -11,7 +11,7 @@ on:
       - Makefile
       - .github/workflows/build-image.yml
   pull_request:
-    branches: [main]
+    branches: [main, integration/shopos-master-consolidation]
     paths:
       - image/**
       - scripts/**
