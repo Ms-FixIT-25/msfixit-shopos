@@ -1,0 +1,41 @@
+name: Production merge eligibility contract
+
+on:
+  pull_request:
+    branches: [main, integration/shopos-master-consolidation]
+    types: [opened, synchronize, reopened, ready_for_review, converted_to_draft, labeled, unlabeled]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    name: Validate production merge eligibility policy
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out exact policy source
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Verify exact source identity
+        run: test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
+      - name: Compile eligibility evaluator
+        run: python3 -m py_compile scripts/check-merge-eligibility.py tests/test-merge-eligibility.py
+      - name: Test fail-closed eligibility decisions
+        run: python3 tests/test-merge-eligibility.py
+      - name: Assert evaluator has no repository write capability
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          if grep -Eq 'merge_pull|gh pr merge|enable-auto-merge|contents:[[:space:]]*write' scripts/check-merge-eligibility.py; then
+            echo 'Eligibility evaluator must not contain repository write or merge capability.' >&2
+            exit 1
+          fi
+          grep -Fq 'contents: read' .github/workflows/merge-eligibility-contract.yml
+          if grep -Eq 'contents:[[:space:]]*write|pull-requests:[[:space:]]*write' .github/workflows/merge-eligibility-contract.yml; then
+            echo 'Eligibility contract must remain read-only.' >&2
+            exit 1
+          fi
