@@ -19,12 +19,16 @@ grep -Fq 'ExecStart=/usr/local/sbin/msfixit-first-login-init' "$service" \
 grep -Fq '"$stage/usr/local/sbin/msfixit-first-login-init"' "$build" \
     || fail 'package build does not explicitly include first-login-init in its executable chmod contract'
 
-chmod_block="$(sed -n '/^chmod 0755 \\/,/^chmod 0644 /p' "$build")"
-printf '%s\n' "$chmod_block" | grep -Fq 'msfixit-first-login-init' \
-    || fail 'first-login-init is not forced to mode 0755 during package staging'
-
-hash_block="$(sed -n '/^[[:space:]]*sha256sum \\/,/usr\/share\/msfixit-shopos\/wordpress\/assets\/msfixit-service-requests.css/p' "$build")"
-printf '%s\n' "$hash_block" | grep -Fq 'usr/local/sbin/msfixit-first-login-init' \
-    || fail 'first-login-init is absent from packaged build-info integrity hashes'
+python3 - "$build" <<'PY'
+from pathlib import Path
+import re, sys
+text = Path(sys.argv[1]).read_text(encoding='utf-8')
+chmod = re.search(r'(?ms)^chmod 0755 \\\n(?P<body>.*?)^chmod 0644 ', text)
+if not chmod or 'msfixit-first-login-init' not in chmod.group('body'):
+    raise SystemExit('FAIL: first-login-init is not forced to mode 0755 during package staging')
+hash_call = re.search(r'(?ms)sha256sum \\\n(?P<body>.*?)(?:\n\s*\)|\n\s*>|\n\s*\})', text)
+if not hash_call or 'usr/local/sbin/msfixit-first-login-init' not in hash_call.group('body'):
+    raise SystemExit('FAIL: first-login-init is absent from packaged build-info integrity hashes')
+PY
 
 printf 'PASS: first-login helper is packaged executable and integrity-tracked\n'
