@@ -6,13 +6,15 @@ postinst="$root/image/package/DEBIAN/postinst"
 first_login="$root/image/package/etc/systemd/system/msfixit-first-login.service"
 kiosk="$root/image/package/etc/systemd/system/msfixit-kiosk.service"
 boot_console="$root/image/package/etc/systemd/system/msfixit-boot-console.service"
+office_print="$root/image/package/etc/systemd/system/msfixit-office-print.service"
+office_worker="$root/image/package/etc/systemd/system/msfixit-office-worker.service"
 time_service="$root/image/package/etc/systemd/system/msfixit-time-bootstrap.service"
 time_helper="$root/image/package/usr/local/sbin/msfixit-time-bootstrap"
 timesync="$root/image/package/etc/systemd/timesyncd.conf.d/msfixit-shopos.conf"
 
 fail() { printf 'FAIL: %s\n' "$*" >&2; exit 1; }
 
-for path in "$postinst" "$first_login" "$kiosk" "$boot_console" "$time_service" "$time_helper" "$timesync"; do
+for path in "$postinst" "$first_login" "$kiosk" "$boot_console" "$office_print" "$office_worker" "$time_service" "$time_helper" "$timesync"; do
     [ -s "$path" ] || fail "missing required file: $path"
 done
 
@@ -26,6 +28,12 @@ grep -Fq 'systemctl enable systemd-timesyncd.service' "$postinst" \
     || fail 'systemd-timesyncd is not enabled'
 grep -Fq 'systemctl enable msfixit-time-bootstrap.service' "$postinst" \
     || fail 'time bootstrap service is not enabled'
+grep -Fq 'systemctl disable systemd-networkd.service' "$postinst" \
+    || fail 'systemd-networkd must be disabled when NetworkManager owns networking'
+grep -Fq 'systemctl disable systemd-networkd-wait-online.service' "$postinst" \
+    || fail 'systemd-networkd wait-online must not degrade or delay ShopOS boot'
+grep -Fq 'systemctl enable NetworkManager.service' "$postinst" \
+    || fail 'NetworkManager must remain the canonical ShopOS network manager'
 
 grep -Fq 'BUILD_EPOCH' "$time_helper" \
     || fail 'offline clock fallback is not derived from packaged build time'
@@ -60,4 +68,8 @@ grep -Fq 'TTYVHangup=no' "$boot_console" \
 grep -Fq 'TTYVTDisallocate=no' "$boot_console" \
     || fail 'boot console must preserve framebuffer/VT state for the next owner'
 
-printf 'PASS: real-hardware first-login keeps Wi-Fi executable, seeds time offline, syncs NTP online, and preserves the Plymouth/VT/kiosk handoff.\n'
+if grep -Fq 'network-online.target' "$office_print" "$office_worker"; then
+    fail 'local Office workers must not block or fail solely because the appliance is offline'
+fi
+
+printf 'PASS: real-hardware first-login keeps Wi-Fi executable, seeds time offline, uses NetworkManager only, and preserves the Plymouth/VT/kiosk handoff.\n'
