@@ -80,6 +80,12 @@ for unit in /lib/systemd/system/php*-fpm.service; do
     systemctl disable "$(basename "$unit")" 2>/dev/null || true
 done
 
+# ShopOS uses NetworkManager for Ethernet and Wi-Fi. Do not leave the base
+# image's systemd-networkd stack enabled in parallel: on Raspberry Pi it can
+# fail independently, mark the boot degraded and introduce wait-online races.
+systemctl disable systemd-networkd.service 2>/dev/null || true
+systemctl disable systemd-networkd.socket 2>/dev/null || true
+systemctl disable systemd-networkd-wait-online.service 2>/dev/null || true
 systemctl enable NetworkManager.service 2>/dev/null || true
 systemctl enable systemd-timesyncd.service 2>/dev/null || true
 systemctl enable nftables.service 2>/dev/null || true
