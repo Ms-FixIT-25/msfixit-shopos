@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+export DISPLAY="${DISPLAY:-:0}"
+readonly setup_marker=/var/lib/msfixit-shopos/first-setup-complete
+readonly kiosk_user=shopos-kiosk
+readonly kiosk_runtime=/run/msfixit-shopos-kiosk
+
+# Xorg is the single owner of the physical display after Plymouth. Do not
+# bounce between tty1/tty7 or restart X between first-login and kiosk.
+xset -dpms 2>/dev/null || true
+xset s off 2>/dev/null || true
+xset s noblank 2>/dev/null || true
+xsetroot -solid '#0a1930' 2>/dev/null || true
+
+# Permit only the dedicated local kiosk account to connect to this local-only
+# X server after the privileged first-login phase. Xorg itself listens on no TCP.
+xhost +SI:localuser:"$kiosk_user" >/dev/null 2>&1 || true
+
+if [ ! -e "$setup_marker" ]; then
+    command -v xterm >/dev/null 2>&1 || {
+        printf 'xterm is required for graphical first-login.\n' >&2
+        exit 1
+    }
+
+    # The provisioning script stays privileged because it creates the admin
+    # account and system configuration, but all interaction happens inside X.
+    xterm \
+        -fullscreen \
+        -fa 'DejaVu Sans Mono' \
+        -fs 16 \
+        -bg '#0a1930' \
+        -fg '#ffffff' \
+        -title 'Ms. FixIT ShopOS Ersteinrichtung' \
+        -e /usr/local/sbin/msfixit-first-login-init
+fi
+
+[ -e "$setup_marker" ] || {
+    printf 'First-login did not complete; refusing to start kiosk.\n' >&2
+    exit 1
+}
+
+install -d -o "$kiosk_user" -g "$kiosk_user" -m 0700 "$kiosk_runtime"
+
+# Keep the same X server alive and only drop privileges for the kiosk client.
+exec runuser -u "$kiosk_user" -- env \
+    DISPLAY="$DISPLAY" \
+    HOME=/var/lib/msfixit-shopos/kiosk \
+    XDG_RUNTIME_DIR="$kiosk_runtime" \
+    /usr/local/sbin/msfixit-kiosk-session
