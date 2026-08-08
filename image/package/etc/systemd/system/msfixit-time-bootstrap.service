@@ -1,0 +1,11 @@
+[Unit]
+Description=Seed a sane ShopOS clock before first login
+After=local-fs.target
+Before=systemd-timesyncd.service msfixit-first-login.service msfixit-kiosk.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/msfixit-time-bootstrap
+
+[Install]
+WantedBy=multi-user.target
