@@ -2,8 +2,15 @@ name: First-login package permissions
 
 on:
   pull_request:
-    branches:
-      - integration/shopos-master-consolidation
+    branches: [integration/shopos-master-consolidation]
+    paths:
+      - scripts/build-package.sh
+      - image/package/usr/local/sbin/msfixit-first-login-init
+      - image/package/etc/systemd/system/msfixit-first-login.service
+      - tests/test-shopos-first-login-package-permissions.sh
+      - .github/workflows/first-login-package-permissions.yml
+  push:
+    branches: [integration/shopos-master-consolidation]
     paths:
       - scripts/build-package.sh
       - image/package/usr/local/sbin/msfixit-first-login-init
@@ -19,22 +26,26 @@ concurrency:
   group: first-login-package-permissions-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  SHOPOS_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+
 jobs:
   regression:
-    name: Verify first-login executable package contract
+    name: Verify exact first-login package contract
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
-      - name: Check out product fix
+      - name: Check out exact source
         uses: actions/checkout@v7
         with:
+          ref: ${{ env.SHOPOS_SOURCE_SHA }}
           persist-credentials: false
-
+      - name: Verify source identity
+        run: test "$(git rev-parse HEAD)" = "$SHOPOS_SOURCE_SHA"
       - name: Check shell syntax
         run: |
           set -Eeuo pipefail
           bash -n scripts/build-package.sh
           bash -n tests/test-shopos-first-login-package-permissions.sh
-
       - name: Run first-login package regression
         run: bash tests/test-shopos-first-login-package-permissions.sh
