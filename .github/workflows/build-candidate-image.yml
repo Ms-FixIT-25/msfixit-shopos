@@ -34,7 +34,14 @@ jobs:
       - name: Verify exact source identity
         run: test "$(git rev-parse HEAD)" = "${{ github.event.pull_request.head.sha || github.sha }}"
 
+      - name: Validate test harness semantics
+        env:
+          SHOPOS_TEST_DEBUG: "1"
+        run: bash tests/test-test-harness-quality.sh
+
       - name: Run candidate regression gates
+        env:
+          SHOPOS_TEST_DEBUG: "1"
         run: |
           set -Eeuo pipefail
           bash tests/test-shopos-first-login-package-permissions.sh
