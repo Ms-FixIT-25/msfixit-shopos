@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+build_info=/usr/share/msfixit-shopos/build-info.txt
+minimum_epoch=1704067200
+
+current_epoch="$(date +%s 2>/dev/null || printf '0')"
+build_epoch=""
+if [ -r "$build_info" ]; then
+    build_epoch="$(awk -F= '$1 == "BUILD_EPOCH" {print $2; exit}' "$build_info" | tr -d '[:space:]')"
+fi
+
+if ! [[ "$build_epoch" =~ ^[0-9]+$ ]]; then
+    build_epoch="$minimum_epoch"
+fi
+if [ "$build_epoch" -lt "$minimum_epoch" ]; then
+    build_epoch="$minimum_epoch"
+fi
+
+# Raspberry Pi systems without an RTC may start at the Unix epoch while offline.
+# Never move a sane clock backwards; only seed obviously stale clocks forward to
+# the packaged build time (or a conservative floor) until NTP becomes available.
+if ! [[ "$current_epoch" =~ ^[0-9]+$ ]] || [ "$current_epoch" -lt "$build_epoch" ]; then
+    date --set="@${build_epoch}" >/dev/null
+    hwclock --systohc 2>/dev/null || true
+fi
+
+# Public NTP takes over automatically as soon as networking is usable.
+systemctl try-restart systemd-timesyncd.service 2>/dev/null || true
+exit 0
